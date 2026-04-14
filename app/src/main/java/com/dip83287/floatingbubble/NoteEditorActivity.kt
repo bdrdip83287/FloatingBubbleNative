@@ -71,7 +71,7 @@ class NoteEditorActivity : AppCompatActivity() {
         contentInput = EditText(this).apply {
             setText(content)
             hint = "Content"
-            textSize = 13f
+            textSize = 14f
             minHeight = 300
             gravity = android.view.Gravity.TOP
         }
