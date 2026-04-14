@@ -6,23 +6,40 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.dip83287.floatingbubble.data.Note
+import com.dip83287.floatingbubble.repository.NoteRepository
 
 class MainActivity : AppCompatActivity() {
     
     private lateinit var recyclerView: RecyclerView
     private lateinit var noteAdapter: NoteAdapter
-    private val notes = mutableListOf<Note>()
+    private lateinit var repository: NoteRepository
+    private var notes = mutableListOf<Note>()
+    
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        checkOverlayPermission()
+    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        repository = NoteRepository(this)
+        notes = repository.getAllNotes().toMutableList()
+        
+        if (notes.isEmpty()) {
+            notes.add(Note(title = "Welcome!", content = "Tap + to create a new note"))
+            notes.add(Note(title = "Floating Bubble", content = "This bubble appears over other apps!"))
+            repository.saveNotes(notes)
+        }
         
         // Create layout programmatically
         val mainLayout = LinearLayout(this).apply {
@@ -55,6 +72,7 @@ class MainActivity : AppCompatActivity() {
         // FAB
         val fab = Button(this).apply {
             text = "+"
+            textSize = 24f
             setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
             setTextColor(android.graphics.Color.parseColor("#333333"))
             val params = LinearLayout.LayoutParams(120, 120)
@@ -75,11 +93,6 @@ class MainActivity : AppCompatActivity() {
         }
         recyclerView.adapter = noteAdapter
         
-        // Add sample notes
-        notes.add(Note(title = "Welcome!", content = "Tap + to create a new note"))
-        notes.add(Note(title = "Floating Bubble", content = "This bubble appears over other apps!"))
-        noteAdapter.notifyDataSetChanged()
-        
         // Check overlay permission
         checkOverlayPermission()
     }
@@ -87,16 +100,45 @@ class MainActivity : AppCompatActivity() {
     private fun createNewNote() {
         val newNote = Note(title = "New Note", content = "")
         notes.add(0, newNote)
+        repository.saveNotes(notes)
         noteAdapter.notifyItemInserted(0)
         openNoteEditor(newNote)
     }
     
     private fun openNoteEditor(note: Note) {
         val intent = Intent(this, NoteEditorActivity::class.java)
+        intent.putExtra("note_id", note.id)
         intent.putExtra("note_title", note.title)
         intent.putExtra("note_content", note.content)
         intent.putExtra("note_index", notes.indexOf(note))
-        startActivity(intent)
+        startActivityForResult(intent, 100)
+    }
+    
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 100 && resultCode == RESULT_OK) {
+            data?.let {
+                if (it.hasExtra("delete_note_id")) {
+                    val deleteId = it.getLongExtra("delete_note_id", 0)
+                    notes.removeAll { n -> n.id == deleteId }
+                } else {
+                    val noteId = it.getLongExtra("note_id", 0)
+                    val title = it.getStringExtra("title") ?: ""
+                    val content = it.getStringExtra("content") ?: ""
+                    val index = it.getIntExtra("index", -1)
+                    if (index != -1 && index < notes.size) {
+                        notes[index] = notes[index].copy(
+                            title = title,
+                            content = content,
+                            preview = content.take(50),
+                            lastEdited = System.currentTimeMillis()
+                        )
+                    }
+                }
+                repository.saveNotes(notes)
+                noteAdapter.notifyDataSetChanged()
+            }
+        }
     }
     
     private fun checkOverlayPermission() {
@@ -107,7 +149,7 @@ class MainActivity : AppCompatActivity() {
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
                 )
-                startActivity(intent)
+                overlayPermissionLauncher.launch(intent)
             } else {
                 startFloatingBubbleService()
             }
@@ -123,16 +165,6 @@ class MainActivity : AppCompatActivity() {
         }
         Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
     }
-    
-    override fun onResume() {
-        super.onResume()
-        // Refresh notes if needed
-    }
-    
-    data class Note(
-        var title: String,
-        var content: String
-    )
     
     class NoteAdapter(
         private val notes: List<Note>,

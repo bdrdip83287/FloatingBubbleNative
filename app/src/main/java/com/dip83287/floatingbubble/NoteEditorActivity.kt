@@ -13,6 +13,7 @@ class NoteEditorActivity : AppCompatActivity() {
     
     private lateinit var titleInput: EditText
     private lateinit var contentInput: EditText
+    private var noteId: Long = 0
     private var noteIndex: Int = -1
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,6 +21,7 @@ class NoteEditorActivity : AppCompatActivity() {
         
         val title = intent.getStringExtra("note_title") ?: ""
         val content = intent.getStringExtra("note_content") ?: ""
+        noteId = intent.getLongExtra("note_id", System.currentTimeMillis())
         noteIndex = intent.getIntExtra("note_index", -1)
         
         // Create layout programmatically
@@ -116,6 +118,7 @@ class NoteEditorActivity : AppCompatActivity() {
     
     private fun saveNote() {
         val resultIntent = android.content.Intent().apply {
+            putExtra("note_id", noteId)
             putExtra("title", titleInput.text.toString())
             putExtra("content", contentInput.text.toString())
             putExtra("index", noteIndex)
@@ -127,6 +130,7 @@ class NoteEditorActivity : AppCompatActivity() {
     
     private fun deleteNote() {
         val resultIntent = android.content.Intent().apply {
+            putExtra("delete_note_id", noteId)
             putExtra("delete_index", noteIndex)
         }
         setResult(RESULT_OK, resultIntent)
