@@ -6,124 +6,85 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.dip83287.floatingbubble.adapter.NoteAdapter
-import com.dip83287.floatingbubble.data.AppDatabase
-import com.dip83287.floatingbubble.data.Note
-import com.dip83287.floatingbubble.repository.NoteRepository
-import com.dip83287.floatingbubble.utils.PreferenceManager
-import kotlinx.coroutines.launch
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
-class MainActivity : AppCompatActivity() {
-    
-    private lateinit var noteAdapter: NoteAdapter
-    private lateinit var repository: NoteRepository
-    private lateinit var preferenceManager: PreferenceManager
-    
-    private val overlayPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        checkOverlayPermission()
-    }
+class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
         
-        preferenceManager = PreferenceManager(this)
-        val database = AppDatabase.getDatabase(this)
-        repository = NoteRepository(database)
-        
-        setupRecyclerView()
-        setupClickListeners()
-        loadNotes()
+        // Check overlay permission
         checkOverlayPermission()
-        startFloatingBubbleService()
-    }
-    
-    private fun setupRecyclerView() {
-        noteAdapter = NoteAdapter { note ->
-            openNoteEditor(note)
-        }
-        findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recyclerViewNotes).apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = noteAdapter
-        }
-    }
-    
-    private fun setupClickListeners() {
-        findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabAddNote).setOnClickListener {
-            createNewNote()
-        }
-    }
-    
-    private fun loadNotes() {
-        lifecycleScope.launch {
-            repository.getAllNotes().collect { notes ->
-                noteAdapter.submitList(notes)
+        
+        setContent {
+            MaterialTheme {
+                FloatingNotesApp()
             }
         }
-    }
-    
-    private fun createNewNote() {
-        lifecycleScope.launch {
-            val newNote = Note(
-                title = "Untitled Note",
-                content = "",
-                preview = "",
-                lastEdited = System.currentTimeMillis()
-            )
-            val id = repository.insertNote(newNote)
-            val note = Note(
-                id = id,
-                title = "Untitled Note",
-                content = "",
-                preview = ""
-            )
-            openNoteEditor(note)
-        }
-    }
-    
-    private fun openNoteEditor(note: Note) {
-        val intent = Intent(this, NoteEditorActivity::class.java)
-        intent.putExtra("note_id", note.id)
-        intent.putExtra("note_title", note.title)
-        intent.putExtra("note_content", note.content)
-        startActivity(intent)
     }
     
     private fun checkOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
-                AlertDialog.Builder(this)
-                    .setTitle("Overlay Permission Required")
-                    .setMessage("This app needs 'Display over other apps' permission to show floating bubble.")
-                    .setPositiveButton("Grant") { _, _ ->
-                        val intent = Intent(
-                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            Uri.parse("package:$packageName")
-                        )
-                        overlayPermissionLauncher.launch(intent)
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
+                Toast.makeText(this, "Please grant overlay permission", Toast.LENGTH_LONG).show()
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            } else {
+                startFloatingBubbleService()
             }
         }
     }
     
     private fun startFloatingBubbleService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (Settings.canDrawOverlays(this)) {
-                val intent = Intent(this, FloatingBubbleService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(intent)
-                } else {
-                    startService(intent)
-                }
+        val intent = Intent(this, FloatingBubbleService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
+    }
+    
+    @Composable
+    fun FloatingNotesApp() {
+        var noteText by remember { mutableStateOf("") }
+        
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "Floating Notes",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            
+            OutlinedTextField(
+                value = noteText,
+                onValueChange = { noteText = it },
+                label = { Text("Write your note...") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Button(
+                onClick = { /* Save note */ },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Save Note")
             }
         }
     }

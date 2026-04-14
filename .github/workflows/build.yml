@@ -24,11 +24,31 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Fix line endings
+      - name: Create gradlew
         run: |
-          # Fix gradlew line endings
-          sed -i 's/\r$//' gradlew
+          cat > gradlew << 'SCRIPT'
+          #!/bin/sh
+          JAVA_CMD="${JAVA_HOME}/bin/java"
+          CLASSPATH="gradle/wrapper/gradle-wrapper.jar"
+          exec "$JAVA_CMD" -Xmx2048m -cp "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
+          SCRIPT
           chmod +x gradlew
+
+      - name: Create gradle-wrapper.jar
+        run: |
+          mkdir -p gradle/wrapper
+          curl -L -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+
+      - name: Create gradle-wrapper.properties
+        run: |
+          cat > gradle/wrapper/gradle-wrapper.properties << 'PROP'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
+          networkTimeout=10000
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          PROP
 
       - name: Build APK
         run: ./gradlew assembleDebug --stacktrace
