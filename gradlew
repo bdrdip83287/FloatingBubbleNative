@@ -1,7 +1,5 @@
 #!/bin/sh
 
-# Gradle wrapper script for Unix
-
 # Find Java
 if [ -n "$JAVA_HOME" ]; then
     JAVA_CMD="$JAVA_HOME/bin/java"
