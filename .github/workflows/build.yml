@@ -24,10 +24,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup gradlew
+      - name: Clean previous builds
         run: |
           chmod +x gradlew
-          sed -i 's/\r$//' gradlew
+          ./gradlew clean
 
       - name: Build APK
         run: ./gradlew assembleDebug --stacktrace
