@@ -1,114 +1,136 @@
 package com.dip83287.floatingbubble
 
 import android.os.Bundle
+import android.widget.Button
 import android.widget.EditText
-import android.widget.TextView
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import com.dip83287.floatingbubble.data.AppDatabase
-import com.dip83287.floatingbubble.data.Note
-import com.dip83287.floatingbubble.repository.NoteRepository
-import kotlinx.coroutines.launch
+import androidx.appcompat.widget.Toolbar
 
 class NoteEditorActivity : AppCompatActivity() {
     
-    private lateinit var repository: NoteRepository
-    private var noteId: Long = 0
-    private var isLocked: Boolean = false
+    private lateinit var titleInput: EditText
+    private lateinit var contentInput: EditText
+    private var noteIndex: Int = -1
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_note_editor)
         
-        val database = AppDatabase.getDatabase(this)
-        repository = NoteRepository(database)
-        
-        noteId = intent.getLongExtra("note_id", 0)
-        val title = intent.getStringExtra("note_title") ?: "Untitled Note"
+        val title = intent.getStringExtra("note_title") ?: ""
         val content = intent.getStringExtra("note_content") ?: ""
+        noteIndex = intent.getIntExtra("note_index", -1)
         
-        findViewById<TextView>(R.id.tvNoteTitle).text = title
-        findViewById<EditText>(R.id.etNoteContent).setText(content)
-        
-        setupClickListeners()
-        loadNote()
-    }
-    
-    private fun setupClickListeners() {
-        findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar).setNavigationOnClickListener {
-            finish()
+        // Create layout programmatically
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT
+            )
         }
         
-        findViewById<android.view.View>(R.id.btnSaveNote).setOnClickListener {
-            saveNote()
-        }
-        
-        findViewById<android.view.View>(R.id.btnDeleteNote).setOnClickListener {
-            deleteNote()
-        }
-        
-        findViewById<android.view.View>(R.id.btnShareNote).setOnClickListener {
-            shareNote()
-        }
-    }
-    
-    private fun loadNote() {
-        lifecycleScope.launch {
-            val note = repository.getAllNotes().collect { notes ->
-                notes.find { it.id == noteId }?.let {
-                    findViewById<TextView>(R.id.tvNoteTitle).text = it.title
-                    findViewById<EditText>(R.id.etNoteContent).setText(it.content)
-                    isLocked = it.isLocked
-                }
+        // Toolbar
+        val toolbar = Toolbar(this).apply {
+            title = "Edit Note"
+            setTitleTextColor(android.graphics.Color.parseColor("#333333"))
+            setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
+            setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+            setNavigationOnClickListener {
+                finish()
             }
         }
+        mainLayout.addView(toolbar)
+        
+        // ScrollView for content
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        }
+        
+        val contentLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 32, 32, 32)
+        }
+        
+        // Title input
+        titleInput = EditText(this).apply {
+            setText(title)
+            hint = "Title"
+            textSize = 18f
+        }
+        contentLayout.addView(titleInput)
+        
+        // Content input
+        contentInput = EditText(this).apply {
+            setText(content)
+            hint = "Content"
+            textSize = 14f
+            minHeight = 300
+            gravity = android.view.Gravity.TOP
+        }
+        contentLayout.addView(contentInput)
+        
+        scrollView.addView(contentLayout)
+        mainLayout.addView(scrollView)
+        
+        // Bottom buttons
+        val buttonLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        
+        val saveButton = Button(this).apply {
+            text = "Save"
+            layoutParams = LinearLayout.LayoutParams(0, 100, 1f)
+            setBackgroundColor(android.graphics.Color.parseColor("#27AE60"))
+            setTextColor(android.graphics.Color.WHITE)
+            setOnClickListener {
+                saveNote()
+            }
+        }
+        buttonLayout.addView(saveButton)
+        
+        val deleteButton = Button(this).apply {
+            text = "Delete"
+            layoutParams = LinearLayout.LayoutParams(0, 100, 1f)
+            setBackgroundColor(android.graphics.Color.parseColor("#E74C3C"))
+            setTextColor(android.graphics.Color.WHITE)
+            setOnClickListener {
+                deleteNote()
+            }
+        }
+        buttonLayout.addView(deleteButton)
+        
+        mainLayout.addView(buttonLayout)
+        
+        setContentView(mainLayout)
     }
     
     private fun saveNote() {
-        val title = findViewById<TextView>(R.id.tvNoteTitle).text.toString()
-        val content = findViewById<EditText>(R.id.etNoteContent).text.toString()
-        
-        lifecycleScope.launch {
-            val note = Note(
-                id = noteId,
-                title = title,
-                content = content,
-                preview = content.take(50),
-                isLocked = isLocked,
-                lastEdited = System.currentTimeMillis()
-            )
-            repository.updateNote(note)
-            Toast.makeText(this@NoteEditorActivity, "Note saved", Toast.LENGTH_SHORT).show()
-            finish()
+        val resultIntent = android.content.Intent().apply {
+            putExtra("title", titleInput.text.toString())
+            putExtra("content", contentInput.text.toString())
+            putExtra("index", noteIndex)
         }
+        setResult(RESULT_OK, resultIntent)
+        Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+        finish()
     }
     
     private fun deleteNote() {
-        AlertDialog.Builder(this)
-            .setTitle("Delete Note")
-            .setMessage("Are you sure?")
-            .setPositiveButton("Delete") { _, _ ->
-                lifecycleScope.launch {
-                    val note = Note(id = noteId)
-                    repository.deleteNote(note)
-                    Toast.makeText(this@NoteEditorActivity, "Note deleted", Toast.LENGTH_SHORT).show()
-                    finish()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-    
-    private fun shareNote() {
-        val title = findViewById<TextView>(R.id.tvNoteTitle).text.toString()
-        val content = findViewById<EditText>(R.id.etNoteContent).text.toString()
-        
-        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(android.content.Intent.EXTRA_TEXT, "$title\n\n$content")
+        val resultIntent = android.content.Intent().apply {
+            putExtra("delete_index", noteIndex)
         }
-        startActivity(android.content.Intent.createChooser(shareIntent, "Share Note"))
+        setResult(RESULT_OK, resultIntent)
+        Toast.makeText(this, "Note deleted", Toast.LENGTH_SHORT).show()
+        finish()
     }
 }

@@ -5,29 +5,98 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
+    
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var noteAdapter: NoteAdapter
+    private val notes = mutableListOf<Note>()
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Check overlay permission
-        checkOverlayPermission()
+        // Create layout programmatically
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT
+            )
+        }
         
-        setContent {
-            MaterialTheme {
-                FloatingNotesApp()
+        // Toolbar
+        val toolbar = Toolbar(this).apply {
+            title = "Floating Notes"
+            setTitleTextColor(android.graphics.Color.parseColor("#333333"))
+            setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
+        }
+        mainLayout.addView(toolbar)
+        
+        // RecyclerView
+        recyclerView = RecyclerView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+            layoutManager = LinearLayoutManager(this@MainActivity)
+        }
+        mainLayout.addView(recyclerView)
+        
+        // FAB
+        val fab = Button(this).apply {
+            text = "+"
+            setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
+            setTextColor(android.graphics.Color.parseColor("#333333"))
+            val params = LinearLayout.LayoutParams(120, 120)
+            params.gravity = android.view.Gravity.END or android.view.Gravity.BOTTOM
+            params.setMargins(0, 0, 32, 32)
+            layoutParams = params
+            setOnClickListener {
+                createNewNote()
             }
         }
+        mainLayout.addView(fab)
+        
+        setContentView(mainLayout)
+        
+        // Setup adapter
+        noteAdapter = NoteAdapter(notes) { note ->
+            openNoteEditor(note)
+        }
+        recyclerView.adapter = noteAdapter
+        
+        // Add sample notes
+        notes.add(Note(title = "Welcome!", content = "Tap + to create a new note"))
+        notes.add(Note(title = "Floating Bubble", content = "This bubble appears over other apps!"))
+        noteAdapter.notifyDataSetChanged()
+        
+        // Check overlay permission
+        checkOverlayPermission()
+    }
+    
+    private fun createNewNote() {
+        val newNote = Note(title = "New Note", content = "")
+        notes.add(0, newNote)
+        noteAdapter.notifyItemInserted(0)
+        openNoteEditor(newNote)
+    }
+    
+    private fun openNoteEditor(note: Note) {
+        val intent = Intent(this, NoteEditorActivity::class.java)
+        intent.putExtra("note_title", note.title)
+        intent.putExtra("note_content", note.content)
+        intent.putExtra("note_index", notes.indexOf(note))
+        startActivity(intent)
     }
     
     private fun checkOverlayPermission() {
@@ -55,36 +124,40 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
     }
     
-    @Composable
-    fun FloatingNotesApp() {
-        var noteText by remember { mutableStateOf("") }
+    override fun onResume() {
+        super.onResume()
+        // Refresh notes if needed
+    }
+    
+    data class Note(
+        var title: String,
+        var content: String
+    )
+    
+    class NoteAdapter(
+        private val notes: List<Note>,
+        private val onItemClick: (Note) -> Unit
+    ) : RecyclerView.Adapter<NoteAdapter.ViewHolder>() {
         
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Floating Notes",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): ViewHolder {
+            val view = android.view.View.inflate(parent.context, android.R.layout.simple_list_item_2, null)
+            return ViewHolder(view)
+        }
+        
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            holder.bind(notes[position])
+        }
+        
+        override fun getItemCount(): Int = notes.size
+        
+        inner class ViewHolder(itemView: android.view.View) : RecyclerView.ViewHolder(itemView) {
+            private val titleView = itemView.findViewById<android.widget.TextView>(android.R.id.text1)
+            private val contentView = itemView.findViewById<android.widget.TextView>(android.R.id.text2)
             
-            OutlinedTextField(
-                value = noteText,
-                onValueChange = { noteText = it },
-                label = { Text("Write your note...") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Button(
-                onClick = { /* Save note */ },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Save Note")
+            fun bind(note: Note) {
+                titleView.text = note.title
+                contentView.text = note.content.take(50)
+                itemView.setOnClickListener { onItemClick(note) }
             }
         }
     }
