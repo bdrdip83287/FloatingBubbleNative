@@ -35,7 +35,7 @@ class NoteEditorActivity : AppCompatActivity() {
         
         // Toolbar
         val toolbar = Toolbar(this).apply {
-            title = "Edit Note"
+            this.title = "Edit Note"
             setTitleTextColor(android.graphics.Color.parseColor("#333333"))
             setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
             setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
