@@ -35,7 +35,7 @@ class FloatingBubbleService : Service() {
     private var initialX = 0
     private var initialY = 0
     private var initialTouchX = 0f
-    -private var initialTouchY = 0f
+    private var initialTouchY = 0f
     
     override fun onCreate() {
         super.onCreate()
