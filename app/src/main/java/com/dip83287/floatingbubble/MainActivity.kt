@@ -32,13 +32,18 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        repository = NoteRepository(this)
-        notes = repository.getAllNotes().toMutableList()
-        
-        if (notes.isEmpty()) {
-            notes.add(Note(title = "Welcome!", content = "Tap + to create a new note"))
-            notes.add(Note(title = "Floating Bubble", content = "This bubble appears over other apps!"))
-            repository.saveNotes(notes)
+        try {
+            repository = NoteRepository(this)
+            notes = repository.getAllNotes().toMutableList()
+            
+            if (notes.isEmpty()) {
+                notes.add(Note(title = "Welcome!", content = "Tap + to create a new note"))
+                notes.add(Note(title = "Floating Bubble", content = "This bubble appears over other apps!"))
+                repository.saveNotes(notes)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Error loading notes: ${e.message}", Toast.LENGTH_LONG).show()
         }
         
         // Create layout programmatically
@@ -157,13 +162,18 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun startFloatingBubbleService() {
-        val intent = Intent(this, FloatingBubbleService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        try {
+            val intent = Intent(this, FloatingBubbleService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Failed to start bubble: ${e.message}", Toast.LENGTH_LONG).show()
         }
-        Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
     }
     
     class NoteAdapter(
