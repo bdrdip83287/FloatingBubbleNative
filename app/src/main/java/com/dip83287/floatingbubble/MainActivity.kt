@@ -26,7 +26,11 @@ class MainActivity : AppCompatActivity() {
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        checkOverlayPermission()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Settings.canDrawOverlays(this)) {
+                startFloatingBubbleService()
+            }
+        }
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,10 +47,9 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Error loading notes: ${e.message}", Toast.LENGTH_LONG).show()
         }
         
-        // Create layout programmatically
+        // Create layout
         val mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
@@ -158,6 +161,8 @@ class MainActivity : AppCompatActivity() {
             } else {
                 startFloatingBubbleService()
             }
+        } else {
+            startFloatingBubbleService()
         }
     }
     
@@ -172,7 +177,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Failed to start bubble: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
     

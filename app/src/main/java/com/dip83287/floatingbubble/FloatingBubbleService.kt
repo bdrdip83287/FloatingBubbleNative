@@ -37,7 +37,6 @@ class FloatingBubbleService : Service() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification())
     }
     
     private fun createNotificationChannel() {
@@ -72,6 +71,7 @@ class FloatingBubbleService : Service() {
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Check permission first
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
                 stopSelf()
@@ -79,6 +79,10 @@ class FloatingBubbleService : Service() {
             }
         }
         
+        // Start foreground notification
+        startForeground(NOTIFICATION_ID, createNotification())
+        
+        // Create bubble view if not exists
         if (bubbleView == null) {
             createBubbleView()
         }
@@ -87,8 +91,8 @@ class FloatingBubbleService : Service() {
     }
     
     private fun createBubbleView() {
-        // Create a simple bubble view
-        bubbleView = ImageView(this).apply {
+        // Simple bubble view
+        val bubble = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_edit)
             setBackgroundColor(Color.parseColor("#F9E79F"))
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -99,6 +103,8 @@ class FloatingBubbleService : Service() {
                 outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
             }
         }
+        
+        bubbleView = bubble
         
         val layoutParams = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams(
