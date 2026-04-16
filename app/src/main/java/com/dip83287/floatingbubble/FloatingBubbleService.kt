@@ -1,4 +1,4 @@
-
+package com.dip83287.floatingbubble
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -30,6 +30,7 @@ class FloatingBubbleService : Service() {
         private const val CHANNEL_ID = "floating_bubble"
         private var bubbleView: View? = null
         private var isExpanded = false
+        private var currentLayoutParams: WindowManager.LayoutParams? = null
     }
     
     private lateinit var windowManager: WindowManager
@@ -48,10 +49,10 @@ class FloatingBubbleService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Floating Notes",
+                "ফ্লটিং নোটস",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Floating notes bubble"
+                description = "ফ্লটিং নোটস বাবল"
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -66,8 +67,8 @@ class FloatingBubbleService : Service() {
         )
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Floating Notes")
-            .setContentText("Tap to open notes")
+            .setContentTitle("ফ্লটিং নোটস")
+            .setContentText("নোটস খোলতে ট্যাপ করুন")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -93,7 +94,6 @@ class FloatingBubbleService : Service() {
     }
     
     private fun createBubbleView() {
-        // Circular bubble layout
         val bubbleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -105,7 +105,6 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // Icon
         val iconView = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_edit)
             setColorFilter(Color.parseColor("#333333"))
@@ -136,6 +135,8 @@ class FloatingBubbleService : Service() {
         layoutParams.gravity = Gravity.TOP or Gravity.START
         layoutParams.x = 100
         layoutParams.y = 300
+        
+        currentLayoutParams = layoutParams
         
         var isDragging = false
         var startX = 0
@@ -177,7 +178,7 @@ class FloatingBubbleService : Service() {
         }
         
         bubbleView?.setOnLongClickListener {
-            Toast.makeText(this, "Floating bubble closed", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "ফ্লটিং বাবল বন্ধ হয়েছে", Toast.LENGTH_SHORT).show()
             stopSelf()
             true
         }
@@ -189,10 +190,8 @@ class FloatingBubbleService : Service() {
         if (isExpanded) return
         isExpanded = true
         
-        // Remove bubble
         bubbleView?.let { windowManager.removeView(it) }
         
-        // Create note pad layout
         val notePadLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#FFF8DC"))
@@ -203,7 +202,6 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // Title bar with close button
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -213,7 +211,7 @@ class FloatingBubbleService : Service() {
         }
         
         val titleText = TextView(this).apply {
-            text = "📝 Floating Notes"
+            text = "📝 ফ্লটিং নোটস"
             textSize = 18f
             setTextColor(Color.parseColor("#333333"))
             setTypeface(null, android.graphics.Typeface.BOLD)
@@ -225,7 +223,6 @@ class FloatingBubbleService : Service() {
         }
         titleBar.addView(titleText)
         
-        // Condense button (X)
         val condenseButton = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
             setColorFilter(Color.parseColor("#C0392B"))
@@ -238,7 +235,6 @@ class FloatingBubbleService : Service() {
         
         notePadLayout.addView(titleBar)
         
-        // Divider
         val divider = View(this).apply {
             setBackgroundColor(Color.parseColor("#DDDDDD"))
             layoutParams = LinearLayout.LayoutParams(
@@ -251,9 +247,8 @@ class FloatingBubbleService : Service() {
         }
         notePadLayout.addView(divider)
         
-        // Message
         val messageText = TextView(this).apply {
-            text = "Tap below to open full notes app"
+            text = "সম্পূর্ণ নোটস অ্যাপ খুলতে নিচে ট্যাপ করুন"
             textSize = 14f
             setTextColor(Color.parseColor("#666666"))
             gravity = Gravity.CENTER
@@ -266,9 +261,8 @@ class FloatingBubbleService : Service() {
         }
         notePadLayout.addView(messageText)
         
-        // Open full app button
         val openButton = Button(this).apply {
-            text = "📋 Open Notes App"
+            text = "📋 নোটস অ্যাপ খুলুন"
             setBackgroundColor(Color.parseColor("#F9E79F"))
             setTextColor(Color.parseColor("#333333"))
             layoutParams = LinearLayout.LayoutParams(
@@ -287,16 +281,16 @@ class FloatingBubbleService : Service() {
         
         val expandedParams = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams(
+                400,
                 350,
-                250,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
             )
         } else {
             WindowManager.LayoutParams(
+                400,
                 350,
-                250,
                 WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
@@ -307,6 +301,7 @@ class FloatingBubbleService : Service() {
         expandedParams.x = 0
         expandedParams.y = 0
         
+        currentLayoutParams = expandedParams
         windowManager.addView(bubbleView, expandedParams)
     }
     
@@ -314,10 +309,8 @@ class FloatingBubbleService : Service() {
         if (!isExpanded) return
         isExpanded = false
         
-        // Remove note pad
         bubbleView?.let { windowManager.removeView(it) }
         
-        // Recreate bubble
         createBubbleView()
     }
     
