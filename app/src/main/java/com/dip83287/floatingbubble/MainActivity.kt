@@ -33,7 +33,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(sdInstanceState)
+        super.onCreate(savedInstanceState)  // ✅ Correct
         
         try {
             repository = NoteRepository(this)
