@@ -26,6 +26,7 @@
 
         <activity
             android:name=".NoteEditorActivity"
+            android:exported="false"
             android:configChanges="orientation|screenSize" />
 
         <service
