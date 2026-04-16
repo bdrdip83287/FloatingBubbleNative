@@ -8,6 +8,7 @@ import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -22,6 +23,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var repository: NoteRepository
     private var notes = mutableListOf<Note>()
     
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Settings.canDrawOverlays(this)) {
+                startFloatingBubbleService()
+            }
+        }
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -31,7 +42,7 @@ class MainActivity : AppCompatActivity() {
             
             if (notes.isEmpty()) {
                 notes.add(Note(title = "Welcome!", content = "Tap + to create a new note"))
-                notes.add(Note(title = "Floating Bubble", content = "Bubble feature coming soon!"))
+                notes.add(Note(title = "Floating Bubble", content = "Tap the bubble to expand!"))
                 repository.saveNotes(notes)
             }
         } catch (e: Exception) {
@@ -90,6 +101,9 @@ class MainActivity : AppCompatActivity() {
             openNoteEditor(note)
         }
         recyclerView.adapter = noteAdapter
+        
+        // Check overlay permission and start bubble
+        checkAndStartBubble()
     }
     
     private fun createNewNote() {
@@ -133,6 +147,37 @@ class MainActivity : AppCompatActivity() {
                 repository.saveNotes(notes)
                 noteAdapter.notifyDataSetChanged()
             }
+        }
+    }
+    
+    private fun checkAndStartBubble() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "Please grant overlay permission for floating bubble", Toast.LENGTH_LONG).show()
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                overlayPermissionLauncher.launch(intent)
+            } else {
+                startFloatingBubbleService()
+            }
+        } else {
+            startFloatingBubbleService()
+        }
+    }
+    
+    private fun startFloatingBubbleService() {
+        try {
+            val intent = Intent(this, FloatingBubbleService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
     
