@@ -1,29 +1,43 @@
 package com.dip83287.floatingbubble
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.dip83287.floatingbubble.data.Note
+import com.dip83287.floatingbubble.repository.NoteRepository
 
-class NoteEditorActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity() {
     
-    private lateinit var titleEditText: EditText
-    private lateinit var contentEditText: EditText
-    private var noteId: Long = 0
-    private var noteIndex: Int = -1
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var noteAdapter: NoteAdapter
+    private lateinit var repository: NoteRepository
+    private var notes = mutableListOf<Note>()
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Get data from intent
-        noteId = intent.getLongExtra("note_id", 0)
-        val noteTitle = intent.getStringExtra("note_title") ?: ""
-        val noteContent = intent.getStringExtra("note_content") ?: ""
-        noteIndex = intent.getIntExtra("note_index", -1)
+        try {
+            repository = NoteRepository(this)
+            notes = repository.getAllNotes().toMutableList()
+            
+            if (notes.isEmpty()) {
+                notes.add(Note(title = "Welcome!", content = "Tap + to create a new note"))
+                notes.add(Note(title = "Floating Bubble", content = "Bubble feature coming soon!"))
+                repository.saveNotes(notes)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
         
         // Create layout
         val mainLayout = LinearLayout(this).apply {
@@ -36,91 +50,117 @@ class NoteEditorActivity : AppCompatActivity() {
         
         // Toolbar
         val toolbar = Toolbar(this).apply {
-            title = "Edit Note"
+            title = "Floating Notes"
             setTitleTextColor(android.graphics.Color.parseColor("#333333"))
             setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
         }
         mainLayout.addView(toolbar)
         
-        // Title EditText
-        titleEditText = EditText(this).apply {
-            hint = "Note Title"
-            setText(noteTitle)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            setPadding(16, 16, 16, 16)
-        }
-        mainLayout.addView(titleEditText)
-        
-        // Content EditText
-        contentEditText = EditText(this).apply {
-            hint = "Note Content"
-            setText(noteContent)
+        // RecyclerView
+        recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
             )
-            setPadding(16, 16, 16, 16)
+            layoutManager = LinearLayoutManager(this@MainActivity)
         }
-        mainLayout.addView(contentEditText)
+        mainLayout.addView(recyclerView)
         
-        // Button container
-        val buttonContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+        // FAB
+        val fab = Button(this).apply {
+            text = "+"
+            textSize = 24f
+            setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
+            setTextColor(android.graphics.Color.parseColor("#333333"))
+            val params = LinearLayout.LayoutParams(120, 120)
+            params.gravity = android.view.Gravity.END or android.view.Gravity.BOTTOM
+            params.setMargins(0, 0, 32, 32)
+            layoutParams = params
+            setOnClickListener {
+                createNewNote()
+            }
         }
-        
-        // Save button
-        val saveButton = Button(this).apply {
-            text = "Save"
-            layoutParams = LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-            setOnClickListener { saveNote() }
-        }
-        buttonContainer.addView(saveButton)
-        
-        // Delete button
-        val deleteButton = Button(this).apply {
-            text = "Delete"
-            layoutParams = LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-            setOnClickListener { deleteNote() }
-        }
-        buttonContainer.addView(deleteButton)
-        
-        mainLayout.addView(buttonContainer)
+        mainLayout.addView(fab)
         
         setContentView(mainLayout)
+        
+        // Setup adapter
+        noteAdapter = NoteAdapter(notes) { note ->
+            openNoteEditor(note)
+        }
+        recyclerView.adapter = noteAdapter
     }
     
-    private fun saveNote() {
-        val resultIntent = Intent().apply {
-            putExtra("note_id", noteId)
-            putExtra("title", titleEditText.text.toString())
-            putExtra("content", contentEditText.text.toString())
-            putExtra("index", noteIndex)
-        }
-        setResult(RESULT_OK, resultIntent)
-        finish()
+    private fun createNewNote() {
+        val newNote = Note(title = "New Note", content = "")
+        notes.add(0, newNote)
+        repository.saveNotes(notes)
+        noteAdapter.notifyItemInserted(0)
+        openNoteEditor(newNote)
     }
     
-    private fun deleteNote() {
-        val resultIntent = Intent().apply {
-            putExtra("delete_note_id", noteId)
+    private fun openNoteEditor(note: Note) {
+        val intent = Intent(this, NoteEditorActivity::class.java)
+        intent.putExtra("note_id", note.id)
+        intent.putExtra("note_title", note.title)
+        intent.putExtra("note_content", note.content)
+        intent.putExtra("note_index", notes.indexOf(note))
+        startActivityForResult(intent, 100)
+    }
+    
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 100 && resultCode == RESULT_OK) {
+            data?.let {
+                if (it.hasExtra("delete_note_id")) {
+                    val deleteId = it.getLongExtra("delete_note_id", 0)
+                    notes.removeAll { n -> n.id == deleteId }
+                } else {
+                    val noteId = it.getLongExtra("note_id", 0)
+                    val title = it.getStringExtra("title") ?: ""
+                    val content = it.getStringExtra("content") ?: ""
+                    val index = it.getIntExtra("index", -1)
+                    if (index != -1 && index < notes.size) {
+                        notes[index] = notes[index].copy(
+                            title = title,
+                            content = content,
+                            preview = content.take(50),
+                            lastEdited = System.currentTimeMillis()
+                        )
+                    }
+                }
+                repository.saveNotes(notes)
+                noteAdapter.notifyDataSetChanged()
+            }
         }
-        setResult(RESULT_OK, resultIntent)
-        finish()
+    }
+    
+    class NoteAdapter(
+        private val notes: List<Note>,
+        private val onItemClick: (Note) -> Unit
+    ) : RecyclerView.Adapter<NoteAdapter.ViewHolder>() {
+        
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): ViewHolder {
+            val view = android.view.View.inflate(parent.context, android.R.layout.simple_list_item_2, null)
+            return ViewHolder(view)
+        }
+        
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            holder.bind(notes[position])
+        }
+        
+        override fun getItemCount(): Int = notes.size
+        
+        inner class ViewHolder(itemView: android.view.View) : RecyclerView.ViewHolder(itemView) {
+            private val titleView = itemView.findViewById<android.widget.TextView>(android.R.id.text1)
+            private val contentView = itemView.findViewById<android.widget.TextView>(android.R.id.text2)
+            
+            fun bind(note: Note) {
+                titleView.text = note.title
+                contentView.text = note.content.take(50)
+                itemView.setOnClickListener { onItemClick(note) }
+            }
+        }
     }
 }
