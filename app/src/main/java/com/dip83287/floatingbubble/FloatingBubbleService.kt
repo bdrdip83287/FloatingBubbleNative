@@ -1,5 +1,5 @@
-package com.dip83287.floatingbubble
 
+import com.dip83287.floatingbubble.MainActivity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
