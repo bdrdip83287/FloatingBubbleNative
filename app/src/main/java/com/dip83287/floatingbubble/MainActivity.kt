@@ -1,4 +1,3 @@
-package com.dip83287.floatingbubble
 
 import android.content.Intent
 import android.net.Uri
@@ -34,7 +33,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        super.onCreate(sdInstanceState)
         
         try {
             repository = NoteRepository(this)
