@@ -1,0 +1,617 @@
+==================== FLOATING BUBBLE NATIVE PROJECT DUMP ====================
+Generated: Fri Apr 17 23:54:13 +06 2026
+
+==================== 📁 PROJECT TREE ====================
+./app/build.gradle
+./app/src/main/AndroidManifest.xml
+./app/src/main/java/com/dip83287/floatingbubble/FloatingBubbleService.kt
+./app/src/main/java/com/dip83287/floatingbubble/MainActivity.kt
+./app/src/main/java/com/dip83287/floatingbubble/NoteEditorActivity.kt
+./app/src/main/java/com/dip83287/floatingbubble/SettingsActivity.kt
+./app/src/main/java/com/dip83287/floatingbubble/adapter/NoteAdapter.kt
+./app/src/main/java/com/dip83287/floatingbubble/data/Note.kt
+./app/src/main/java/com/dip83287/floatingbubble/repository/NoteRepository.kt
+./app/src/main/java/com/dip83287/floatingbubble/utils/PreferenceManager.kt
+./app/src/main/res/drawable/bubble_background.xml
+./app/src/main/res/layout/activity_main.xml
+./app/src/main/res/layout/activity_note_editor.xml
+./app/src/main/res/layout/activity_settings.xml
+./app/src/main/res/layout/item_note.xml
+./app/src/main/res/values/colors.xml
+./app/src/main/res/values/strings.xml
+./app/src/main/res/values/themes.xml
+./build.gradle
+./gradle.properties
+./gradle/wrapper/gradle-wrapper.properties
+./settings.gradle
+
+
+==================== 📄 build.gradle ====================
+
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+buildscript {
+    ext.kotlin_version = '1.9.22'
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.3.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
+
+
+==================== 📄 app/build.gradle ====================
+
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace 'com.dip83287.floatingbubble'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.dip83287.floatingbubble"
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+            debuggable true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+
+
+==================== 📄 settings.gradle ====================
+
+rootProject.name = "FloatingBubbleNative"
+include ':app'
+
+
+==================== 📄 gradle/wrapper/gradle-wrapper.properties ====================
+
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+
+
+==================== 📄 app/src/main/AndroidManifest.xml ====================
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+
+    <application
+        android:label="Floating Notes"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+
+        <activity android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".FloatingBubbleService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
+    </application>
+</manifest>
+
+==================== 📄 app/src/main/java/com/dip83287/floatingbubble/MainActivity.kt ====================
+
+package com.dip83287.floatingbubble
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import android.view.*
+import com.dip83287.floatingbubble.data.Note
+import com.dip83287.floatingbubble.repository.NoteRepository
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var repository: NoteRepository
+    private lateinit var adapter: NoteAdapter
+    private var notes = mutableListOf<Note>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        repository = NoteRepository(this)
+        notes = repository.getAllNotes().toMutableList()
+
+        if (notes.isEmpty()) {
+            notes.add(Note(title = "Welcome!", content = "Tap + to create"))
+            repository.saveNotes(notes)
+        }
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        recyclerView = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+        }
+
+        adapter = NoteAdapter(notes) {}
+        recyclerView.adapter = adapter
+
+        val btn = Button(this).apply {
+            text = "+"
+            setOnClickListener {
+                notes.add(0, Note(title = "New Note", content = ""))
+                repository.saveNotes(notes)
+                adapter.notifyDataSetChanged()
+            }
+        }
+
+        layout.addView(recyclerView)
+        layout.addView(btn)
+
+        setContentView(layout)
+
+        checkOverlay()
+    }
+
+    private fun checkOverlay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            } else {
+                startServiceNow()
+            }
+        } else {
+            startServiceNow()
+        }
+    }
+
+    private fun startServiceNow() {
+        val intent = Intent(this, FloatingBubbleService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            startForegroundService(intent)
+        else
+            startService(intent)
+    }
+
+    // =====================
+    class NoteAdapter(
+        private val notes: List<Note>,
+        private val click: (Note) -> Unit
+    ) : RecyclerView.Adapter<NoteAdapter.VH>() {
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(android.R.layout.simple_list_item_2, parent, false)
+            return VH(view)
+        }
+
+        override fun getItemCount() = notes.size
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            holder.bind(notes[position])
+        }
+
+        class VH(v: View) : RecyclerView.ViewHolder(v) {
+            fun bind(note: Note) {
+                val t1 = itemView.findViewById<TextView>(android.R.id.text1)
+                val t2 = itemView.findViewById<TextView>(android.R.id.text2)
+
+                t1.text = note.title
+                t2.text = note.content.take(40)
+            }
+        }
+    }
+}
+
+==================== 📄 app/src/main/java/com/dip83287/floatingbubble/FloatingBubbleService.kt ====================
+
+package com.dip83287.floatingbubble
+
+import android.app.*
+import android.content.Intent
+import android.graphics.PixelFormat
+import android.os.*
+import android.provider.Settings
+import android.view.*
+import android.widget.*
+import androidx.core.app.NotificationCompat
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.dip83287.floatingbubble.data.Note
+
+class FloatingBubbleService : Service() {
+
+    private lateinit var wm: WindowManager
+    private var bubble: View? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        startForegroundNow()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !Settings.canDrawOverlays(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        if (bubble == null) createBubble()
+
+        return START_STICKY
+    }
+
+    private fun createBubble() {
+
+        val note = getLastNote()
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20,20,20,20)
+            setBackgroundColor(0xFFF9E79F.toInt())
+        }
+
+        val t1 = TextView(this).apply {
+            text = note?.title ?: "No Notes"
+        }
+
+        val t2 = TextView(this).apply {
+            text = note?.content?.take(40) ?: "Tap"
+        }
+
+        layout.addView(t1)
+        layout.addView(t2)
+
+        bubble = layout
+
+        val params = WindowManager.LayoutParams(
+            300,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = 100
+        params.y = 300
+
+        layout.setOnClickListener {
+            Toast.makeText(this, "Bubble Clicked", Toast.LENGTH_SHORT).show()
+        }
+
+        wm.addView(bubble, params)
+    }
+
+    private fun getLastNote(): Note? {
+        return try {
+            val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
+            val json = prefs.getString("notes_list", "[]")
+            val type = object : TypeToken<List<Note>>() {}.type
+            val list: List<Note> = Gson().fromJson(json, type)
+            if (list.isNotEmpty()) list[0] else null
+        } catch (e: Exception) { null }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        bubble?.let { wm.removeView(it) }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun startForegroundNow() {
+        val ch = NotificationChannel("ch","bubble",
+            NotificationManager.IMPORTANCE_LOW)
+
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(ch)
+
+        val n = NotificationCompat.Builder(this,"ch")
+            .setContentTitle("Running")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .build()
+
+        startForeground(1,n)
+    }
+}
+
+==================== 📄 app/src/main/java/com/dip83287/floatingbubble/NoteEditorActivity.kt ====================
+
+package com.dip83287.floatingbubble
+
+import android.os.Bundle
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
+
+class NoteEditorActivity : AppCompatActivity() {
+    
+    private lateinit var titleInput: EditText
+    private lateinit var contentInput: EditText
+    private var noteId: Long = 0
+    private var noteIndex: Int = -1
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        val noteTitle = intent.getStringExtra("note_title") ?: ""
+        val content = intent.getStringExtra("note_content") ?: ""
+        noteId = intent.getLongExtra("note_id", System.currentTimeMillis())
+        noteIndex = intent.getIntExtra("note_index", -1)
+        
+        // Create layout programmatically
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+        
+        // Toolbar
+        val toolbar = Toolbar(this).apply {
+            title = "Edit Note"
+            setTitleTextColor(android.graphics.Color.parseColor("#333333"))
+            setBackgroundColor(android.graphics.Color.parseColor("#F9E79F"))
+            setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+            setNavigationOnClickListener {
+                finish()
+            }
+        }
+        mainLayout.addView(toolbar)
+        
+        // ScrollView for content
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        }
+        
+        val contentLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 32, 32, 32)
+        }
+        
+        // Title input
+        titleInput = EditText(this).apply {
+            setText(noteTitle)
+            hint = "Title"
+            textSize = 18f
+        }
+        contentLayout.addView(titleInput)
+        
+        // Content input
+        contentInput = EditText(this).apply {
+            setText(content)
+            hint = "Content"
+            textSize = 14f
+            minHeight = 300
+            gravity = android.view.Gravity.TOP
+        }
+        contentLayout.addView(contentInput)
+        
+        scrollView.addView(contentLayout)
+        mainLayout.addView(scrollView)
+        
+        // Bottom buttons
+        val buttonLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        
+        val saveButton = Button(this).apply {
+            text = "Save"
+            layoutParams = LinearLayout.LayoutParams(0, 100, 1f)
+            setBackgroundColor(android.graphics.Color.parseColor("#27AE60"))
+            setTextColor(android.graphics.Color.WHITE)
+            setOnClickListener {
+                saveNote()
+            }
+        }
+        buttonLayout.addView(saveButton)
+        
+        val deleteButton = Button(this).apply {
+            text = "Delete"
+            layoutParams = LinearLayout.LayoutParams(0, 100, 1f)
+            setBackgroundColor(android.graphics.Color.parseColor("#E74C3C"))
+            setTextColor(android.graphics.Color.WHITE)
+            setOnClickListener {
+                deleteNote()
+            }
+        }
+        buttonLayout.addView(deleteButton)
+        
+        mainLayout.addView(buttonLayout)
+        
+        setContentView(mainLayout)
+    }
+    
+    private fun saveNote() {
+        val resultIntent = android.content.Intent().apply {
+            putExtra("note_id", noteId)
+            putExtra("title", titleInput.text.toString())
+            putExtra("content", contentInput.text.toString())
+            putExtra("index", noteIndex)
+        }
+        setResult(RESULT_OK, resultIntent)
+        Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+        finish()
+    }
+    
+    private fun deleteNote() {
+        val resultIntent = android.content.Intent().apply {
+            putExtra("delete_note_id", noteId)
+            putExtra("delete_index", noteIndex)
+        }
+        setResult(RESULT_OK, resultIntent)
+        Toast.makeText(this, "Note deleted", Toast.LENGTH_SHORT).show()
+        finish()
+    }
+}
+
+==================== 📄 app/src/main/java/com/dip83287/floatingbubble/data/Note.kt ====================
+
+package com.dip83287.floatingbubble.model
+
+data class Note(
+    val id: Int,
+    val title: String,
+    val content: String
+) {
+    fun getPreview(): String {
+        return if (content.length > 30) {
+            content.substring(0, 30) + "..."
+        } else {
+            content
+        }
+    }
+}
+
+==================== 📄 app/src/main/java/com/dip83287/floatingbubble/repository/NoteRepository.kt ====================
+
+package com.dip83287.floatingbubble.repository
+
+import android.content.Context
+import com.dip83287.floatingbubble.data.Note
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+
+class NoteRepository(context: Context) {
+
+    private val prefs = context.getSharedPreferences("notes_prefs", Context.MODE_PRIVATE)
+    private val gson = Gson()
+
+    fun getAllNotes(): List<Note> {
+        val json = prefs.getString("notes_list", "[]")
+        val type = object : TypeToken<List<Note>>() {}.type
+        return gson.fromJson(json, type)
+    }
+
+    fun saveNotes(list: List<Note>) {
+        prefs.edit().putString("notes_list", gson.toJson(list)).apply()
+    }
+}
+
+==================== 📄 app/src/main/java/com/dip83287/floatingbubble/utils/PreferenceManager.kt ====================
+
+package com.dip83287.floatingbubble.utils
+
+import android.content.Context
+import android.content.SharedPreferences
+
+class PreferenceManager(context: Context) {
+    private val prefs: SharedPreferences = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+    
+    fun isPasswordSet(): Boolean = prefs.getBoolean("password_set", false)
+    fun setPasswordSet(set: Boolean) = prefs.edit().putBoolean("password_set", set).apply()
+    
+    fun getMasterPassword(): String? = prefs.getString("master_password", null)
+    fun setMasterPassword(password: String) = prefs.edit().putString("master_password", password).apply()
+}
+
+
+==================== 📄 app/src/main/res/values/colors.xml ====================
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#FFF8DC</color>
+    <color name="toolbar_bg">#F9E79F</color>
+    <color name="text_primary">#333333</color>
+    <color name="text_secondary">#666666</color>
+    <color name="fab_bg">#F9E79F</color>
+    <color name="bubble_bg">#F9E79F</color>
+</resources>
+
+
+==================== 📄 app/src/main/res/values/themes.xml ====================
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FloatingBubble" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#F9E79F</item>
+        <item name="colorPrimaryVariant">#F1C40F</item>
+        <item name="colorOnPrimary">#333333</item>
+        <item name="android:windowBackground">@color/background</item>
+    </style>
+</resources>
+
+
+==================== 📄 app/src/main/res/values/strings.xml ====================
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Floating Notes</string>
+</resources>
+
+==================== ✅ DONE ====================
