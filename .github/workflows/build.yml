@@ -24,12 +24,17 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Create fixed keystore (same for all builds)
+      - name: Create keystore if not exists
         run: |
-          # একই keystore সব build এ ব্যবহার হবে
-          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, OU=Android, O=Google, L=Mountain View, ST=California, C=US" -noprompt
+          # শুধু keystore না থাকলে তৈরি করবে
+          if [ ! -f "debug.keystore" ]; then
+            echo "Creating new keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, OU=Android, O=Google, L=Mountain View, ST=California, C=US" -noprompt
+          else
+            echo "Keystore already exists, using existing one."
+          fi
           
-          # Verify keystore created
+          # Verify keystore exists
           ls -la debug.keystore
 
       - name: Build APK with fixed signature
@@ -45,7 +50,12 @@ jobs:
 
       - name: Rename APK
         run: |
-          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/FloatingNotes-${{ steps.version.outputs.version }}.apk
+          if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
+            mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/FloatingNotes-${{ steps.version.outputs.version }}.apk
+          else
+            echo "APK not found!"
+            exit 1
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
