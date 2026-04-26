@@ -13,30 +13,42 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // শুধু permission চেক এবং bubble start
-        checkAndStartBubble()
-        
-        // অ্যাপটি immediately minimize করে দিচ্ছি যাতে শুধু bubble দেখা যায়
-        moveTaskToBack(true)
+        // সরাসরি "Display over other apps" সেটিংস পৃষ্ঠায় নিয়ে যান
+        openOverlaySettings()
     }
 
-    private fun checkAndStartBubble() {
+    private fun openOverlaySettings() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "Please grant overlay permission", Toast.LENGTH_LONG).show()
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
-            } else {
-                startBubbleService()
-                // permission দেওয়ার পর অ্যাপ বন্ধ করে দিচ্ছি
-                finish()
-            }
+            // সরাসরি এই অ্যাপের জন্য Display over other apps সেটিংস খুলবে
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivityForResult(intent, 100)
         } else {
+            // Android 6.0 এর নিচে permission দরকার নেই
             startBubbleService()
             finish()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        
+        if (requestCode == 100) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Settings.canDrawOverlays(this)) {
+                    // Permission granted - start bubble service
+                    startBubbleService()
+                    // অ্যাপটি ব্যাকগ্রাউন্ডে পাঠিয়ে দিন
+                    moveTaskToBack(true)
+                    Toast.makeText(this, "Floating bubble activated!", Toast.LENGTH_SHORT).show()
+                } else {
+                    // Permission denied - show message and exit
+                    Toast.makeText(this, "Permission required for floating bubble", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+            }
         }
     }
 
@@ -47,6 +59,5 @@ class MainActivity : AppCompatActivity() {
         } else {
             startService(intent)
         }
-        Toast.makeText(this, "Floating bubble started", Toast.LENGTH_SHORT).show()
     }
 }
