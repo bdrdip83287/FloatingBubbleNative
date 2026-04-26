@@ -24,10 +24,22 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Create debug keystore
+      - name: Create debug keystore if not exists
         run: |
-          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, O=Android, C=US" -noprompt
-          mv debug.keystore app/debug.keystore
+          # Check if keystore already exists in repo
+          if [ -f "debug.keystore" ]; then
+            echo "Keystore already exists in repo, using it."
+            cp debug.keystore app/debug.keystore
+          elif [ -f "app/debug.keystore" ]; then
+            echo "Keystore already exists in app folder, using it."
+          else
+            echo "Creating new keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, O=Android, C=US" -noprompt
+            cp debug.keystore app/debug.keystore
+          fi
+          
+          # Verify keystore exists
+          ls -la app/debug.keystore
 
       - name: Build APK
         run: |
