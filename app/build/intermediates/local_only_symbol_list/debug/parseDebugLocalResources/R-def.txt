@@ -1,0 +1,27 @@
+R_DEF: Internal format may change without notice
+local
+color background
+color bubble_bg
+color fab_bg
+color text_primary
+color text_secondary
+color toolbar_bg
+drawable bubble_background
+id btnChangePassword
+id btnDeleteNote
+id btnSaveNote
+id btnSetPassword
+id btnShareNote
+id etNoteContent
+id fabAddNote
+id notePreview
+id noteTitle
+id recyclerViewNotes
+id toolbar
+id tvNoteTitle
+layout activity_main
+layout activity_note_editor
+layout activity_settings
+layout item_note
+string app_name
+style Theme.FloatingBubble
