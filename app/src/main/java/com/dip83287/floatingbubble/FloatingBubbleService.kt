@@ -20,7 +20,7 @@ class FloatingBubbleService : Service() {
     // বাবল সেটিংস
     private val BUBBLE_COLOR = "#2196F3"        // বাবলের রং (নীল)
     private val BUBBLE_ICON = "📝"               // বাবলের আইকন
-    private val BUBBLE_SIZE = 80                // বাবলের সাইজ (px)
+    private val BUBBLE_SIZE = 140                // বাবলের সাইজ (px)
     
     // নোটপ্যাড সেটিংস
     private val NOTEPAD_BG_COLOR = "#FFF8DC"     // নোটপ্যাডের ব্যাকগ্রাউন্ড (ক্রিম)
