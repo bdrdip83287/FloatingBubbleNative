@@ -3,8 +3,6 @@ name: Android Build
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -24,38 +22,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Create keystore if not exists
-        run: |
-          # শুধু keystore না থাকলে তৈরি করবে
-          if [ ! -f "debug.keystore" ]; then
-            echo "Creating new keystore..."
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, OU=Android, O=Google, L=Mountain View, ST=California, C=US" -noprompt
-          else
-            echo "Keystore already exists, using existing one."
-          fi
-          
-          # Verify keystore exists
-          ls -la debug.keystore
-
-      - name: Build APK with fixed signature
+      - name: Build APK
         run: |
           chmod +x gradlew
           ./gradlew clean assembleDebug --stacktrace
-
-      - name: Get version name
-        id: version
-        run: |
-          VERSION=$(date +'%Y%m%d-%H%M%S')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Rename APK
-        run: |
-          if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
-            mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/FloatingNotes-${{ steps.version.outputs.version }}.apk
-          else
-            echo "APK not found!"
-            exit 1
-          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
