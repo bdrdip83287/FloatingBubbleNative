@@ -12,21 +12,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // সরাসরি "Display over other apps" সেটিংস পৃষ্ঠায় নিয়ে যান
-        openOverlaySettings()
+
+        // ✅ সরাসরি Floating Notes অ্যাপের সেটিংস পেজে যান
+        openAppSpecificOverlaySettings()
     }
 
-    private fun openOverlaySettings() {
+    private fun openAppSpecificOverlaySettings() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // সরাসরি এই অ্যাপের জন্য Display over other apps সেটিংস খুলবে
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
+            // 🔥 এখানে change: "package:your_package_name" ফর্ম্যাট use করছি
+            val intent = Intent()
+            intent.action = Settings.ACTION_MANAGE_OVERLAY_PERMISSION
+            intent.data = Uri.parse("package:$packageName")
             startActivityForResult(intent, 100)
         } else {
-            // Android 6.0 এর নিচে permission দরকার নেই
             startBubbleService()
             finish()
         }
@@ -34,18 +32,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        
+
         if (requestCode == 100) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (Settings.canDrawOverlays(this)) {
-                    // Permission granted - start bubble service
                     startBubbleService()
-                    // অ্যাপটি ব্যাকগ্রাউন্ডে পাঠিয়ে দিন
                     moveTaskToBack(true)
                     Toast.makeText(this, "Floating bubble activated!", Toast.LENGTH_SHORT).show()
                 } else {
-                    // Permission denied - show message and exit
-                    Toast.makeText(this, "Permission required for floating bubble", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Permission required. Please enable 'Display over other apps'.", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
