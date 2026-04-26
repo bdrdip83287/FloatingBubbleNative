@@ -24,17 +24,31 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Clean everything
+      - name: Create fixed keystore (same for all builds)
         run: |
-          rm -rf ~/.gradle/caches/
-          rm -rf .gradle
-          chmod +x gradlew
+          # একই keystore সব build এ ব্যবহার হবে
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, OU=Android, O=Google, L=Mountain View, ST=California, C=US" -noprompt
+          
+          # Verify keystore created
+          ls -la debug.keystore
 
-      - name: Build APK
-        run: ./gradlew clean assembleDebug --stacktrace --no-daemon --no-build-cache
+      - name: Build APK with fixed signature
+        run: |
+          chmod +x gradlew
+          ./gradlew clean assembleDebug --stacktrace
+
+      - name: Get version name
+        id: version
+        run: |
+          VERSION=$(date +'%Y%m%d-%H%M%S')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Rename APK
+        run: |
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/FloatingNotes-${{ steps.version.outputs.version }}.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: floating-notes-debug
+          name: FloatingNotes-Latest
           path: app/build/outputs/apk/debug/*.apk
