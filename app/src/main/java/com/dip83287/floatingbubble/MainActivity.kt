@@ -17,7 +17,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // অ্যাপটি ব্যাকগ্রাউন্ডে পাঠানোর আগে permission চেক করুন
+        checkAndRequestPermission()
+    }
 
+    private fun checkAndRequestPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (Settings.canDrawOverlays(this)) {
                 // Permission already granted
@@ -30,7 +35,7 @@ class MainActivity : AppCompatActivity() {
                 
                 if (!alreadyRequested) {
                     prefs.edit().putBoolean(KEY_PERMISSION_REQUESTED, true).apply()
-                    openAppDetailsSettings()
+                    requestOverlayPermission()
                 } else {
                     Toast.makeText(this, "Please enable 'Display over other apps' permission in Settings", Toast.LENGTH_LONG).show()
                     finish()
@@ -42,22 +47,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openAppDetailsSettings() {
-        try {
-            // পদ্ধতি ১: অ্যাপ ডিটেইলস সেটিংস (এখানেই "Display over other apps" থাকে)
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-            intent.data = Uri.parse("package:$packageName")
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
             startActivityForResult(intent, 100)
-        } catch (e: Exception) {
-            try {
-                // পদ্ধতি ২: অ্যাপলিকেশন সেটিংস
-                val intent = Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS)
-                startActivityForResult(intent, 100)
-            } catch (e2: Exception) {
-                // পদ্ধতি ৩: ওভারলে পারমিশন সেটিংস (সব অ্যাপের লিস্ট)
-                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                startActivityForResult(intent, 100)
-            }
         }
     }
 
@@ -72,7 +68,7 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "Floating bubble activated!", Toast.LENGTH_SHORT).show()
                     finish()
                 } else {
-                    Toast.makeText(this, "Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Permission required for floating bubble", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
@@ -80,11 +76,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startBubbleService() {
-        val intent = Intent(this, FloatingBubbleService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        try {
+            val intent = Intent(this, FloatingBubbleService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }
