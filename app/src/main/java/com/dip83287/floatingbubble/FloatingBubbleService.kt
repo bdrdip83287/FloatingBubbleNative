@@ -60,10 +60,17 @@ class FloatingBubbleService : Service() {
     // ডিলিট এর জন্য
     private var deleteOverlay: View? = null
     private var isDeleting = false
+    
+    // স্ক্রিন ডাইমেনশন
+    private var screenWidth = 0
+    private var screenHeight = 0
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        val metrics = resources.displayMetrics
+        screenWidth = metrics.widthPixels
+        screenHeight = metrics.heightPixels
         loadSavedPositions()
     }
 
@@ -118,7 +125,7 @@ class FloatingBubbleService : Service() {
     }
 
     private fun getDefaultBubbleX(): Int {
-        return width - BUBBLE_SIZE - 20 // ডান পাশে
+        return screenWidth - BUBBLE_SIZE - 20 // ডান পাশে
     }
 
     private fun createBubble() {
@@ -261,7 +268,6 @@ class FloatingBubbleService : Service() {
     }
 
     private fun checkDeleteArea(y: Int) {
-        val screenHeight = resources.displayMetrics.heightPixels
         isDeleting = (y + BUBBLE_SIZE) > (screenHeight - 150)
         
         // ভিজুয়াল ফিডব্যাক
@@ -337,7 +343,7 @@ class FloatingBubbleService : Service() {
         // Title bar
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
 
         val title = TextView(this).apply {
@@ -345,7 +351,7 @@ class FloatingBubbleService : Service() {
             textSize = 18f
             setTextColor(Color.parseColor("#333333"))
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         titleBar.addView(title)
 
@@ -364,7 +370,7 @@ class FloatingBubbleService : Service() {
         // Divider
         val divider = View(this).apply {
             setBackgroundColor(Color.parseColor("#DDDDDD"))
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, 2).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 2).apply {
                 topMargin = 16
                 bottomMargin = 16
             }
@@ -387,14 +393,14 @@ class FloatingBubbleService : Service() {
         // Buttons
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = 16 }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 16 }
         }
 
         val saveBtn = Button(this).apply {
             text = "Save"
             setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = 8 }
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
             setOnClickListener { saveNote() }
         }
         buttonRow.addView(saveBtn)
@@ -403,7 +409,7 @@ class FloatingBubbleService : Service() {
             text = "Clear"
             setBackgroundColor(Color.parseColor("#FF9800"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener {
                 editText.setText("")
                 Toast.makeText(this@FloatingBubbleService, "Cleared", Toast.LENGTH_SHORT).show()
@@ -416,7 +422,7 @@ class FloatingBubbleService : Service() {
             text = "Open Full App"
             setBackgroundColor(Color.parseColor("#2196F3"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = 8 }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 8 }
             setOnClickListener {
                 val intent = Intent(this@FloatingBubbleService, MainActivity::class.java)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -431,7 +437,7 @@ class FloatingBubbleService : Service() {
             textSize = 24f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, 40).apply { topMargin = 8 }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 40).apply { topMargin = 8 }
             setOnTouchListener(NotepadDragListener())
         }
         container.addView(dragHandle)
@@ -442,7 +448,7 @@ class FloatingBubbleService : Service() {
             textSize = 20f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, 40).apply { topMargin = 8 }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 40).apply { topMargin = 8 }
             setOnTouchListener(ResizeTouchListener())
         }
         container.addView(resizeHandleView)
@@ -507,8 +513,8 @@ class FloatingBubbleService : Service() {
                     val dx = event.rawX - startX
                     val dy = event.rawY - startY
                     
-                    notepadWidth = (startWidth + dx).coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
-                    notepadHeight = (startHeight + dy).coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
+                    notepadWidth = (startWidth + dx).toInt().coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
+                    notepadHeight = (startHeight + dy).toInt().coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
                     
                     noteView?.layoutParams?.width = notepadWidth
                     noteView?.layoutParams?.height = notepadHeight
