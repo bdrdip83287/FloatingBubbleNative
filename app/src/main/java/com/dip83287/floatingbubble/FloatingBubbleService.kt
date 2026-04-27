@@ -466,8 +466,8 @@ class FloatingBubbleService : Service() {
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    startX = noteView?.layoutParams?.x ?: 0
-                    startY = noteView?.layoutParams?.y ?: 0
+                    startX = (noteView?.layoutParams as? WindowManager.LayoutParams)?.x ?: 0
+                    startY = (noteView?.layoutParams as? WindowManager.LayoutParams)?.y ?: 0
                     touchX = event.rawX
                     touchY = event.rawY
                     return true
@@ -475,15 +475,17 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - touchX
                     val dy = event.rawY - touchY
-                    noteView?.layoutParams?.x = startX + dx.toInt()
-                    noteView?.layoutParams?.y = startY + dy.toInt()
+                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
+                    params?.x = startX + dx.toInt()
+                    params?.y = startY + dy.toInt()
                     noteView?.let { windowManager.updateViewLayout(it, it.layoutParams) }
                     return true
                 }
                 MotionEvent.ACTION_UP -> {
+                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
                     saveNotepadPosition(
-                        noteView?.layoutParams?.x ?: 0,
-                        noteView?.layoutParams?.y ?: 0,
+                        params?.x ?: 0,
+                        params?.y ?: 0,
                         notepadWidth,
                         notepadHeight
                     )
@@ -516,15 +518,17 @@ class FloatingBubbleService : Service() {
                     notepadWidth = (startWidth + dx).toInt().coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
                     notepadHeight = (startHeight + dy).toInt().coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
                     
-                    noteView?.layoutParams?.width = notepadWidth
-                    noteView?.layoutParams?.height = notepadHeight
-                    noteView?.let { windowManager.updateViewLayout(it, it.layoutParams) }
+                    val params = noteView?.layoutParams
+                    params?.width = notepadWidth
+                    params?.height = notepadHeight
+                    noteView?.let { windowManager.updateViewLayout(it, params) }
                     return true
                 }
                 MotionEvent.ACTION_UP -> {
+                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
                     saveNotepadPosition(
-                        noteView?.layoutParams?.x ?: 0,
-                        noteView?.layoutParams?.y ?: 0,
+                        params?.x ?: 0,
+                        params?.y ?: 0,
                         notepadWidth,
                         notepadHeight
                     )
@@ -539,13 +543,9 @@ class FloatingBubbleService : Service() {
         if (!isExpanded) return
         
         // নোটপ্যাডের শেষ পজিশন সেভ করুন
-        noteView?.let {
-            saveNotepadPosition(
-                it.layoutParams.x,
-                it.layoutParams.y,
-                notepadWidth,
-                notepadHeight
-            )
+        val params = noteView?.layoutParams as? WindowManager.LayoutParams
+        if (params != null) {
+            saveNotepadPosition(params.x, params.y, notepadWidth, notepadHeight)
         }
         
         noteView?.animate()
