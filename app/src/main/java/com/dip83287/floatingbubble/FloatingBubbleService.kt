@@ -17,11 +17,11 @@ class FloatingBubbleService : Service() {
     // ============================================================
     // 🔧 কাস্টমাইজেশন সেকশন
     // ============================================================
-    private val BUBBLE_COLOR = "#2196F3"
+    private val BUBBLE_COLOR = "#808080"   // গোলাপী/সাদা না, ধূসর (grey)
+    private val NOTEPAD_BG_COLOR = "#808080" // ধূসর
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 80
 
-    private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val NOTEPAD_TITLE = "📝 Floating Note"
     private val NOTEPAD_MIN_WIDTH = 300
     private val NOTEPAD_MIN_HEIGHT = 400
@@ -33,9 +33,7 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
 
-    // ============================================================
-    // মেমরি ভেরিয়েবল (পজিশন, সাইজ সেভ করার জন্য)
-    // ============================================================
+    // মেমরি ভেরিয়েবল
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
     private val KEY_BUBBLE_X = "bubble_x"
@@ -55,14 +53,15 @@ class FloatingBubbleService : Service() {
     private var notepadPosX = 0
     private var notepadPosY = 0
 
-    // রিসাইজ করার জন্য ভেরিয়েবল
+    // রিসাইজ ও ড্র্যাগ
     private var isResizing = false
     private var resizeStartX = 0
     private var resizeStartY = 0
     private var resizeStartWidth = 0
     private var resizeStartHeight = 0
 
-    // delete zone
+    // ডিলিট জোন ভিউ
+    private var deleteZoneView: View? = null
     private var isDraggingToDelete = false
 
     override fun onCreate() {
@@ -70,6 +69,7 @@ class FloatingBubbleService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         loadSavedPositions()
+        createDeleteZone()
     }
 
     private fun loadSavedPositions() {
@@ -92,6 +92,49 @@ class FloatingBubbleService : Service() {
         currentNotepadHeight = height
         notepadPosX = x
         notepadPosY = y
+    }
+
+    private fun createDeleteZone() {
+        val zone = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.RED)
+            val shape = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.RED)
+            }
+            background = shape
+            setPadding(20, 20, 20, 20)
+        }
+
+        val cross = TextView(this).apply {
+            text = "✕"
+            textSize = 40f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        zone.addView(cross)
+
+        val params = WindowManager.LayoutParams(
+            100, 100,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        params.y = 50
+        zone.visibility = View.GONE
+        deleteZoneView = zone
+        windowManager.addView(deleteZoneView, params)
+    }
+
+    private fun showDeleteZone() {
+        deleteZoneView?.visibility = View.VISIBLE
+    }
+
+    private fun hideDeleteZone() {
+        deleteZoneView?.visibility = View.GONE
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -151,7 +194,6 @@ class FloatingBubbleService : Service() {
         )
         params.gravity = Gravity.TOP or Gravity.START
 
-        // ডিফল্ট পজিশন (স্ক্রিনের ডান পাশে, উপর থেকে ১৫০px নিচে)
         val displayMetrics = resources.displayMetrics
         val defaultX = prefs.getInt(KEY_BUBBLE_X, displayMetrics.widthPixels - BUBBLE_SIZE - 20)
         val defaultY = prefs.getInt(KEY_BUBBLE_Y, 150)
@@ -182,16 +224,17 @@ class FloatingBubbleService : Service() {
                         windowManager.updateViewLayout(bubbleView!!, params)
 
                         val screenHeight = displayMetrics.heightPixels
-                        if (params.y + BUBBLE_SIZE > screenHeight - 100) {
+                        if (params.y + BUBBLE_SIZE > screenHeight - 150) {
                             isDraggingToDelete = true
-                            showDeleteWarning()
+                            showDeleteZone()
                         } else {
                             isDraggingToDelete = false
-                            hideDeleteWarning()
+                            hideDeleteZone()
                         }
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
+                        hideDeleteZone()
                         if (isDraggingToDelete) {
                             deleteBubble()
                             return true
@@ -215,14 +258,6 @@ class FloatingBubbleService : Service() {
         }
 
         windowManager.addView(bubbleView, params)
-    }
-
-    private fun showDeleteWarning() {
-        // এখানে ইচ্ছে করলে টোস্ট বা ভিউ দেখাতে পারেন
-    }
-
-    private fun hideDeleteWarning() {
-        // warning hide
     }
 
     private fun deleteBubble() {
@@ -282,12 +317,14 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 24f
         }
 
+        // টাইটেল বার (ড্র্যাগ হ্যান্ডেল)
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
+            setOnTouchListener(TitleBarDragListener())
         }
 
         val title = TextView(this).apply {
@@ -402,6 +439,44 @@ class FloatingBubbleService : Service() {
         return container
     }
 
+    inner class TitleBarDragListener : View.OnTouchListener {
+        private var initialX = 0
+        private var initialY = 0
+        private var touchX = 0f
+        private var touchY = 0f
+
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = (noteView?.layoutParams as WindowManager.LayoutParams).x
+                    initialY = (noteView?.layoutParams as WindowManager.LayoutParams).y
+                    touchX = event.rawX
+                    touchY = event.rawY
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - touchX).toInt()
+                    val dy = (event.rawY - touchY).toInt()
+                    val params = noteView?.layoutParams as WindowManager.LayoutParams
+                    params.x = initialX + dx
+                    params.y = initialY + dy
+                    windowManager.updateViewLayout(noteView, params)
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    saveNotepadSizeAndPosition(
+                        currentNotepadWidth,
+                        currentNotepadHeight,
+                        (noteView?.layoutParams as WindowManager.LayoutParams).x,
+                        (noteView?.layoutParams as WindowManager.LayoutParams).y
+                    )
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
     inner class ResizeTouchListener : View.OnTouchListener {
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -513,6 +588,7 @@ class FloatingBubbleService : Service() {
         super.onDestroy()
         bubbleView?.let { windowManager.removeView(it) }
         noteView?.let { windowManager.removeView(it) }
+        deleteZoneView?.let { windowManager.removeView(it) }
     }
 
     override fun onBind(intent: Intent?) = null
