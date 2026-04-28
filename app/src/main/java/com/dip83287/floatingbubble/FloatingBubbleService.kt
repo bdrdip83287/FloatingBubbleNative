@@ -1,6 +1,6 @@
 package com.dip83287.floatingbubble
 
-import android.app.*
+import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.Color
@@ -13,111 +13,94 @@ import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
 
-    // ================= CUSTOM =================
-    private val BUBBLE_COLOR = "#808080"
-    private val NOTEPAD_BG_COLOR = "#808080"
+    // ============================================================
+    // 🔧 কাস্টমাইজেশন সেকশন
+    // ============================================================
+    
+    private val BUBBLE_COLOR = "#808080"           // বাবলের রং (Grey)
+    private val NOTEPAD_BG_COLOR = "#808080"       // নোটপ্যাডের ব্যাকগ্রাউন্ড (Grey)
     private val NOTEPAD_TITLE = "📝 Floating Note"
-
     private val NOTEPAD_MIN_WIDTH = 300
     private val NOTEPAD_MIN_HEIGHT = 400
     private val NOTEPAD_MAX_WIDTH = 600
     private val NOTEPAD_MAX_HEIGHT = 800
-
+    
     private val ANIMATION_DURATION = 300L
-
+    
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
-
+    
+    // 📍 স্টোরেজ কী - পজিশন এবং সাইজ মনে রাখার জন্য
     private val STORAGE_BUBBLE_X = "bubble_x"
     private val STORAGE_BUBBLE_Y = "bubble_y"
     private val STORAGE_NOTEPAD_X = "notepad_x"
     private val STORAGE_NOTEPAD_Y = "notepad_y"
     private val STORAGE_NOTEPAD_WIDTH = "notepad_width"
     private val STORAGE_NOTEPAD_HEIGHT = "notepad_height"
-    // ==========================================
-
+    
+    // ============================================================
+    
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
     private var noteView: View? = null
     private var isExpanded = false
     private lateinit var editText: EditText
-
+    
+    // বাবল পজিশন ট্র্যাকিং
     private var bubbleX = 0
-    private var bubbleY = 300
+    private var bubbleY = 0
     private var notepadX = 0
     private var notepadY = 0
     private var notepadWidth = NOTEPAD_MIN_WIDTH
     private var notepadHeight = NOTEPAD_MIN_HEIGHT
-
+    
+    // ডিলিট এর জন্য
     private var deleteOverlay: View? = null
     private var isDeleting = false
-
+    
+    // স্ক্রিন ডাইমেনশন
     private var screenWidth = 0
     private var screenHeight = 0
 
     override fun onCreate() {
         super.onCreate()
-
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-
         val metrics = resources.displayMetrics
         screenWidth = metrics.widthPixels
         screenHeight = metrics.heightPixels
-
         loadSavedPositions()
-
-        createNotificationChannel()
-        startForegroundServiceSafe()
+        
+        // বাবল যেন স্ট্যান্ডবাই থাকে (Foreground service)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForeground(1001, android.app.Notification.Builder(this, "bubble_channel")
+                .setContentTitle("Floating Notes")
+                .setContentText("Active")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .build())
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             !Settings.canDrawOverlays(this)
         ) {
-            Toast.makeText(this, "Overlay permission required", Toast.LENGTH_SHORT).show()
             stopSelf()
             return START_NOT_STICKY
         }
 
         if (bubbleView == null) {
-            Handler(Looper.getMainLooper()).post { createBubble() }
+            Handler(Looper.getMainLooper()).post {
+                createBubble()
+            }
         }
 
         return START_STICKY
     }
 
-    // ================= NOTIFICATION FIX =================
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "bubble_channel",
-                "Floating Bubble",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun startForegroundServiceSafe() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notification = Notification.Builder(this, "bubble_channel")
-                .setContentTitle("Floating Notes")
-                .setContentText("Active")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .build()
-
-            startForeground(1001, notification)
-        }
-    }
-
-    // ===================================================
-
+    // 📍 সেভ করা পজিশন লোড করুন
     private fun loadSavedPositions() {
         val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
-        bubbleX = prefs.getInt(STORAGE_BUBBLE_X, screenWidth - 120)
+        bubbleX = prefs.getInt(STORAGE_BUBBLE_X, getDefaultBubbleX())
         bubbleY = prefs.getInt(STORAGE_BUBBLE_Y, 300)
         notepadX = prefs.getInt(STORAGE_NOTEPAD_X, 0)
         notepadY = prefs.getInt(STORAGE_NOTEPAD_Y, 0)
@@ -126,12 +109,32 @@ class FloatingBubbleService : Service() {
     }
 
     private fun saveBubblePosition(x: Int, y: Int) {
-        getSharedPreferences("notes_prefs", MODE_PRIVATE)
-            .edit().putInt(STORAGE_BUBBLE_X, x).putInt(STORAGE_BUBBLE_Y, y).apply()
+        val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
+        prefs.edit().putInt(STORAGE_BUBBLE_X, x).putInt(STORAGE_BUBBLE_Y, y).apply()
+        bubbleX = x
+        bubbleY = y
+    }
+
+    private fun saveNotepadPosition(x: Int, y: Int, width: Int, height: Int) {
+        val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
+        prefs.edit().apply {
+            putInt(STORAGE_NOTEPAD_X, x)
+            putInt(STORAGE_NOTEPAD_Y, y)
+            putInt(STORAGE_NOTEPAD_WIDTH, width)
+            putInt(STORAGE_NOTEPAD_HEIGHT, height)
+            apply()
+        }
+        notepadX = x
+        notepadY = y
+        notepadWidth = width
+        notepadHeight = height
+    }
+
+    private fun getDefaultBubbleX(): Int {
+        return screenWidth - 80 - 20 // ডান পাশে
     }
 
     private fun createBubble() {
-
         val bubbleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -142,24 +145,32 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        val icon = TextView(this).apply {
+        val iconView = TextView(this).apply {
             text = "📝"
             textSize = 28f
             setTextColor(Color.WHITE)
         }
+        bubbleLayout.addView(iconView)
 
-        bubbleLayout.addView(icon)
+        val countView = TextView(this).apply {
+            text = "0"
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.RED)
+            setPadding(6, 3, 6, 3)
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        bubbleLayout.addView(countView)
+
         bubbleView = bubbleLayout
 
         val params = WindowManager.LayoutParams(
-            120,
-            120,
-            if (Build.VERSION.SDK_INT >= 26)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            80,
+            80,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
 
@@ -167,91 +178,400 @@ class FloatingBubbleService : Service() {
         params.x = bubbleX
         params.y = bubbleY
 
-        try {
-            windowManager.addView(bubbleView, params)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        loadNoteCount(countView)
 
-        // ================= DRAG =================
-        var startX = 0
-        var startY = 0
-        var touchX = 0f
-        var touchY = 0f
+        // 🖱️ ড্র্যাগ এবং ডিলিট এর জন্য টাচ লিসেনার (লং প্রেস সরানো হয়েছে)
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var isDragging = false
 
         bubbleView?.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    startX = params.x
-                    startY = params.y
-                    touchX = event.rawX
-                    touchY = event.rawY
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    showDeleteOverlay()
                     true
                 }
-
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX - touchX
-                    val dy = event.rawY - touchY
-
-                    params.x = startX + dx.toInt()
-                    params.y = startY + dy.toInt()
-
-                    try {
-                        bubbleView?.let {
-                            windowManager.updateViewLayout(it, params)
+                    val dx = event.rawX - initialTouchX
+                    val dy = event.rawY - initialTouchY
+                    if (abs(dx) > 10 || abs(dy) > 10) {
+                        isDragging = true
+                    }
+                    params.x = (params.x + dx).toInt()
+                    params.y = (params.y + dy).toInt()
+                    windowManager.updateViewLayout(bubbleView!!, params)
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    
+                    // চেক করুন নিচের দিকে নিয়ে যাচ্ছে কিনা
+                    checkDeleteArea(params.y)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    hideDeleteOverlay()
+                    if (!isDragging && abs(event.rawX - initialTouchX) < 10 && abs(event.rawY - initialTouchY) < 10) {
+                        expandToNotePad()
+                    } else {
+                        if (isDeleting) {
+                            // বাবল ডিলিট করুন
+                            stopSelf()
+                        } else {
+                            saveBubblePosition(params.x, params.y)
                         }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
                     }
                     true
                 }
-
-                MotionEvent.ACTION_UP -> {
-                    saveBubblePosition(params.x, params.y)
-                    expandToNotePad()
-                    true
-                }
-
-                else -> false
             }
+            false
+        }
+
+        windowManager.addView(bubbleView, params)
+    }
+
+    // 🗑️ ডিলিট এরিয়া দেখানোর জন্য (লাল গোলাকার ক্রস আইকন)
+    private fun showDeleteOverlay() {
+        if (deleteOverlay != null) return
+        
+        val overlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(20, 20, 20, 20)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#E74C3C"))
+            }
+        }
+        
+        val crossIcon = TextView(this).apply {
+            text = "✕"
+            textSize = 32f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        overlay.addView(crossIcon)
+        
+        val params = WindowManager.LayoutParams(
+            100,
+            100,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        
+        params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        params.y = 50
+        
+        windowManager.addView(overlay, params)
+        deleteOverlay = overlay
+        isDeleting = false
+    }
+
+    private fun hideDeleteOverlay() {
+        deleteOverlay?.let {
+            windowManager.removeView(it)
+            deleteOverlay = null
+        }
+        isDeleting = false
+    }
+
+    private fun checkDeleteArea(y: Int) {
+        isDeleting = (y + 80) > (screenHeight - 150)
+        
+        // ভিজুয়াল ফিডব্যাক - রং পরিবর্তন
+        val overlayBg = deleteOverlay?.background as? GradientDrawable
+        if (isDeleting) {
+            overlayBg?.setColor(Color.parseColor("#C0392B"))
+        } else {
+            overlayBg?.setColor(Color.parseColor("#E74C3C"))
         }
     }
 
-    // ================= NOTEPAD =================
-
     private fun expandToNotePad() {
-        bubbleView?.let { windowManager.removeView(it) }
-        bubbleView = null
+        if (isExpanded) return
+        
+        bubbleView?.animate()
+            ?.scaleX(0.5f)
+            ?.scaleY(0.5f)
+            ?.alpha(0f)
+            ?.setDuration(ANIMATION_DURATION)
+            ?.withEndAction {
+                bubbleView?.let { windowManager.removeView(it) }
+                bubbleView = null
+                showNotePad()
+            }
+            ?.start()
+    }
 
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            setPadding(20, 20, 20, 20)
-        }
+    private fun showNotePad() {
+        if (noteView != null) return
+        isExpanded = true
 
-        editText = EditText(this)
-        layout.addView(editText)
+        val container = createResizableNotePad()
+        noteView = container
 
         val params = WindowManager.LayoutParams(
             notepadWidth,
             notepadHeight,
-            if (Build.VERSION.SDK_INT >= 26)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         )
 
-        params.gravity = Gravity.CENTER
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = notepadX
+        params.y = notepadY
 
-        noteView = layout
-        windowManager.addView(layout, params)
+        if (notepadX == 0 && notepadY == 0) {
+            params.gravity = Gravity.CENTER
+            params.x = 0
+            params.y = 0
+        }
+
+        windowManager.addView(noteView, params)
+        
+        noteView?.alpha = 0f
+        noteView?.animate()
+            ?.alpha(1f)
+            ?.scaleX(1f)
+            ?.scaleY(1f)
+            ?.setDuration(ANIMATION_DURATION)
+            ?.start()
+    }
+
+    private fun createResizableNotePad(): View {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
+            setPadding(24, 24, 24, 24)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                elevation = 24f
+            }
+        }
+
+        // Title bar (ড্র্যাগ হ্যান্ডেল)
+        val titleBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setBackgroundColor(Color.parseColor("#666666"))
+            setPadding(16, 12, 16, 12)
+            // ড্র্যাগ লিসেনার
+            setOnTouchListener(TitleBarDragListener())
+        }
+
+        val title = TextView(this).apply {
+            text = NOTEPAD_TITLE
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleBar.addView(title)
+
+        val minimizeBtn = TextView(this).apply {
+            text = "−"
+            textSize = 28f
+            setTextColor(Color.WHITE)
+            setPadding(16, 0, 8, 0)
+            setOnClickListener {
+                collapseToBubble()
+            }
+        }
+        titleBar.addView(minimizeBtn)
+        container.addView(titleBar)
+
+        // Divider
+        val divider = View(this).apply {
+            setBackgroundColor(Color.parseColor("#AAAAAA"))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 2).apply {
+                topMargin = 16
+                bottomMargin = 16
+            }
+        }
+        container.addView(divider)
+
+        // Edit Text
+        editText = EditText(this).apply {
+            hint = "Write your note here..."
+            minHeight = 250
+            gravity = Gravity.TOP
+            setPadding(16, 16, 16, 16)
+            setBackgroundColor(Color.parseColor("#EEEEEE"))
+        }
+        container.addView(editText)
+
+        val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
+        editText.setText(prefs.getString(STORAGE_LAST_NOTE, ""))
+
+        // Buttons
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 16 }
+        }
+
+        val saveBtn = Button(this).apply {
+            text = "Save"
+            setBackgroundColor(Color.parseColor("#4CAF50"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
+            setOnClickListener { saveNote() }
+        }
+        buttonRow.addView(saveBtn)
+
+        val clearBtn = Button(this).apply {
+            text = "Clear"
+            setBackgroundColor(Color.parseColor("#FF9800"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                editText.setText("")
+                Toast.makeText(this@FloatingBubbleService, "Cleared", Toast.LENGTH_SHORT).show()
+            }
+        }
+        buttonRow.addView(clearBtn)
+        container.addView(buttonRow)
+
+        val openAppBtn = Button(this).apply {
+            text = "Open Full App"
+            setBackgroundColor(Color.parseColor("#2196F3"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 8 }
+            setOnClickListener {
+                val intent = Intent(this@FloatingBubbleService, MainActivity::class.java)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+            }
+        }
+        container.addView(openAppBtn)
+
+        return container
+    }
+
+    // 🖱️ টাইটেল বার ড্র্যাগ করার জন্য
+    inner class TitleBarDragListener : View.OnTouchListener {
+        private var startX = 0
+        private var startY = 0
+        private var touchX = 0f
+        private var touchY = 0f
+
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = (noteView?.layoutParams as? WindowManager.LayoutParams)?.x ?: 0
+                    startY = (noteView?.layoutParams as? WindowManager.LayoutParams)?.y ?: 0
+                    touchX = event.rawX
+                    touchY = event.rawY
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - touchX
+                    val dy = event.rawY - touchY
+                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
+                    params?.x = startX + dx.toInt()
+                    params?.y = startY + dy.toInt()
+                    noteView?.let { windowManager.updateViewLayout(it, it.layoutParams) }
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
+                    saveNotepadPosition(
+                        params?.x ?: 0,
+                        params?.y ?: 0,
+                        notepadWidth,
+                        notepadHeight
+                    )
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    private fun collapseToBubble() {
+        if (!isExpanded) return
+        
+        // নোটপ্যাডের শেষ পজিশন এবং সাইজ সেভ করুন
+        val params = noteView?.layoutParams as? WindowManager.LayoutParams
+        if (params != null) {
+            saveNotepadPosition(params.x, params.y, notepadWidth, notepadHeight)
+        }
+        
+        noteView?.animate()
+            ?.alpha(0f)
+            ?.scaleX(0.5f)
+            ?.scaleY(0.5f)
+            ?.setDuration(ANIMATION_DURATION)
+            ?.withEndAction {
+                noteView?.let { windowManager.removeView(it) }
+                noteView = null
+                isExpanded = false
+                createBubble()
+                
+                bubbleView?.alpha = 0f
+                bubbleView?.scaleX = 0.5f
+                bubbleView?.scaleY = 0.5f
+                bubbleView?.animate()
+                    ?.alpha(1f)
+                    ?.scaleX(1f)
+                    ?.scaleY(1f)
+                    ?.setDuration(ANIMATION_DURATION)
+                    ?.start()
+            }
+            ?.start()
+    }
+
+    private fun loadNoteCount(countView: TextView) {
+        val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
+        val count = prefs.getInt(STORAGE_NOTE_COUNT, 0)
+        if (count > 0) {
+            countView.text = count.toString()
+            countView.visibility = View.VISIBLE
+        } else {
+            countView.visibility = View.GONE
+        }
+    }
+
+    private fun updateNoteCount() {
+        val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
+        val count = prefs.getInt(STORAGE_NOTE_COUNT, 0)
+        if (bubbleView != null) {
+            val countView = (bubbleView as? LinearLayout)?.getChildAt(1) as? TextView
+            if (countView != null && count > 0) {
+                countView.text = count.toString()
+                countView.visibility = View.VISIBLE
+            } else if (countView != null) {
+                countView.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun saveNote() {
+        val noteContent = editText.text.toString()
+        if (noteContent.isNotEmpty()) {
+            val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
+            val currentCount = prefs.getInt(STORAGE_NOTE_COUNT, 0)
+            prefs.edit().apply {
+                putString(STORAGE_LAST_NOTE, noteContent)
+                putInt(STORAGE_NOTE_COUNT, currentCount + 1)
+                apply()
+            }
+            updateNoteCount()
+            Toast.makeText(this, "Note saved! Total: ${currentCount + 1}", Toast.LENGTH_SHORT).show()
+            editText.setText("")
+        } else {
+            Toast.makeText(this, "Please write something", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         bubbleView?.let { windowManager.removeView(it) }
         noteView?.let { windowManager.removeView(it) }
+        deleteOverlay?.let { windowManager.removeView(it) }
     }
 
     override fun onBind(intent: Intent?) = null
