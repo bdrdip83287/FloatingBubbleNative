@@ -151,8 +151,9 @@ class FloatingBubbleService : Service() {
         )
         params.gravity = Gravity.TOP or Gravity.START
 
-        // ডিফল্ট পজিশন (ডান পাশে, ১৫০px নিচে)
-        val defaultX = prefs.getInt(KEY_BUBBLE_X, (resources.displayMetrics.widthPixels - BUBBLE_SIZE) / 2)
+        // ডিফল্ট পজিশন (স্ক্রিনের ডান পাশে, উপর থেকে ১৫০px নিচে)
+        val displayMetrics = resources.displayMetrics
+        val defaultX = prefs.getInt(KEY_BUBBLE_X, displayMetrics.widthPixels - BUBBLE_SIZE - 20)
         val defaultY = prefs.getInt(KEY_BUBBLE_Y, 150)
         params.x = defaultX
         params.y = defaultY
@@ -180,8 +181,7 @@ class FloatingBubbleService : Service() {
                         params.y = initialY + (event.rawY - touchY).toInt()
                         windowManager.updateViewLayout(bubbleView!!, params)
 
-                        // delete zone detection (screen bottom)
-                        val screenHeight = resources.displayMetrics.heightPixels
+                        val screenHeight = displayMetrics.heightPixels
                         if (params.y + BUBBLE_SIZE > screenHeight - 100) {
                             isDraggingToDelete = true
                             showDeleteWarning()
@@ -284,7 +284,10 @@ class FloatingBubbleService : Service() {
 
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
 
         val title = TextView(this).apply {
@@ -292,7 +295,7 @@ class FloatingBubbleService : Service() {
             textSize = 18f
             setTextColor(Color.parseColor("#333333"))
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         titleBar.addView(title)
 
@@ -308,11 +311,12 @@ class FloatingBubbleService : Service() {
 
         val divider = View(this).apply {
             setBackgroundColor(Color.parseColor("#DDDDDD"))
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 2)
-            (layoutParams as LinearLayout.LayoutParams).apply {
-                topMargin = 16
-                bottomMargin = 16
-            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 2
+            )
+            lp.topMargin = 16
+            lp.bottomMargin = 16
+            layoutParams = lp
         }
         container.addView(divider)
 
@@ -330,16 +334,21 @@ class FloatingBubbleService : Service() {
 
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-            (layoutParams as LinearLayout.LayoutParams).topMargin = 16
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = 16
+            layoutParams = lp
         }
 
         val saveBtn = Button(this).apply {
             text = "Save"
             setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = 8
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            lp.marginEnd = 8
+            layoutParams = lp
             setOnClickListener { saveNote() }
         }
         buttonRow.addView(saveBtn)
@@ -348,7 +357,8 @@ class FloatingBubbleService : Service() {
             text = "Clear"
             setBackgroundColor(Color.parseColor("#FF9800"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = lp
             setOnClickListener {
                 editText.setText("")
                 Toast.makeText(this@FloatingBubbleService, "Cleared", Toast.LENGTH_SHORT).show()
@@ -361,8 +371,12 @@ class FloatingBubbleService : Service() {
             text = "Open Full App"
             setBackgroundColor(Color.parseColor("#2196F3"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-            (layoutParams as LinearLayout.LayoutParams).topMargin = 8
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = 8
+            layoutParams = lp
             setOnClickListener {
                 val intent = Intent(this@FloatingBubbleService, MainActivity::class.java)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -376,8 +390,11 @@ class FloatingBubbleService : Service() {
             textSize = 20f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 40)
-            (layoutParams as LinearLayout.LayoutParams).topMargin = 8
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 40
+            )
+            lp.topMargin = 8
+            layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
         }
         container.addView(resizeHandleView)
