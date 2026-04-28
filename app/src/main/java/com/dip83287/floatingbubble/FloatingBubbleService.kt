@@ -9,6 +9,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.*
 import android.provider.Settings
 import android.view.*
+import android.view.animation.*
 import android.widget.*
 import kotlin.math.abs
 
@@ -17,8 +18,8 @@ class FloatingBubbleService : Service() {
     // ============================================================
     // 🔧 কাস্টমাইজেশন সেকশন
     // ============================================================
-    private val BUBBLE_COLOR = "#808080"   // গোলাপী/সাদা না, ধূসর (grey)
-    private val NOTEPAD_BG_COLOR = "#808080" // ধূসর
+    private val BUBBLE_COLOR = "#808080"
+    private val NOTEPAD_BG_COLOR = "#808080"
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 80
 
@@ -28,7 +29,7 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_WIDTH = 600
     private val NOTEPAD_MAX_HEIGHT = 800
 
-    private val ANIMATION_DURATION = 300L
+    private val ANIMATION_DURATION = 400L
 
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
@@ -53,16 +54,17 @@ class FloatingBubbleService : Service() {
     private var notepadPosX = 0
     private var notepadPosY = 0
 
-    // রিসাইজ ও ড্র্যাগ
     private var isResizing = false
     private var resizeStartX = 0
     private var resizeStartY = 0
     private var resizeStartWidth = 0
     private var resizeStartHeight = 0
 
-    // ডিলিট জোন ভিউ
     private var deleteZoneView: View? = null
     private var isDraggingToDelete = false
+
+    // স্প্রিং অ্যানিমেশনের জন্য
+    private val springInterpolator = OvershootInterpolator(2f)
 
     override fun onCreate() {
         super.onCreate()
@@ -151,6 +153,7 @@ class FloatingBubbleService : Service() {
             }
         }
 
+        // সার্ভিসকে স্টিকি করে রাখা
         return START_STICKY
     }
 
@@ -169,6 +172,7 @@ class FloatingBubbleService : Service() {
             text = BUBBLE_ICON
             textSize = 28f
             setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
         }
         bubbleLayout.addView(iconView)
 
@@ -202,12 +206,13 @@ class FloatingBubbleService : Service() {
 
         loadNoteCount(countView)
 
-        bubbleView?.setOnTouchListener(object : View.OnTouchListener {
-            private var initialX = 0
-            private var initialY = 0
-            private var touchX = 0f
-            private var touchY = 0f
+        var isDragging = false
+        var initialX = 0
+        var initialY = 0
+        var touchX = 0f
+        var touchY = 0f
 
+        bubbleView?.setOnTouchListener(object : View.OnTouchListener {
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
@@ -215,12 +220,15 @@ class FloatingBubbleService : Service() {
                         initialY = params.y
                         touchX = event.rawX
                         touchY = event.rawY
+                        isDragging = false
                         isDraggingToDelete = false
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params.x = initialX + (event.rawX - touchX).toInt()
-                        params.y = initialY + (event.rawY - touchY).toInt()
+                        val dx = (event.rawX - touchX).toInt()
+                        val dy = (event.rawY - touchY).toInt()
+                        params.x = initialX + dx
+                        params.y = initialY + dy
                         windowManager.updateViewLayout(bubbleView!!, params)
 
                         val screenHeight = displayMetrics.heightPixels
@@ -231,6 +239,8 @@ class FloatingBubbleService : Service() {
                             isDraggingToDelete = false
                             hideDeleteZone()
                         }
+
+                        if (abs(dx) > 10 || abs(dy) > 10) isDragging = true
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
@@ -239,10 +249,14 @@ class FloatingBubbleService : Service() {
                             deleteBubble()
                             return true
                         }
-                        if (abs(event.rawX - touchX) < 10 && abs(event.rawY - touchY) < 10) {
+                        if (isDragging) {
+                            // স্প্রিং এফেক্ট সহ ডকিং
+                            val finalX = params.x.coerceIn(0, displayMetrics.widthPixels - BUBBLE_SIZE)
+                            val finalY = params.y.coerceIn(0, displayMetrics.heightPixels - BUBBLE_SIZE)
+                            animateBubbleToPosition(finalX, finalY)
+                            saveBubblePosition(finalX, finalY)
+                        } else if (abs(event.rawX - touchX) < 10 && abs(event.rawY - touchY) < 10) {
                             expandToNotePad()
-                        } else {
-                            saveBubblePosition(params.x, params.y)
                         }
                         return true
                     }
@@ -260,6 +274,23 @@ class FloatingBubbleService : Service() {
         windowManager.addView(bubbleView, params)
     }
 
+    private fun animateBubbleToPosition(x: Int, y: Int) {
+        val params = bubbleView?.layoutParams as WindowManager.LayoutParams
+        val startX = params.x
+        val startY = params.y
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = ANIMATION_DURATION
+            interpolator = springInterpolator
+            addUpdateListener {
+                val progress = it.animatedValue as Float
+                params.x = (startX + (x - startX) * progress).toInt()
+                params.y = (startY + (y - startY) * progress).toInt()
+                windowManager.updateViewLayout(bubbleView, params)
+            }
+            start()
+        }
+    }
+
     private fun deleteBubble() {
         stopSelf()
     }
@@ -268,10 +299,12 @@ class FloatingBubbleService : Service() {
         if (isExpanded) return
 
         bubbleView?.animate()
-            ?.scaleX(0.5f)
-            ?.scaleY(0.5f)
+            ?.scaleX(0f)
+            ?.scaleY(0f)
             ?.alpha(0f)
             ?.setDuration(ANIMATION_DURATION)
+            ?.interpolator = springInterpolator
+        bubbleView?.animate()
             ?.withEndAction {
                 bubbleView?.let { windowManager.removeView(it) }
                 bubbleView = null
@@ -301,11 +334,14 @@ class FloatingBubbleService : Service() {
         windowManager.addView(noteView, params)
 
         noteView?.alpha = 0f
+        noteView?.scaleX = 0.7f
+        noteView?.scaleY = 0.7f
         noteView?.animate()
             ?.alpha(1f)
             ?.scaleX(1f)
             ?.scaleY(1f)
             ?.setDuration(ANIMATION_DURATION)
+            ?.interpolator = springInterpolator
             ?.start()
     }
 
@@ -528,9 +564,11 @@ class FloatingBubbleService : Service() {
 
         noteView?.animate()
             ?.alpha(0f)
-            ?.scaleX(0.5f)
-            ?.scaleY(0.5f)
+            ?.scaleX(0f)
+            ?.scaleY(0f)
             ?.setDuration(ANIMATION_DURATION)
+            ?.interpolator = springInterpolator
+        noteView?.animate()
             ?.withEndAction {
                 noteView?.let { windowManager.removeView(it) }
                 noteView = null
@@ -544,6 +582,7 @@ class FloatingBubbleService : Service() {
                     ?.scaleX(1f)
                     ?.scaleY(1f)
                     ?.setDuration(ANIMATION_DURATION)
+                    ?.interpolator = springInterpolator
                     ?.start()
             }
             ?.start()
