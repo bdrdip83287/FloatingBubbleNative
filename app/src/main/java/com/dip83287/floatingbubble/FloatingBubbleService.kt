@@ -1,5 +1,9 @@
 package com.dip83287.floatingbubble
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -9,9 +13,15 @@ import android.os.*
 import android.provider.Settings
 import android.view.*
 import android.widget.*
+import androidx.core.app.NotificationCompat
 import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
+
+    companion object {
+        private const val NOTIFICATION_ID = 1001
+        private const val CHANNEL_ID = "floating_bubble_channel"
+    }
 
     // ============================================================
     // 🔧 কাস্টমাইজেশন সেকশন
@@ -46,7 +56,6 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     
-    // বাবল পজিশন ট্র্যাকিং
     private var bubbleX = 0
     private var bubbleY = 0
     private var notepadX = 0
@@ -54,11 +63,9 @@ class FloatingBubbleService : Service() {
     private var notepadWidth = NOTEPAD_MIN_WIDTH
     private var notepadHeight = NOTEPAD_MIN_HEIGHT
     
-    // ডিলিট এর জন্য
     private var deleteOverlay: View? = null
     private var isDeleting = false
     
-    // স্ক্রিন ডাইমেনশন
     private var screenWidth = 0
     private var screenHeight = 0
 
@@ -68,16 +75,43 @@ class FloatingBubbleService : Service() {
         val metrics = resources.displayMetrics
         screenWidth = metrics.widthPixels
         screenHeight = metrics.heightPixels
-        loadSavedPositions()
         
-        // বাবল যেন স্ট্যান্ডবাই থাকে (Foreground service)
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, createNotification())
+        
+        loadSavedPositions()
+    }
+
+    private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForeground(1001, android.app.Notification.Builder(this, "bubble_channel")
-                .setContentTitle("Floating Notes")
-                .setContentText("Active")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .build())
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Floating Notes Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps floating bubble active"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
         }
+    }
+
+    private fun createNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Floating Notes")
+            .setContentText("Active - Tap to open")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -97,7 +131,6 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
-    // 📍 সেভ করা পজিশন লোড করুন
     private fun loadSavedPositions() {
         val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
         bubbleX = prefs.getInt(STORAGE_BUBBLE_X, getDefaultBubbleX())
@@ -131,7 +164,7 @@ class FloatingBubbleService : Service() {
     }
 
     private fun getDefaultBubbleX(): Int {
-        return screenWidth - 80 - 20 // ডান পাশে
+        return screenWidth - 80 - 20
     }
 
     private fun createBubble() {
@@ -180,7 +213,6 @@ class FloatingBubbleService : Service() {
 
         loadNoteCount(countView)
 
-        // 🖱️ ড্র্যাগ এবং ডিলিট এর জন্য টাচ লিসেনার (লং প্রেস সরানো হয়েছে)
         var initialTouchX = 0f
         var initialTouchY = 0f
         var isDragging = false
@@ -206,7 +238,6 @@ class FloatingBubbleService : Service() {
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     
-                    // চেক করুন নিচের দিকে নিয়ে যাচ্ছে কিনা
                     checkDeleteArea(params.y)
                     true
                 }
@@ -216,7 +247,6 @@ class FloatingBubbleService : Service() {
                         expandToNotePad()
                     } else {
                         if (isDeleting) {
-                            // বাবল ডিলিট করুন
                             stopSelf()
                         } else {
                             saveBubblePosition(params.x, params.y)
@@ -228,13 +258,9 @@ class FloatingBubbleService : Service() {
             false
         }
 
-        // ❌ লং প্রেস ডিলিট সরানো হয়েছে - এখন কিছু করবে না
-        // bubbleView?.setOnLongClickListener { ... } সরানো হয়েছে
-
         windowManager.addView(bubbleView, params)
     }
 
-    // 🗑️ ডিলিট এরিয়া দেখানোর জন্য (লাল গোলাকার ক্রস আইকন)
     private fun showDeleteOverlay() {
         if (deleteOverlay != null) return
         
@@ -284,7 +310,6 @@ class FloatingBubbleService : Service() {
     private fun checkDeleteArea(y: Int) {
         isDeleting = (y + 80) > (screenHeight - 150)
         
-        // ভিজুয়াল ফিডব্যাক - রং পরিবর্তন
         val overlayBg = deleteOverlay?.background as? GradientDrawable
         if (isDeleting) {
             overlayBg?.setColor(Color.parseColor("#C0392B"))
@@ -356,13 +381,11 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // Title bar (ড্র্যাগ হ্যান্ডেল)
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setBackgroundColor(Color.parseColor("#666666"))
             setPadding(16, 12, 16, 12)
-            // ড্র্যাগ লিসেনার
             setOnTouchListener(TitleBarDragListener())
         }
 
@@ -387,7 +410,6 @@ class FloatingBubbleService : Service() {
         titleBar.addView(minimizeBtn)
         container.addView(titleBar)
 
-        // Divider
         val divider = View(this).apply {
             setBackgroundColor(Color.parseColor("#AAAAAA"))
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 2).apply {
@@ -397,7 +419,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // Edit Text
         editText = EditText(this).apply {
             hint = "Write your note here..."
             minHeight = 250
@@ -410,7 +431,6 @@ class FloatingBubbleService : Service() {
         val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
         editText.setText(prefs.getString(STORAGE_LAST_NOTE, ""))
 
-        // Buttons
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 16 }
@@ -454,7 +474,6 @@ class FloatingBubbleService : Service() {
         return container
     }
 
-    // 🖱️ টাইটেল বার ড্র্যাগ করার জন্য
     inner class TitleBarDragListener : View.OnTouchListener {
         private var startX = 0
         private var startY = 0
@@ -494,53 +513,9 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    inner class ResizeTouchListener : View.OnTouchListener {
-        private var startWidth = 0
-        private var startHeight = 0
-        private var startX = 0f
-        private var startY = 0f
-
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    startWidth = notepadWidth
-                    startHeight = notepadHeight
-                    startX = event.rawX
-                    startY = event.rawY
-                    return true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX - startX
-                    val dy = event.rawY - startY
-                    
-                    notepadWidth = (startWidth + dx).toInt().coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
-                    notepadHeight = (startHeight + dy).toInt().coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
-                    
-                    val params = noteView?.layoutParams
-                    params?.width = notepadWidth
-                    params?.height = notepadHeight
-                    noteView?.let { windowManager.updateViewLayout(it, params) }
-                    return true
-                }
-                MotionEvent.ACTION_UP -> {
-                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
-                    saveNotepadPosition(
-                        params?.x ?: 0,
-                        params?.y ?: 0,
-                        notepadWidth,
-                        notepadHeight
-                    )
-                    return true
-                }
-            }
-            return false
-        }
-    }
-
     private fun collapseToBubble() {
         if (!isExpanded) return
         
-        // নোটপ্যাডের শেষ পজিশন এবং সাইজ সেভ করুন
         val params = noteView?.layoutParams as? WindowManager.LayoutParams
         if (params != null) {
             saveNotepadPosition(params.x, params.y, notepadWidth, notepadHeight)
