@@ -1,5 +1,6 @@
 package com.dip83287.floatingbubble
 
+import android.animation.ValueAnimator
 import android.app.Service
 import android.content.Intent
 import android.content.SharedPreferences
@@ -366,7 +367,7 @@ class FloatingBubbleService : Service() {
         val title = TextView(this).apply {
             text = NOTEPAD_TITLE
             textSize = 18f
-            setTextColor(Color.parseColor("#333333"))
+            setTextColor(Color.WHITE)
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
