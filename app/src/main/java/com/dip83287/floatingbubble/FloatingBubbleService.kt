@@ -1,6 +1,5 @@
 package com.dip83287.floatingbubble
 
-import android.animation.ValueAnimator
 import android.app.Service
 import android.content.Intent
 import android.content.SharedPreferences
@@ -276,20 +275,12 @@ class FloatingBubbleService : Service() {
     }
 
     private fun animateBubbleToPosition(x: Int, y: Int) {
-        val params = bubbleView?.layoutParams as WindowManager.LayoutParams
-        val startX = params.x
-        val startY = params.y
-        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = ANIMATION_DURATION
-            interpolator = springInterpolator
-            addUpdateListener {
-                val progress = it.animatedValue as Float
-                params.x = (startX + (x - startX) * progress).toInt()
-                params.y = (startY + (y - startY) * progress).toInt()
-                windowManager.updateViewLayout(bubbleView, params)
-            }
-            start()
-        }
+        bubbleView?.animate()
+            ?.x(x.toFloat())
+            ?.y(y.toFloat())
+            ?.setDuration(ANIMATION_DURATION)
+            ?.setInterpolator(springInterpolator)
+            ?.start()
     }
 
     private fun deleteBubble() {
@@ -304,8 +295,7 @@ class FloatingBubbleService : Service() {
             ?.scaleY(0f)
             ?.alpha(0f)
             ?.setDuration(ANIMATION_DURATION)
-            ?.interpolator = springInterpolator
-        bubbleView?.animate()
+            ?.setInterpolator(springInterpolator)
             ?.withEndAction {
                 bubbleView?.let { windowManager.removeView(it) }
                 bubbleView = null
@@ -342,7 +332,7 @@ class FloatingBubbleService : Service() {
             ?.scaleX(1f)
             ?.scaleY(1f)
             ?.setDuration(ANIMATION_DURATION)
-            ?.interpolator = springInterpolator
+            ?.setInterpolator(springInterpolator)
             ?.start()
     }
 
@@ -367,7 +357,7 @@ class FloatingBubbleService : Service() {
         val title = TextView(this).apply {
             text = NOTEPAD_TITLE
             textSize = 18f
-            setTextColor(Color.WHITE)
+            setTextColor(Color.parseColor("#333333"))
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
@@ -568,8 +558,7 @@ class FloatingBubbleService : Service() {
             ?.scaleX(0f)
             ?.scaleY(0f)
             ?.setDuration(ANIMATION_DURATION)
-            ?.interpolator = springInterpolator
-        noteView?.animate()
+            ?.setInterpolator(springInterpolator)
             ?.withEndAction {
                 noteView?.let { windowManager.removeView(it) }
                 noteView = null
@@ -583,7 +572,7 @@ class FloatingBubbleService : Service() {
                     ?.scaleX(1f)
                     ?.scaleY(1f)
                     ?.setDuration(ANIMATION_DURATION)
-                    ?.interpolator = springInterpolator
+                    ?.setInterpolator(springInterpolator)
                     ?.start()
             }
             ?.start()
