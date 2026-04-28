@@ -5,7 +5,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
@@ -19,23 +18,14 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // একটি সাধারণ ভিউ তৈরি করুন (এটি অ্যাপ ওপেন করলেই দেখাবে)
-        val textView = TextView(this).apply {
-            text = "Starting Floating Notes...\nPlease wait"
-            textSize = 18f
-            gravity = android.view.Gravity.CENTER
-            setPadding(32, 32, 32, 32)
-        }
-        setContentView(textView)
-        
-        // Permission চেক করুন
+        // শুধু permission চেক করুন, কোন UI দেখাবেন না
         checkAndRequestPermission()
     }
 
     private fun checkAndRequestPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (Settings.canDrawOverlays(this)) {
-                // Permission already granted
+                // Permission already granted - start bubble and close app
                 startBubbleServiceAndClose()
             } else {
                 val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -45,8 +35,8 @@ class MainActivity : AppCompatActivity() {
                     prefs.edit().putBoolean(KEY_PERMISSION_REQUESTED, true).apply()
                     requestOverlayPermission()
                 } else {
-                    Toast.makeText(this, "Please enable 'Display over other apps' permission in Settings", Toast.LENGTH_LONG).show()
-                    finish()
+                    Toast.makeText(this, "Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
+                    requestOverlayPermission()
                 }
             }
         } else {
@@ -87,7 +77,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 startService(intent)
             }
-            Toast.makeText(this, "Floating bubble started!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Floating bubble activated!", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
@@ -95,6 +85,5 @@ class MainActivity : AppCompatActivity() {
         
         // অ্যাপ বন্ধ করে দিন (শুধু bubble থাকবে)
         moveTaskToBack(true)
-        finish()
     }
 }
