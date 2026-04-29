@@ -1,5 +1,9 @@
 package com.dip83287.floatingbubble
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.SharedPreferences
@@ -11,6 +15,7 @@ import android.provider.Settings
 import android.view.*
 import android.view.animation.*
 import android.widget.*
+import androidx.core.app.NotificationCompat
 import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
@@ -29,13 +34,13 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_WIDTH = 600
     private val NOTEPAD_MAX_HEIGHT = 800
 
-    private val ANIMATION_DURATION = 400L
+    private val ANIMATION_DURATION = 300L
+    private val CHANNEL_ID = "floating_bubble_channel"
+    private val NOTIFICATION_ID = 9999
 
+    // স্টোরেজ কী
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
-
-    // মেমরি ভেরিয়েবল
-    private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
     private val KEY_BUBBLE_X = "bubble_x"
     private val KEY_BUBBLE_Y = "bubble_y"
@@ -45,6 +50,7 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_Y = "notepad_y"
 
     private lateinit var windowManager: WindowManager
+    private lateinit var prefs: SharedPreferences
     private var bubbleView: View? = null
     private var noteView: View? = null
     private var isExpanded = false
@@ -54,17 +60,9 @@ class FloatingBubbleService : Service() {
     private var notepadPosX = 0
     private var notepadPosY = 0
 
-    private var isResizing = false
-    private var resizeStartX = 0
-    private var resizeStartY = 0
-    private var resizeStartWidth = 0
-    private var resizeStartHeight = 0
-
     private var deleteZoneView: View? = null
     private var isDraggingToDelete = false
-
-    // স্প্রিং অ্যানিমেশনের জন্য
-    private val springInterpolator = OvershootInterpolator(2f)
+    private var isDragging = false
 
     override fun onCreate() {
         super.onCreate()
@@ -72,6 +70,39 @@ class FloatingBubbleService : Service() {
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         loadSavedPositions()
         createDeleteZone()
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, createNotification())
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Floating Bubble Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps floating bubble alive"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Floating Notes")
+            .setContentText("Bubble is active")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
     }
 
     private fun loadSavedPositions() {
@@ -153,7 +184,6 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // সার্ভিসকে স্টিকি করে রাখা
         return START_STICKY
     }
 
@@ -206,13 +236,12 @@ class FloatingBubbleService : Service() {
 
         loadNoteCount(countView)
 
-        var isDragging = false
-        var initialX = 0
-        var initialY = 0
-        var touchX = 0f
-        var touchY = 0f
-
         bubbleView?.setOnTouchListener(object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var touchX = 0f
+            private var touchY = 0f
+
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
@@ -250,10 +279,9 @@ class FloatingBubbleService : Service() {
                             return true
                         }
                         if (isDragging) {
-                            // স্প্রিং এফেক্ট সহ ডকিং
                             val finalX = params.x.coerceIn(0, displayMetrics.widthPixels - BUBBLE_SIZE)
                             val finalY = params.y.coerceIn(0, displayMetrics.heightPixels - BUBBLE_SIZE)
-                            animateBubbleToPosition(finalX, finalY)
+                            animateBubbleToSpringPosition(finalX, finalY)
                             saveBubblePosition(finalX, finalY)
                         } else if (abs(event.rawX - touchX) < 10 && abs(event.rawY - touchY) < 10) {
                             expandToNotePad()
@@ -274,12 +302,12 @@ class FloatingBubbleService : Service() {
         windowManager.addView(bubbleView, params)
     }
 
-    private fun animateBubbleToPosition(x: Int, y: Int) {
+    private fun animateBubbleToSpringPosition(x: Int, y: Int) {
         bubbleView?.animate()
             ?.x(x.toFloat())
             ?.y(y.toFloat())
             ?.setDuration(ANIMATION_DURATION)
-            ?.setInterpolator(springInterpolator)
+            ?.setInterpolator(OvershootInterpolator(1.2f))
             ?.start()
     }
 
@@ -287,6 +315,7 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
+    // 🔥 মেসেঞ্জার স্টাইলের স্মুথ এক্সপান্ড
     private fun expandToNotePad() {
         if (isExpanded) return
 
@@ -295,16 +324,16 @@ class FloatingBubbleService : Service() {
             ?.scaleY(0f)
             ?.alpha(0f)
             ?.setDuration(ANIMATION_DURATION)
-            ?.setInterpolator(springInterpolator)
+            ?.setInterpolator(AccelerateInterpolator())
             ?.withEndAction {
                 bubbleView?.let { windowManager.removeView(it) }
                 bubbleView = null
-                showNotePad()
+                showNotePadWithMessengerStyle()
             }
             ?.start()
     }
 
-    private fun showNotePad() {
+    private fun showNotePadWithMessengerStyle() {
         if (noteView != null) return
         isExpanded = true
 
@@ -324,6 +353,7 @@ class FloatingBubbleService : Service() {
 
         windowManager.addView(noteView, params)
 
+        // মেসেঞ্জার স্টাইলের পপ ইন
         noteView?.alpha = 0f
         noteView?.scaleX = 0.7f
         noteView?.scaleY = 0.7f
@@ -332,7 +362,7 @@ class FloatingBubbleService : Service() {
             ?.scaleX(1f)
             ?.scaleY(1f)
             ?.setDuration(ANIMATION_DURATION)
-            ?.setInterpolator(springInterpolator)
+            ?.setInterpolator(OvershootInterpolator(1f))
             ?.start()
     }
 
@@ -368,7 +398,7 @@ class FloatingBubbleService : Service() {
             textSize = 28f
             setTextColor(Color.parseColor("#C0392B"))
             setPadding(16, 0, 8, 0)
-            setOnClickListener { collapseToBubble() }
+            setOnClickListener { collapseToBubbleWithMessengerStyle() }
         }
         titleBar.addView(minimizeBtn)
         container.addView(titleBar)
@@ -546,7 +576,8 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun collapseToBubble() {
+    // 🔥 মেসেঞ্জার স্টাইলের স্মুথ কোলাপ্স
+    private fun collapseToBubbleWithMessengerStyle() {
         if (!isExpanded) return
 
         val currentNotepadX = (noteView?.layoutParams as WindowManager.LayoutParams).x
@@ -558,21 +589,21 @@ class FloatingBubbleService : Service() {
             ?.scaleX(0f)
             ?.scaleY(0f)
             ?.setDuration(ANIMATION_DURATION)
-            ?.setInterpolator(springInterpolator)
+            ?.setInterpolator(AccelerateInterpolator())
             ?.withEndAction {
                 noteView?.let { windowManager.removeView(it) }
                 noteView = null
                 isExpanded = false
                 createBubble()
                 bubbleView?.alpha = 0f
-                bubbleView?.scaleX = 0.5f
-                bubbleView?.scaleY = 0.5f
+                bubbleView?.scaleX = 0f
+                bubbleView?.scaleY = 0f
                 bubbleView?.animate()
                     ?.alpha(1f)
                     ?.scaleX(1f)
                     ?.scaleY(1f)
                     ?.setDuration(ANIMATION_DURATION)
-                    ?.setInterpolator(springInterpolator)
+                    ?.setInterpolator(OvershootInterpolator(1f))
                     ?.start()
             }
             ?.start()
