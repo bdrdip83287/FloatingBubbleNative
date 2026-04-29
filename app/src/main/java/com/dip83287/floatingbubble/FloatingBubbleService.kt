@@ -60,6 +60,13 @@ class FloatingBubbleService : Service() {
     private var notepadPosX = 0
     private var notepadPosY = 0
 
+    // রিসাইজ ভেরিয়েবল
+    private var isResizing = false
+    private var resizeStartX = 0
+    private var resizeStartY = 0
+    private var resizeStartWidth = 0
+    private var resizeStartHeight = 0
+
     private var deleteZoneView: View? = null
     private var isDraggingToDelete = false
     private var isDragging = false
@@ -315,7 +322,6 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🔥 মেসেঞ্জার স্টাইলের স্মুথ এক্সপান্ড
     private fun expandToNotePad() {
         if (isExpanded) return
 
@@ -353,7 +359,6 @@ class FloatingBubbleService : Service() {
 
         windowManager.addView(noteView, params)
 
-        // মেসেঞ্জার স্টাইলের পপ ইন
         noteView?.alpha = 0f
         noteView?.scaleX = 0.7f
         noteView?.scaleY = 0.7f
@@ -374,7 +379,6 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 24f
         }
 
-        // টাইটেল বার (ড্র্যাগ হ্যান্ডেল)
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -576,7 +580,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🔥 মেসেঞ্জার স্টাইলের স্মুথ কোলাপ্স
     private fun collapseToBubbleWithMessengerStyle() {
         if (!isExpanded) return
 
