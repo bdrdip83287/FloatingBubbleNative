@@ -1,5 +1,7 @@
 package com.dip83287.floatingbubble
 
+import android.animation.Animator
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -318,13 +320,13 @@ class FloatingBubbleService : Service() {
                     params.x = (startX + (targetX - startX) * fraction).toInt()
                     windowManager.updateViewLayout(bubbleView!!, params)
                 }
-                addListener(object : android.animation.Animator.AnimatorListener {
-                    override fun onAnimationStart(animation: android.animation.Animator) {}
-                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                addListener(object : Animator.AnimatorListener {
+                    override fun onAnimationStart(animation: Animator) {}
+                    override fun onAnimationEnd(animation: Animator) {
                         saveBubblePosition(params.x, params.y)
                     }
-                    override fun onAnimationCancel(animation: android.animation.Animator) {}
-                    override fun onAnimationRepeat(animation: android.animation.Animator) {}
+                    override fun onAnimationCancel(animation: Animator) {}
+                    override fun onAnimationRepeat(animation: Animator) {}
                 })
                 start()
             }
