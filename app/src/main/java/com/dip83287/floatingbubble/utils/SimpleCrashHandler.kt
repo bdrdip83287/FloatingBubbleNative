@@ -21,7 +21,7 @@ class SimpleCrashHandler(private val context: Context) : Thread.UncaughtExceptio
         log.crash("CrashHandler", throwable)
         
         Handler(Looper.getMainLooper()).post {
-            Toast.makeText(context, "App crashed! Log saved in /storage/emulated/0/FloatingNotesLogs/", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "App crashed! Log saved.", Toast.LENGTH_LONG).show()
         }
         
         Thread.sleep(500)

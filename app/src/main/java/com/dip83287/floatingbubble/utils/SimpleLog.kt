@@ -11,7 +11,6 @@ import java.util.*
 class SimpleLog private constructor(context: Context) {
 
     companion object {
-        private const val TAG = "FloatingNotes"
         private const val LOG_FILE_NAME = "floating_notes_log.txt"
         
         @Volatile
@@ -33,8 +32,7 @@ class SimpleLog private constructor(context: Context) {
             logDir.mkdirs()
         }
         logFile = File(logDir, LOG_FILE_NAME)
-        writeLog("=== APP STARTED ===")
-        writeLog("Time: ${dateFormat.format(Date())}")
+        writeLog("=== APP STARTED at ${dateFormat.format(Date())} ===")
     }
 
     private fun writeLog(message: String) {
@@ -43,9 +41,9 @@ class SimpleLog private constructor(context: Context) {
                 writer.write("$message\n")
                 writer.flush()
             }
-            Log.d(TAG, message)
+            Log.d("FloatingNotes", message)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to write log: ${e.message}")
+            Log.e("FloatingNotes", "Failed to write log: ${e.message}")
         }
     }
 
@@ -69,7 +67,7 @@ class SimpleLog private constructor(context: Context) {
 
     fun e(tag: String, msg: String, throwable: Throwable? = null) {
         val errorMsg = if (throwable != null) {
-            "$msg\n${throwable.stackTrace.joinToString("\n") { "  at $it" }}"
+            "$msg\n${throwable.stackTrace.joinToString("\n") { "    at $it" }}"
         } else {
             msg
         }
@@ -78,13 +76,13 @@ class SimpleLog private constructor(context: Context) {
 
     fun crash(tag: String, throwable: Throwable) {
         val crashMsg = """
-            ========== CRASH DETECTED ==========
+            ========== CRASH ==========
             Thread: ${Thread.currentThread().name}
             Exception: ${throwable.javaClass.simpleName}
             Message: ${throwable.message}
             StackTrace:
-            ${throwable.stackTrace.joinToString("\n") { "  at $it" }}
-            ========== END CRASH ==========
+            ${throwable.stackTrace.joinToString("\n") { "    at $it" }}
+            ========== END ==========
         """.trimIndent()
         writeLog(formatMessage("CRASH", tag, crashMsg))
     }
@@ -94,15 +92,6 @@ class SimpleLog private constructor(context: Context) {
             logFile.readText()
         } catch (e: Exception) {
             "Unable to read log: ${e.message}"
-        }
-    }
-
-    fun clearLog() {
-        try {
-            logFile.writeText("")
-            writeLog("=== LOG CLEARED ===")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to clear log: ${e.message}")
         }
     }
 

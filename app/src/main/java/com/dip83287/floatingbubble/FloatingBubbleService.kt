@@ -10,18 +10,22 @@ import android.provider.Settings
 import android.view.*
 import android.widget.*
 import com.dip83287.floatingbubble.utils.SimpleLog
+import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
+    private var noteView: View? = null
+    private var isExpanded = false
+    private lateinit var editText: EditText
     private lateinit var log: SimpleLog
 
     override fun onCreate() {
         super.onCreate()
         log = SimpleLog.getInstance(this)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        log.i("FloatingBubbleService", "onCreate called")
+        log.i("FloatingBubbleService", "onCreate - Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -46,7 +50,7 @@ class FloatingBubbleService : Service() {
 
     private fun createBubble() {
         try {
-            log.i("FloatingBubbleService", "Creating bubble")
+            log.d("FloatingBubbleService", "Creating bubble")
             
             val bubbleLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -54,7 +58,7 @@ class FloatingBubbleService : Service() {
                 setPadding(20, 20, 20, 20)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#2196F3"))
+                    setColor(Color.parseColor("#808080"))
                 }
             }
 
@@ -88,8 +92,12 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        log.i("FloatingBubbleService", "onDestroy called")
-        bubbleView?.let { windowManager.removeView(it) }
+        try {
+            bubbleView?.let { windowManager.removeView(it) }
+            log.i("FloatingBubbleService", "Service destroyed")
+        } catch (e: Exception) {
+            log.e("FloatingBubbleService", "Error in onDestroy", e)
+        }
     }
 
     override fun onBind(intent: Intent?) = null
