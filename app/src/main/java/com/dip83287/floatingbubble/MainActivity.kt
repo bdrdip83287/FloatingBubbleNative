@@ -10,22 +10,22 @@ import androidx.appcompat.app.AppCompatActivity
 import com.dip83287.floatingbubble.utils.*
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var lm: LogManager
-    private lateinit var ft: FlowTracker
+    private lateinit var logManager: LogManager
+    private lateinit var flowTracker: FlowTracker
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        lm = LogManager.getInstance(this)
-        ft = FlowTracker(lm)
+        logManager = LogManager.getInstance(this)
+        flowTracker = FlowTracker(logManager)
         CrashHandler.init(this)
 
-        ft.trackEnter("MainActivity", "onCreate")
-        BaseLifecycleTracker.attach(this, lm)
+        flowTracker.trackEnter("MainActivity", "onCreate")
+        BaseLifecycleTracker.attach(this, logManager)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
-                ft.trackEvent("MainActivity", "Requesting permission")
+                flowTracker.trackEvent("MainActivity", "Requesting permission")
                 startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")), 100)
             } else {
                 startBubbleService()
@@ -35,21 +35,26 @@ class MainActivity : AppCompatActivity() {
             startBubbleService()
             finish()
         }
-        ft.trackExit("MainActivity", "onCreate")
+        flowTracker.trackExit("MainActivity", "onCreate")
     }
 
     private fun startBubbleService() {
         try {
-            startForegroundService(Intent(this, FloatingBubbleService::class.java))
-            ft.trackEvent("MainActivity", "Bubble service started")
+            val intent = Intent(this, FloatingBubbleService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            flowTracker.trackEvent("MainActivity", "Bubble service started")
         } catch (e: Exception) {
-            ft.trackError("MainActivity", "Failed to start service", e)
+            flowTracker.trackError("MainActivity", "Failed to start service", e)
         }
     }
 
-    override fun onActivityResult(req: Int, res: Int, data: Intent?) {
-        super.onActivityResult(req, res, data)
-        if (req == 100 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 100 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
             startBubbleService()
             finish()
         }

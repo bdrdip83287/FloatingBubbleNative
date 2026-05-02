@@ -61,11 +61,16 @@ class LogManager private constructor(context: Context) {
         logDeviceInfo()
     }
 
-    private fun cleanAllLogs(logDir: File) { logDir.listFiles()?.forEach { it.delete() } }
-    private fun getAppVersion(): String = try {
-        val pkgInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
-        "${pkgInfo.versionName} (${pkgInfo.versionCode})"
-    } catch (e: Exception) { "Unknown" }
+    private fun cleanAllLogs(logDir: File) {
+        logDir.listFiles()?.forEach { it.delete() }
+    }
+
+    private fun getAppVersion(): String {
+        return try {
+            val pkgInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+            "${pkgInfo.versionName} (${pkgInfo.versionCode})"
+        } catch (e: Exception) { "Unknown" }
+    }
 
     private fun startLogWriter() {
         Thread {
@@ -101,12 +106,12 @@ class LogManager private constructor(context: Context) {
     }
 
     private fun logDeviceInfo() {
-        i("=== DEVICE INFO ===")
-        i("Manufacturer: ${Build.MANUFACTURER}")
-        i("Model: ${Build.MODEL}")
-        i("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-        i("App Version: ${getAppVersion()}")
-        i("=== END ===")
+        i("DeviceInfo", "=== DEVICE INFO ===")
+        i("DeviceInfo", "Manufacturer: ${Build.MANUFACTURER}")
+        i("DeviceInfo", "Model: ${Build.MODEL}")
+        i("DeviceInfo", "Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        i("DeviceInfo", "App Version: ${getAppVersion()}")
+        i("DeviceInfo", "=== END ===")
     }
 
     private fun formatLog(level: LogLevel, tag: String, msg: String, th: Throwable? = null): String {
@@ -116,15 +121,42 @@ class LogManager private constructor(context: Context) {
         return "$ts ${level.emoji} [${level.name}] [$thread] [$tag] $msg$thStr"
     }
 
-    fun v(tag: String, msg: String) { logQueue.add(formatLog(LogLevel.VERBOSE, tag, msg)); Log.v(TAG, msg) }
-    fun d(tag: String, msg: String) { logQueue.add(formatLog(LogLevel.DEBUG, tag, msg)); Log.d(TAG, msg) }
-    fun i(tag: String, msg: String) { logQueue.add(formatLog(LogLevel.INFO, tag, msg)); Log.i(TAG, msg) }
-    fun w(tag: String, msg: String, th: Throwable? = null) { logQueue.add(formatLog(LogLevel.WARN, tag, msg, th)); Log.w(TAG, msg, th) }
-    fun e(tag: String, msg: String, th: Throwable? = null) { logQueue.add(formatLog(LogLevel.ERROR, tag, msg, th)); Log.e(TAG, msg, th) }
-    fun fatal(tag: String, msg: String, th: Throwable? = null) { logQueue.add(formatLog(LogLevel.FATAL, tag, msg, th)); Log.e(TAG, "FATAL: $msg", th) }
-    fun flow(tag: String, msg: String) { logQueue.add(formatLog(LogLevel.FLOW, tag, "🔄 $msg")); Log.i(TAG, "FLOW: $msg") }
-    fun state(tag: String, msg: String) { logQueue.add(formatLog(LogLevel.STATE, tag, "📊 $msg")); Log.i(TAG, "STATE: $msg") }
-    fun crash(tag: String, msg: String, th: Throwable) { logQueue.add(formatLog(LogLevel.CRASH, tag, "💥 $msg", th)); Log.e(TAG, "CRASH: $msg", th) }
+    fun v(tag: String, msg: String) { 
+        logQueue.add(formatLog(LogLevel.VERBOSE, tag, msg))
+        Log.v(TAG, msg)
+    }
+    fun d(tag: String, msg: String) { 
+        logQueue.add(formatLog(LogLevel.DEBUG, tag, msg))
+        Log.d(TAG, msg)
+    }
+    fun i(tag: String, msg: String) { 
+        logQueue.add(formatLog(LogLevel.INFO, tag, msg))
+        Log.i(TAG, msg)
+    }
+    fun w(tag: String, msg: String, th: Throwable? = null) { 
+        logQueue.add(formatLog(LogLevel.WARN, tag, msg, th))
+        Log.w(TAG, msg, th)
+    }
+    fun e(tag: String, msg: String, th: Throwable? = null) { 
+        logQueue.add(formatLog(LogLevel.ERROR, tag, msg, th))
+        Log.e(TAG, msg, th)
+    }
+    fun fatal(tag: String, msg: String, th: Throwable? = null) { 
+        logQueue.add(formatLog(LogLevel.FATAL, tag, msg, th))
+        Log.e(TAG, "FATAL: $msg", th)
+    }
+    fun flow(tag: String, msg: String) { 
+        logQueue.add(formatLog(LogLevel.FLOW, tag, "🔄 $msg"))
+        Log.i(TAG, "FLOW: $msg")
+    }
+    fun state(tag: String, msg: String) { 
+        logQueue.add(formatLog(LogLevel.STATE, tag, "📊 $msg"))
+        Log.i(TAG, "STATE: $msg")
+    }
+    fun crash(tag: String, msg: String, th: Throwable) { 
+        logQueue.add(formatLog(LogLevel.CRASH, tag, "💥 $msg", th))
+        Log.e(TAG, "CRASH: $msg", th)
+    }
 
     fun getAllLogs(): String {
         val logs = StringBuilder()
@@ -135,6 +167,10 @@ class LogManager private constructor(context: Context) {
         return logs.toString()
     }
 
-    fun clearLogs() { getLogFiles()?.forEach { it.delete() }; i("LogManager", "Logs cleared") }
+    fun clearLogs() { 
+        getLogFiles()?.forEach { it.delete() }
+        i("LogManager", "Logs cleared")
+    }
+    
     private fun getLogFiles() = File(appContext.filesDir, LOG_DIR).listFiles { f -> f.name.startsWith("floating_notes_") }
 }

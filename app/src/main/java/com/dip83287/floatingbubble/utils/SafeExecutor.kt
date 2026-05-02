@@ -8,12 +8,28 @@ class SafeExecutor(private val logManager: LogManager) {
 
     fun <T> execute(tag: String, opName: String, block: () -> T): T? {
         logManager.flow(tag, "→ $opName")
-        return try { block().also { logManager.flow(tag, "← $opName ✓") } }
-        catch (e: Exception) { logManager.e(tag, "✗ $opName: ${e.message}", e); null }
+        return try {
+            block().also { logManager.flow(tag, "← $opName ✓") }
+        } catch (e: Exception) {
+            logManager.e(tag, "✗ $opName: ${e.message}", e)
+            null
+        }
     }
 
-    fun executeAsync(tag: String, opName: String, block: () -> Unit) { Thread { execute(tag, opName, block) }.start() }
-    fun executeOnMain(tag: String, opName: String, block: () -> Unit) { mainHandler.post { execute(tag, opName, block) } }
-    inline fun <T> tryOrNull(tag: String, opName: String, block: () -> T): T? = try { block() }
-        catch (e: Exception) { logManager.e(tag, "Silent error in $opName: ${e.message}", e); null }
+    fun executeAsync(tag: String, opName: String, block: () -> Unit) {
+        Thread { execute(tag, opName, block) }.start()
+    }
+
+    fun executeOnMain(tag: String, opName: String, block: () -> Unit) {
+        mainHandler.post { execute(tag, opName, block) }
+    }
+
+    fun <T> tryOrNull(tag: String, opName: String, block: () -> T): T? {
+        return try {
+            block()
+        } catch (e: Exception) {
+            logManager.e(tag, "Silent error in $opName: ${e.message}", e)
+            null
+        }
+    }
 }
