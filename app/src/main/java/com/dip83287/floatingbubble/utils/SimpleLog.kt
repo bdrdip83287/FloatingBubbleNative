@@ -26,7 +26,7 @@ class SimpleLog private constructor(context: Context) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
 
     init {
-        // ✅ অ্যাপের অভ্যন্তরীণ স্টোরেজ ব্যবহার করুন (permission লাগে না)
+        // অ্যাপের অভ্যন্তরীণ স্টোরেজ ব্যবহার করুন (permission লাগে না)
         val logDir = File(context.filesDir, "logs")
         if (!logDir.exists()) {
             logDir.mkdirs()
@@ -97,4 +97,15 @@ class SimpleLog private constructor(context: Context) {
     }
 
     fun getLogFile(): File = logFile
+
+    // ✅ এখানে clearLog() মেথড যোগ করা হলো
+    fun clearLog() {
+        try {
+            logFile.writeText("")
+            writeLog("=== LOG CLEARED at ${dateFormat.format(Date())} ===")
+            writeLog("Log file path: ${logFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.e("FloatingNotes", "Failed to clear log: ${e.message}")
+        }
+    }
 }
