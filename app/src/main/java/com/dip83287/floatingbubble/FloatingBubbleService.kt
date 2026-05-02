@@ -1,5 +1,8 @@
 package com.dip83287.floatingbubble
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -9,6 +12,7 @@ import android.os.*
 import android.provider.Settings
 import android.view.*
 import android.widget.*
+import androidx.core.app.NotificationCompat
 import com.dip83287.floatingbubble.utils.SimpleLog
 import kotlin.math.abs
 
@@ -20,12 +24,45 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var log: SimpleLog
+    
+    companion object {
+        private const val NOTIFICATION_ID = 1001
+        private const val CHANNEL_ID = "floating_bubble_channel"
+    }
 
     override fun onCreate() {
         super.onCreate()
         log = SimpleLog.getInstance(this)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         log.i("FloatingBubbleService", "onCreate - Service created")
+        
+        // ✅ Foreground service এর জন্য notification channel তৈরি করুন
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, createNotification())
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Floating Bubble",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps floating bubble alive"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Floating Notes")
+            .setContentText("Tap bubble to write note")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
