@@ -62,27 +62,33 @@ class MainActivity : AppCompatActivity() {
         linearLayout.addView(title)
         
         val statusText = TextView(this).apply {
-            text = "✅ Floating bubble is running in background.\n\n📁 Log file location:\n${filesDir}/logs/floating_notes_log.txt\n\nUse Termux to view logs:\ncat ${filesDir}/logs/floating_notes_log.txt"
+            text = "✅ Floating bubble is running in background.\n\n📁 Log file location:\n${filesDir}/logs/floating_notes_log.txt"
             textSize = 12f
             setPadding(0, 0, 0, 32)
         }
         linearLayout.addView(statusText)
         
+        // ✅ লগ দেখার বাটন
         val viewLogBtn = Button(this).apply {
             text = "📖 View Log"
             setOnClickListener { viewLog() }
         }
         linearLayout.addView(viewLogBtn)
         
+        // ✅ লগ শেয়ারের বাটন
         val shareLogBtn = Button(this).apply {
             text = "📤 Share Log"
             setOnClickListener { shareLog() }
         }
         linearLayout.addView(shareLogBtn)
         
+        // ✅ লগ ক্লিয়ারের বাটন
         val clearLogBtn = Button(this).apply {
             text = "🗑️ Clear Log"
-            setOnClickListener { clearLog() }
+            setOnClickListener { 
+                log.clearLog()
+                Toast.makeText(this@MainActivity, "Log cleared", Toast.LENGTH_SHORT).show()
+            }
         }
         linearLayout.addView(clearLogBtn)
         
@@ -100,7 +106,7 @@ class MainActivity : AppCompatActivity() {
         val logContent = log.getLogContent()
         val scrollView = ScrollView(this)
         val textView = TextView(this).apply {
-            text = logContent
+            text = if (logContent.isNotEmpty()) logContent else "No logs found.\n\nMake sure the app is running and generating logs."
             textSize = 10f
             setPadding(16, 16, 16, 16)
             typeface = android.graphics.Typeface.MONOSPACE
@@ -108,6 +114,7 @@ class MainActivity : AppCompatActivity() {
         scrollView.addView(textView)
         setContentView(scrollView)
         
+        // ব্যাক বাটন
         val backBtn = Button(this).apply {
             text = "← Back"
             setOnClickListener { showMainUI() }
@@ -117,18 +124,16 @@ class MainActivity : AppCompatActivity() {
     
     private fun shareLog() {
         val logContent = log.getLogContent()
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, logContent)
-            putExtra(Intent.EXTRA_SUBJECT, "Floating Notes Log")
+        if (logContent.isNotEmpty()) {
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, logContent)
+                putExtra(Intent.EXTRA_SUBJECT, "Floating Notes Log")
+            }
+            startActivity(Intent.createChooser(shareIntent, "Share Log"))
+        } else {
+            Toast.makeText(this, "No logs to share", Toast.LENGTH_SHORT).show()
         }
-        startActivity(Intent.createChooser(shareIntent, "Share Log"))
-    }
-    
-    private fun clearLog() {
-        log.clearLog()
-        Toast.makeText(this, "Log cleared", Toast.LENGTH_SHORT).show()
-        showMainUI()
     }
     
     private fun startBubbleService() {
