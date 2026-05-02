@@ -1,7 +1,6 @@
 package com.dip83287.floatingbubble.utils
 
 import android.content.Context
-import android.os.Environment
 import android.util.Log
 import java.io.File
 import java.io.FileWriter
@@ -27,12 +26,14 @@ class SimpleLog private constructor(context: Context) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
 
     init {
-        val logDir = File(Environment.getExternalStorageDirectory(), "FloatingNotesLogs")
+        // ✅ অ্যাপের অভ্যন্তরীণ স্টোরেজ ব্যবহার করুন (permission লাগে না)
+        val logDir = File(context.filesDir, "logs")
         if (!logDir.exists()) {
             logDir.mkdirs()
         }
         logFile = File(logDir, LOG_FILE_NAME)
         writeLog("=== APP STARTED at ${dateFormat.format(Date())} ===")
+        writeLog("Log file path: ${logFile.absolutePath}")
     }
 
     private fun writeLog(message: String) {
