@@ -11,26 +11,21 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.dip83287.floatingbubble.utils.SimpleCrashHandler
-import com.dip83287.floatingbubble.utils.SimpleLog
+import com.dip83287.floatingbubble.utils.EmergencyLog
 
 class MainActivity : AppCompatActivity() {
-    
-    private lateinit var log: SimpleLog
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Initialize logging
-        SimpleCrashHandler.init(this)
-        log = SimpleLog.getInstance(this)
+        // ইমার্জেন্সি লগিং শুরু করুন - সবচেয়ে প্রথমে
+        EmergencyLog.init(this)
+        EmergencyLog.log("MainActivity: onCreate called")
         
-        log.i("MainActivity", "onCreate called")
-        
-        // Start service in background
+        // Start service
         startBubbleService()
         
-        // Show log viewer directly
+        // Show log viewer
         showLogViewer()
     }
     
@@ -42,16 +37,16 @@ class MainActivity : AppCompatActivity() {
         }
         
         val title = TextView(this).apply {
-            text = "📝 Floating Notes - Log Viewer"
+            text = "📝 Emergency Log Viewer"
             textSize = 20f
             setPadding(0, 0, 0, 32)
         }
         linearLayout.addView(title)
         
         // লগ কন্টেন্ট দেখান
-        val logContent = log.getLogContent()
+        val logContent = EmergencyLog.getLogContent()
         val logTextView = TextView(this).apply {
-            text = if (logContent.isNotEmpty()) logContent else "No logs yet.\n\nApp will log here when running."
+            text = if (logContent.isNotEmpty()) logContent else "No logs yet."
             textSize = 11f
             setPadding(16, 16, 16, 16)
             typeface = android.graphics.Typeface.MONOSPACE
@@ -63,7 +58,7 @@ class MainActivity : AppCompatActivity() {
         val refreshBtn = Button(this).apply {
             text = "🔄 Refresh"
             setOnClickListener {
-                logTextView.text = log.getLogContent()
+                logTextView.text = EmergencyLog.getLogContent()
             }
         }
         linearLayout.addView(refreshBtn)
@@ -71,12 +66,12 @@ class MainActivity : AppCompatActivity() {
         val shareBtn = Button(this).apply {
             text = "📤 Share Log"
             setOnClickListener {
-                val content = log.getLogContent()
+                val content = EmergencyLog.getLogContent()
                 if (content.isNotEmpty()) {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, content)
-                        putExtra(Intent.EXTRA_SUBJECT, "Floating Notes Log")
+                        putExtra(Intent.EXTRA_SUBJECT, "Floating Notes Emergency Log")
                     }
                     startActivity(Intent.createChooser(shareIntent, "Share Log"))
                 } else {
@@ -86,18 +81,10 @@ class MainActivity : AppCompatActivity() {
         }
         linearLayout.addView(shareBtn)
         
-        val clearBtn = Button(this).apply {
-            text = "🗑️ Clear Log"
-            setOnClickListener {
-                log.clearLog()
-                logTextView.text = log.getLogContent()
-                Toast.makeText(this@MainActivity, "Log cleared", Toast.LENGTH_SHORT).show()
-            }
-        }
-        linearLayout.addView(clearBtn)
-        
         scrollView.addView(linearLayout)
         setContentView(scrollView)
+        
+        EmergencyLog.log("MainActivity: Log viewer displayed")
     }
     
     private fun startBubbleService() {
@@ -105,12 +92,13 @@ class MainActivity : AppCompatActivity() {
             val intent = Intent(this, FloatingBubbleService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
+                EmergencyLog.log("MainActivity: startForegroundService called")
             } else {
                 startService(intent)
+                EmergencyLog.log("MainActivity: startService called")
             }
-            log.i("MainActivity", "Bubble service started")
         } catch (e: Exception) {
-            log.e("MainActivity", "Failed to start service: ${e.message}", e)
+            EmergencyLog.logError("MainActivity: Failed to start service", e)
         }
     }
 }
