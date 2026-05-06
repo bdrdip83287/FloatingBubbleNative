@@ -27,28 +27,11 @@ class MainActivity : AppCompatActivity() {
         
         log.i("MainActivity", "onCreate called")
         
-        // Just show the log viewer directly (no service start on UI thread)
-        showLogViewer()
+        // Start service in background
+        startBubbleService()
         
-        // Check permission and start service in background
-        checkAndStartService()
-    }
-    
-    private fun checkAndStartService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                log.w("MainActivity", "Need overlay permission")
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivityForResult(intent, 100)
-            } else {
-                startBubbleService()
-            }
-        } else {
-            startBubbleService()
-        }
+        // Show log viewer directly
+        showLogViewer()
     }
     
     private fun showLogViewer() {
@@ -127,19 +110,7 @@ class MainActivity : AppCompatActivity() {
             }
             log.i("MainActivity", "Bubble service started")
         } catch (e: Exception) {
-            log.e("MainActivity", "Failed to start service", e)
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 100 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (Settings.canDrawOverlays(this)) {
-                log.i("MainActivity", "Permission granted")
-                startBubbleService()
-            } else {
-                log.w("MainActivity", "Permission denied")
-            }
+            log.e("MainActivity", "Failed to start service: ${e.message}", e)
         }
     }
 }
