@@ -27,27 +27,31 @@ class MainActivity : AppCompatActivity() {
         
         log.i("MainActivity", "onCreate called")
         
+        // Just show the log viewer directly (no service start on UI thread)
+        showLogViewer()
+        
+        // Check permission and start service in background
+        checkAndStartService()
+    }
+    
+    private fun checkAndStartService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
-                log.w("MainActivity", "Overlay permission not granted, requesting")
-                Toast.makeText(this, "Please grant overlay permission", Toast.LENGTH_LONG).show()
+                log.w("MainActivity", "Need overlay permission")
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
                 )
                 startActivityForResult(intent, 100)
             } else {
-                log.i("MainActivity", "Overlay permission already granted")
                 startBubbleService()
-                showMainUI()
             }
         } else {
             startBubbleService()
-            showMainUI()
         }
     }
     
-    private fun showMainUI() {
+    private fun showLogViewer() {
         val scrollView = ScrollView(this)
         val linearLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -55,85 +59,62 @@ class MainActivity : AppCompatActivity() {
         }
         
         val title = TextView(this).apply {
-            text = "📝 Floating Notes"
-            textSize = 24f
+            text = "📝 Floating Notes - Log Viewer"
+            textSize = 20f
             setPadding(0, 0, 0, 32)
         }
         linearLayout.addView(title)
         
-        val statusText = TextView(this).apply {
-            text = "✅ Floating bubble is running in background.\n\n📁 Log file location:\n${filesDir}/logs/floating_notes_log.txt"
-            textSize = 12f
-            setPadding(0, 0, 0, 32)
+        // লগ কন্টেন্ট দেখান
+        val logContent = log.getLogContent()
+        val logTextView = TextView(this).apply {
+            text = if (logContent.isNotEmpty()) logContent else "No logs yet.\n\nApp will log here when running."
+            textSize = 11f
+            setPadding(16, 16, 16, 16)
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(android.graphics.Color.parseColor("#333333"))
+            setBackgroundColor(android.graphics.Color.parseColor("#F5F5F5"))
         }
-        linearLayout.addView(statusText)
+        linearLayout.addView(logTextView)
         
-        // ✅ লগ দেখার বাটন
-        val viewLogBtn = Button(this).apply {
-            text = "📖 View Log"
-            setOnClickListener { viewLog() }
+        val refreshBtn = Button(this).apply {
+            text = "🔄 Refresh"
+            setOnClickListener {
+                logTextView.text = log.getLogContent()
+            }
         }
-        linearLayout.addView(viewLogBtn)
+        linearLayout.addView(refreshBtn)
         
-        // ✅ লগ শেয়ারের বাটন
-        val shareLogBtn = Button(this).apply {
+        val shareBtn = Button(this).apply {
             text = "📤 Share Log"
-            setOnClickListener { shareLog() }
+            setOnClickListener {
+                val content = log.getLogContent()
+                if (content.isNotEmpty()) {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, content)
+                        putExtra(Intent.EXTRA_SUBJECT, "Floating Notes Log")
+                    }
+                    startActivity(Intent.createChooser(shareIntent, "Share Log"))
+                } else {
+                    Toast.makeText(this@MainActivity, "No logs to share", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
-        linearLayout.addView(shareLogBtn)
+        linearLayout.addView(shareBtn)
         
-        // ✅ লগ ক্লিয়ারের বাটন
-        val clearLogBtn = Button(this).apply {
+        val clearBtn = Button(this).apply {
             text = "🗑️ Clear Log"
-            setOnClickListener { 
+            setOnClickListener {
                 log.clearLog()
+                logTextView.text = log.getLogContent()
                 Toast.makeText(this@MainActivity, "Log cleared", Toast.LENGTH_SHORT).show()
             }
         }
-        linearLayout.addView(clearLogBtn)
-        
-        val closeBtn = Button(this).apply {
-            text = "⬇️ Minimize to Bubble"
-            setOnClickListener { moveTaskToBack(true) }
-        }
-        linearLayout.addView(closeBtn)
+        linearLayout.addView(clearBtn)
         
         scrollView.addView(linearLayout)
         setContentView(scrollView)
-    }
-    
-    private fun viewLog() {
-        val logContent = log.getLogContent()
-        val scrollView = ScrollView(this)
-        val textView = TextView(this).apply {
-            text = if (logContent.isNotEmpty()) logContent else "No logs found.\n\nMake sure the app is running and generating logs."
-            textSize = 10f
-            setPadding(16, 16, 16, 16)
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-        scrollView.addView(textView)
-        setContentView(scrollView)
-        
-        // ব্যাক বাটন
-        val backBtn = Button(this).apply {
-            text = "← Back"
-            setOnClickListener { showMainUI() }
-        }
-        (scrollView.parent as? android.view.ViewGroup)?.addView(backBtn)
-    }
-    
-    private fun shareLog() {
-        val logContent = log.getLogContent()
-        if (logContent.isNotEmpty()) {
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, logContent)
-                putExtra(Intent.EXTRA_SUBJECT, "Floating Notes Log")
-            }
-            startActivity(Intent.createChooser(shareIntent, "Share Log"))
-        } else {
-            Toast.makeText(this, "No logs to share", Toast.LENGTH_SHORT).show()
-        }
     }
     
     private fun startBubbleService() {
@@ -147,7 +128,6 @@ class MainActivity : AppCompatActivity() {
             log.i("MainActivity", "Bubble service started")
         } catch (e: Exception) {
             log.e("MainActivity", "Failed to start service", e)
-            Toast.makeText(this, "Failed to start: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -155,12 +135,10 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 100 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (Settings.canDrawOverlays(this)) {
-                log.i("MainActivity", "Permission granted by user")
+                log.i("MainActivity", "Permission granted")
                 startBubbleService()
-                showMainUI()
             } else {
-                log.w("MainActivity", "Permission denied by user")
-                Toast.makeText(this, "Permission required for floating bubble", Toast.LENGTH_LONG).show()
+                log.w("MainActivity", "Permission denied")
             }
         }
     }

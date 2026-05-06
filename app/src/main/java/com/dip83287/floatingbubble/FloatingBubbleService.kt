@@ -20,9 +20,6 @@ class FloatingBubbleService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
-    private var noteView: View? = null
-    private var isExpanded = false
-    private lateinit var editText: EditText
     private lateinit var log: SimpleLog
     
     companion object {
@@ -32,13 +29,17 @@ class FloatingBubbleService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        log = SimpleLog.getInstance(this)
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        log.i("FloatingBubbleService", "onCreate - Service created")
         
-        // ✅ Foreground service এর জন্য notification channel তৈরি করুন
+        // First, log to file
+        log = SimpleLog.getInstance(this)
+        log.i("FloatingBubbleService", "onCreate called")
+        
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        
+        // Create notification channel and start foreground
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
+        log.i("FloatingBubbleService", "Foreground service started")
     }
 
     private fun createNotificationChannel() {
@@ -48,18 +49,19 @@ class FloatingBubbleService : Service() {
                 "Floating Bubble",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps floating bubble alive"
+                description = "Floating notes bubble"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
+            log.i("FloatingBubbleService", "Notification channel created")
         }
     }
 
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Floating Notes")
-            .setContentText("Tap bubble to write note")
+            .setContentText("Bubble is active")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -68,9 +70,7 @@ class FloatingBubbleService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         log.i("FloatingBubbleService", "onStartCommand called")
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-            !Settings.canDrawOverlays(this)
-        ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             log.w("FloatingBubbleService", "Overlay permission not granted")
             stopSelf()
             return START_NOT_STICKY
