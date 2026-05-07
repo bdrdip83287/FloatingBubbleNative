@@ -20,16 +20,32 @@ class MainActivity : AppCompatActivity() {
         
         // ইমার্জেন্সি লগিং শুরু করুন - সবচেয়ে প্রথমে
         EmergencyLog.init(this)
+        EmergencyLog.log("=== APP STARTED ===")
         EmergencyLog.log("MainActivity: onCreate called")
         
-        // Start service
-        startBubbleService()
-        
-        // Show log viewer
-        showLogViewer()
+        // Check overlay permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                EmergencyLog.log("MainActivity: Need overlay permission")
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivityForResult(intent, 100)
+            } else {
+                EmergencyLog.log("MainActivity: Overlay permission already granted")
+                startBubbleService()
+                showLogViewer()
+            }
+        } else {
+            startBubbleService()
+            showLogViewer()
+        }
     }
     
     private fun showLogViewer() {
+        EmergencyLog.log("MainActivity: Showing log viewer")
+        
         val scrollView = ScrollView(this)
         val linearLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -43,20 +59,12 @@ class MainActivity : AppCompatActivity() {
         }
         linearLayout.addView(title)
         
-        // লগ ফাইলের পাথ দেখান
-        val logFile = EmergencyLog.getLogFile()
-        val pathText = TextView(this).apply {
-            text = "📍 Log file location:\n${logFile?.absolutePath ?: "Not available"}\n\nYou can access this file via:\nrun-as com.dip83287.floatingbubble cat ${logFile?.absolutePath}"
-            textSize = 12f
-            setPadding(0, 0, 0, 32)
-            setTextColor(android.graphics.Color.parseColor("#666666"))
-        }
-        linearLayout.addView(pathText)
-        
         // লগ কন্টেন্ট দেখান
         val logContent = EmergencyLog.getLogContent()
+        EmergencyLog.log("Log content length: ${logContent.length}")
+        
         val logTextView = TextView(this).apply {
-            text = if (logContent.isNotEmpty()) logContent else "No logs yet.\n\nMake sure the app is running."
+            text = if (logContent.isNotEmpty()) logContent else "No logs yet.\n\nMake sure the app is running and generating logs."
             textSize = 11f
             setPadding(16, 16, 16, 16)
             typeface = android.graphics.Typeface.MONOSPACE
@@ -69,6 +77,7 @@ class MainActivity : AppCompatActivity() {
             text = "🔄 Refresh"
             setOnClickListener {
                 logTextView.text = EmergencyLog.getLogContent()
+                Toast.makeText(this@MainActivity, "Log refreshed", Toast.LENGTH_SHORT).show()
             }
         }
         linearLayout.addView(refreshBtn)
@@ -91,10 +100,20 @@ class MainActivity : AppCompatActivity() {
         }
         linearLayout.addView(shareBtn)
         
+        val clearBtn = Button(this).apply {
+            text = "🗑️ Clear Log"
+            setOnClickListener {
+                EmergencyLog.clearLog()
+                logTextView.text = EmergencyLog.getLogContent()
+                Toast.makeText(this@MainActivity, "Log cleared", Toast.LENGTH_SHORT).show()
+            }
+        }
+        linearLayout.addView(clearBtn)
+        
         scrollView.addView(linearLayout)
         setContentView(scrollView)
         
-        EmergencyLog.log("MainActivity: Log viewer displayed")
+        EmergencyLog.log("MainActivity: Log viewer displayed successfully")
     }
     
     private fun startBubbleService() {
@@ -109,6 +128,22 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             EmergencyLog.logError("MainActivity: Failed to start service", e)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        EmergencyLog.log("MainActivity: onActivityResult called, requestCode=$requestCode")
+        
+        if (requestCode == 100 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Settings.canDrawOverlays(this)) {
+                EmergencyLog.log("MainActivity: Permission granted by user")
+                startBubbleService()
+                showLogViewer()
+            } else {
+                EmergencyLog.log("MainActivity: Permission denied by user")
+                Toast.makeText(this, "Permission required for floating bubble", Toast.LENGTH_LONG).show()
+            }
         }
     }
 }

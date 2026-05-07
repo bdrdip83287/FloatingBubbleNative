@@ -82,3 +82,10 @@ object EmergencyLog {
     
     fun getLogFile(): File? = if (isInitialized) logFile else null
 }
+
+fun clearLog() {
+    if (isInitialized && logFile.exists()) {
+        logFile.writeText("")
+        write("=== LOG CLEARED at ${dateFormat.format(Date())} ===")
+    }
+}
