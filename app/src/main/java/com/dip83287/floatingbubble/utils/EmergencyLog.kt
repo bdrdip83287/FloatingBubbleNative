@@ -1,6 +1,7 @@
 package com.dip83287.floatingbubble.utils
 
 import android.content.Context
+import android.os.Environment
 import android.util.Log
 import java.io.File
 import java.io.FileWriter
@@ -9,7 +10,7 @@ import java.util.*
 
 object EmergencyLog {
     
-    private const val LOG_FILE_NAME = "emergency_log.txt"
+    private const val LOG_FILE_NAME = "floating_notes_crash_log.txt"
     private lateinit var logFile: File
     private var isInitialized = false
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
@@ -18,7 +19,8 @@ object EmergencyLog {
         if (isInitialized) return
         
         try {
-            val logDir = File(context.filesDir, "logs")
+            // ✅ External storage ব্যবহার করুন (সবার পড়ার যোগ্য)
+            val logDir = File(Environment.getExternalStorageDirectory(), "FloatingNotesLogs")
             if (!logDir.exists()) {
                 logDir.mkdirs()
             }
