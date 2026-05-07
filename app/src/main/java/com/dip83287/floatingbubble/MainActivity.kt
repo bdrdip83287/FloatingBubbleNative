@@ -43,10 +43,20 @@ class MainActivity : AppCompatActivity() {
         }
         linearLayout.addView(title)
         
+        // লগ ফাইলের পাথ দেখান
+        val logFile = EmergencyLog.getLogFile()
+        val pathText = TextView(this).apply {
+            text = "📍 Log file location:\n${logFile?.absolutePath ?: "Not available"}\n\nYou can access this file via:\nrun-as com.dip83287.floatingbubble cat ${logFile?.absolutePath}"
+            textSize = 12f
+            setPadding(0, 0, 0, 32)
+            setTextColor(android.graphics.Color.parseColor("#666666"))
+        }
+        linearLayout.addView(pathText)
+        
         // লগ কন্টেন্ট দেখান
         val logContent = EmergencyLog.getLogContent()
         val logTextView = TextView(this).apply {
-            text = if (logContent.isNotEmpty()) logContent else "No logs yet."
+            text = if (logContent.isNotEmpty()) logContent else "No logs yet.\n\nMake sure the app is running."
             textSize = 11f
             setPadding(16, 16, 16, 16)
             typeface = android.graphics.Typeface.MONOSPACE
@@ -75,7 +85,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     startActivity(Intent.createChooser(shareIntent, "Share Log"))
                 } else {
-                    Toast.makeText(this@MainActivity, "No logs to share", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "No logs to share. Run the app first.", Toast.LENGTH_SHORT).show()
                 }
             }
         }
