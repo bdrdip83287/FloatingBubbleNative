@@ -19,6 +19,7 @@ class FloatingBubbleService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
+        // ✅ STEP-2 FIX: Logger MUST initialize here (CRITICAL)
         SystemLogger.init(this)
         SystemLogger.logRuntime("SERVICE CREATED")
     }
@@ -55,8 +56,10 @@ class FloatingBubbleService : Service() {
             val bubble = TextView(this).apply {
                 text = "📝"
                 textSize = 26f
+
                 setOnClickListener {
                     SystemLogger.flow("bubble", "clicked")
+                    Toast.makeText(this@FloatingBubbleService, "Bubble Clicked", Toast.LENGTH_SHORT).show()
                 }
             }
 
