@@ -7,22 +7,28 @@ import java.util.*
 
 object SystemLogger {
 
-    private lateinit var logDir: File
-    private lateinit var runtimeFile: File
-    private lateinit var errorFile: File
-    private lateinit var flowFile: File
+    private var logDir: File? = null
+    private var runtimeFile: File? = null
+    private var errorFile: File? = null
+    private var flowFile: File? = null
 
     fun init(context: Context) {
+        try {
+            logDir = File(context.getExternalFilesDir(null), "FloatingBubbleLogs")
 
-        logDir = File(context.filesDir, "FloatingBubbleLogs")
+            if (!logDir!!.exists()) {
+                logDir!!.mkdirs()
+            }
 
-        if (!logDir.exists()) logDir.mkdirs()
+            runtimeFile = File(logDir, "runtime_log.txt")
+            errorFile = File(logDir, "error_log.txt")
+            flowFile = File(logDir, "flow_log.txt")
 
-        runtimeFile = File(logDir, "runtime_log.txt")
-        errorFile = File(logDir, "error_log.txt")
-        flowFile = File(logDir, "flow_log.txt")
+            logRuntime("LOGGER INIT OK -> ${logDir!!.absolutePath}")
 
-        logRuntime("LOGGER INIT OK -> ${logDir.absolutePath}")
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun time(): String {
@@ -30,32 +36,27 @@ object SystemLogger {
     }
 
     fun logRuntime(msg: String) {
-        runtimeFile.appendText("[${time()}] $msg\n")
+        try {
+            runtimeFile?.appendText("[${time()}] $msg\n")
+        } catch (_: Exception) {}
     }
 
     fun logError(msg: String, e: Throwable?) {
-        errorFile.appendText("""
+        try {
+            errorFile?.appendText("""
+                
 [${time()}] ERROR: $msg
 ${e?.stackTraceToString()}
 
-------------------------
-        """.trimIndent())
+-----------------------------
+
+            """.trimIndent())
+        } catch (_: Exception) {}
     }
 
     fun flow(fn: String, state: String) {
-        flowFile.appendText("[${time()}] $fn => $state\n")
-    }
-
-    // ✅ THIS WAS MISSING (MAIN FIX)
-    inline fun safe(functionName: String, block: () -> Unit) {
-        flow(functionName, "ENTER")
         try {
-            block()
-            flow(functionName, "SUCCESS")
-        } catch (e: Exception) {
-            flow(functionName, "FAILED")
-            logError("Crash inside: $functionName", e)
-        }
-        flow(functionName, "EXIT")
+            flowFile?.appendText("[${time()}] $fn => $state\n")
+        } catch (_: Exception) {}
     }
 }
