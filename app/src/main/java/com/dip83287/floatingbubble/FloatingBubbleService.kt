@@ -20,6 +20,9 @@ class FloatingBubbleService : Service() {
         com.dip83287.floatingbubble.utils.EmergencyLog.write("FLOATING SERVICE CREATED")
 
 
+        com.dip83287.floatingbubble.utils.EmergencyLog.write("FLOATING SERVICE CREATED")
+
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         SystemLogger.init(this)

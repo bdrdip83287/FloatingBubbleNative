@@ -1,6 +1,8 @@
 package com.dip83287.floatingbubble.utils
 
 import android.content.Context
+import android.os.Environment
+import android.util.Log
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -13,21 +15,36 @@ object EmergencyLog {
 
         try {
 
-            val baseDir = context.getExternalFilesDir(null)
+            val rootDir = Environment.getExternalStorageDirectory()
 
-            val logDir = File(baseDir, "FloatingNotesLogs")
+            val logDir = File(
+                rootDir,
+                "FloatingNotesLogs"
+            )
 
             if (!logDir.exists()) {
                 logDir.mkdirs()
             }
 
-            logFile = File(logDir, "floating_notes_crash_log.txt")
+            logFile = File(
+                logDir,
+                "floating_notes_crash_log.txt"
+            )
 
-            write("LOGGER INITIALIZED")
-            write("PATH => ${logFile?.absolutePath}")
+            if (!logFile!!.exists()) {
+                logFile!!.createNewFile()
+            }
+
+            write("===== LOGGER STARTED =====")
+            write("PATH => ${logFile!!.absolutePath}")
 
         } catch (e: Exception) {
-            e.printStackTrace()
+
+            Log.e(
+                "LOGGER_DEBUG",
+                "LOGGER INIT FAILED",
+                e
+            )
         }
     }
 
@@ -42,11 +59,17 @@ object EmergencyLog {
                 Locale.getDefault()
             ).format(Date())
 
-            logFile?.appendText(
+            logFile!!.appendText(
                 "[$time] $message\n"
             )
 
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+
+            Log.e(
+                "LOGGER_DEBUG",
+                "WRITE FAILED",
+                e
+            )
         }
     }
 
