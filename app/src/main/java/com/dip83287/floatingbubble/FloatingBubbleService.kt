@@ -1,4 +1,5 @@
 package com.dip83287.floatingbubble
+import com.dip83287.floatingbubble.utils.EmergencyLog
 
 import android.app.Service
 import android.content.Intent
@@ -16,6 +17,8 @@ class FloatingBubbleService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        EmergencyLog.init(this)
+        EmergencyLog.write("SERVICE CREATED")
 
         com.dip83287.floatingbubble.utils.EmergencyLog.write("FLOATING SERVICE CREATED")
 

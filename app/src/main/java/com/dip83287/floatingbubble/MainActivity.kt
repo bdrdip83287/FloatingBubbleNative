@@ -16,7 +16,6 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.dip83287.floatingbubble.utils.EmergencyLog
 
 class MainActivity : AppCompatActivity() {
     
@@ -26,6 +25,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        EmergencyLog.init(this)
+        EmergencyLog.write("MAIN ACTIVITY STARTED")
 
         com.dip83287.floatingbubble.utils.EmergencyLog.init(this)
         com.dip83287.floatingbubble.utils.EmergencyLog.write("MAIN ACTIVITY STARTED")

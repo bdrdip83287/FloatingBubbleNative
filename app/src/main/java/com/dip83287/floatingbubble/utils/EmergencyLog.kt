@@ -1,12 +1,10 @@
 package com.dip83287.floatingbubble.utils
 
 import android.content.Context
-import android.os.Environment
 import java.io.File
-import java.io.PrintWriter
-import java.io.StringWriter
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 object EmergencyLog {
 
@@ -14,121 +12,49 @@ object EmergencyLog {
 
     fun init(context: Context) {
 
-        try {
+        val dir = File(
+            context.getExternalFilesDir(null),
+            "FloatingBubbleLogs"
+        )
 
-            val logDir = File(
-                Environment.getExternalStorageDirectory(),
-                "FloatingNotesLogs"
-            )
-
-            if (!logDir.exists()) {
-                logDir.mkdirs()
-            }
-
-            logFile = File(logDir, "floating_notes_crash_log.txt")
-
-            if (!logFile.exists()) {
-                logFile.createNewFile()
-            }
-
-            log("LOGGER INITIALIZED")
-
-        } catch (e: Exception) {
-            e.printStackTrace()
+        if (!dir.exists()) {
+            dir.mkdirs()
         }
+
+        logFile = File(dir, "runtime_log.txt")
+
+        if (!logFile.exists()) {
+            logFile.createNewFile()
+        }
+
+        write("LOGGER INITIALIZED")
     }
 
-    private fun time(): String {
-        return SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss",
-            Locale.getDefault()
-        ).format(Date())
-    }
-
-    fun log(message: String) {
+    fun write(message: String) {
 
         try {
-
-            if (!::logFile.isInitialized) return
-
-            logFile.appendText(
-                "\n[${time()}] $message\n"
-            )
-
-        } catch (_: Exception) {
-        }
-    }
-
-    fun logError(message: String, throwable: Throwable?) {
-
-        try {
-
-            if (!::logFile.isInitialized) return
-
-            val sw = StringWriter()
-            val pw = PrintWriter(sw)
-
-            throwable?.printStackTrace(pw)
-
-            logFile.appendText(
-                """
-
-================ CRASH ================
-
-TIME: ${time()}
-
-MESSAGE:
-$message
-
-STACKTRACE:
-${sw.toString()}
-
-=======================================
-
-                """.trimIndent()
-            )
-
-        } catch (_: Exception) {
-        }
-    }
-
-    fun getLogContent(): String {
-
-        return try {
 
             if (!::logFile.isInitialized) {
-                "Log file not initialized"
-            } else if (!logFile.exists()) {
-                "Log file not found"
-            } else {
-                logFile.readText()
+                return
             }
 
-        } catch (e: Exception) {
-            "Failed to read log:\n${e.message}"
+            val time = SimpleDateFormat(
+                "yyyy-MM-dd HH:mm:ss",
+                Locale.getDefault()
+            ).format(Date())
+
+            logFile.appendText("[$time] $message\n")
+
+        } catch (_: Exception) {
         }
     }
 
-    fun installGlobalCrashCatcher(context: Context) {
+    fun getLogFile(): File? {
 
-        init(context)
-
-        Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
-
-            logError(
-                "GLOBAL APP CRASH",
-                throwable
-            )
-
-            android.os.Process.killProcess(
-                android.os.Process.myPid()
-            )
-
-            exitProcess(1)
+        return if (::logFile.isInitialized) {
+            logFile
+        } else {
+            null
         }
-    }
-
-    private fun exitProcess(code: Int) {
-        kotlin.system.exitProcess(code)
     }
 }
