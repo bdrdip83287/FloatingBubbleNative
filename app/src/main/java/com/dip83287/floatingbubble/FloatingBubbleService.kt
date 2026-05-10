@@ -14,6 +14,7 @@ import android.view.*
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import com.dip83287.floatingbubble.utils.SimpleLog
+import com.dip83287.floatingbubble.utils.SystemLogger
 import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
@@ -21,7 +22,9 @@ class FloatingBubbleService : Service() {
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
     private lateinit var log: SimpleLog
-    
+
+    private var bubbleParams: WindowManager.LayoutParams? = null
+
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "floating_bubble_channel"
@@ -29,17 +32,16 @@ class FloatingBubbleService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        
-        // First, log to file
+
+        SystemLogger.logRuntime("Service onCreate")
+
         log = SimpleLog.getInstance(this)
-        log.i("FloatingBubbleService", "onCreate called")
-        
+        log.i("Service", "onCreate called")
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        
-        // Create notification channel and start foreground
+
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
-        log.i("FloatingBubbleService", "Foreground service started")
     }
 
     private fun createNotificationChannel() {
@@ -48,30 +50,28 @@ class FloatingBubbleService : Service() {
                 CHANNEL_ID,
                 "Floating Bubble",
                 NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Floating notes bubble"
-                setShowBadge(false)
-            }
+            )
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
-            log.i("FloatingBubbleService", "Notification channel created")
         }
     }
 
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Floating Notes")
-            .setContentText("Bubble is active")
+            .setContentText("Bubble Active")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        log.i("FloatingBubbleService", "onStartCommand called")
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            log.w("FloatingBubbleService", "Overlay permission not granted")
+
+        SystemLogger.logRuntime("onStartCommand")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !Settings.canDrawOverlays(this)
+        ) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -86,9 +86,11 @@ class FloatingBubbleService : Service() {
     }
 
     private fun createBubble() {
-        try {
-            log.d("FloatingBubbleService", "Creating bubble")
-            
+
+        SystemLogger.safe("createBubble") {
+
+            SystemLogger.logRuntime("Creating Bubble UI")
+
             val bubbleLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -104,36 +106,96 @@ class FloatingBubbleService : Service() {
                 textSize = 27f
                 setTextColor(Color.WHITE)
             }
-            bubbleLayout.addView(iconView)
 
+            bubbleLayout.addView(iconView)
             bubbleView = bubbleLayout
 
             val params = WindowManager.LayoutParams(
-                80, 80,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                80,
+                80,
+                if (Build.VERSION.SDK_INT >= 26)
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
             )
+
             params.gravity = Gravity.TOP or Gravity.START
             params.x = 100
             params.y = 150
 
-            windowManager.addView(bubbleView, params)
-            log.i("FloatingBubbleService", "Bubble created successfully")
-            
-        } catch (e: Exception) {
-            log.e("FloatingBubbleService", "Failed to create bubble", e)
+            bubbleParams = params
+
+            addDragSupport()
+
+            SystemLogger.safe("addBubbleView") {
+                windowManager.addView(bubbleView, params)
+            }
+
+            SystemLogger.logRuntime("Bubble Added x=${params.x}, y=${params.y}")
+
+        }
+    }
+
+    // ✅ DRAG SYSTEM (IMPORTANT FIX)
+    private fun addDragSupport() {
+
+        var initialX = 0f
+        var initialY = 0f
+
+        bubbleView?.setOnTouchListener { _, event ->
+
+            val params = bubbleParams ?: return@setOnTouchListener false
+
+            when (event.action) {
+
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = event.rawX
+                    initialY = event.rawY
+                    true
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+
+                    val dx = event.rawX - initialX
+                    val dy = event.rawY - initialY
+
+                    params.x = (params.x + dx).toInt()
+                    params.y = (params.y + dy).toInt()
+
+                    SystemLogger.safe("updateBubblePosition") {
+                        bubbleView?.let {
+                            windowManager.updateViewLayout(it, params)
+                        }
+                    }
+
+                    SystemLogger.logRuntime(
+                        "Bubble moved x=${params.x}, y=${params.y}"
+                    )
+
+                    initialX = event.rawX
+                    initialY = event.rawY
+
+                    true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    true
+                }
+
+                else -> false
+            }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+
         try {
             bubbleView?.let { windowManager.removeView(it) }
-            log.i("FloatingBubbleService", "Service destroyed")
+            SystemLogger.logRuntime("Service Destroyed")
         } catch (e: Exception) {
-            log.e("FloatingBubbleService", "Error in onDestroy", e)
+            SystemLogger.logError("onDestroy error", e)
         }
     }
 
