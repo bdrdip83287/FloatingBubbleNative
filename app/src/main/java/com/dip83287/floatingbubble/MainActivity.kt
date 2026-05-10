@@ -25,6 +25,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        com.dip83287.floatingbubble.utils.EmergencyLog.init(this)
+        com.dip83287.floatingbubble.utils.EmergencyLog.write("MAIN ACTIVITY STARTED")
+
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            com.dip83287.floatingbubble.utils.EmergencyLog.write("GLOBAL CRASH => ${throwable.stackTraceToString()}")
+        }
+
+
         
         // Initialize logging
         EmergencyLog.init(this)
