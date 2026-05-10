@@ -2,6 +2,7 @@ package com.dip83287.floatingbubble
 
 import android.app.Service
 import android.content.Intent
+import android.graphics.PixelFormat
 import android.os.*
 import android.provider.Settings
 import android.view.*
@@ -18,16 +19,8 @@ class FloatingBubbleService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // ✅ LOG INIT
         SystemLogger.init(this)
         SystemLogger.logRuntime("SERVICE CREATED")
-
-        try {
-            val metrics = resources.displayMetrics
-            SystemLogger.flow("screen", "w=${metrics.widthPixels}, h=${metrics.heightPixels}")
-        } catch (e: Exception) {
-            SystemLogger.logError("Screen metrics error", e)
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -61,7 +54,7 @@ class FloatingBubbleService : Service() {
         try {
             val bubble = TextView(this).apply {
                 text = "📝"
-                textSize = 24f
+                textSize = 26f
                 setOnClickListener {
                     SystemLogger.flow("bubble", "clicked")
                 }
@@ -70,7 +63,8 @@ class FloatingBubbleService : Service() {
             bubbleView = bubble
 
             val params = WindowManager.LayoutParams(
-                100, 100,
+                120,
+                120,
                 if (Build.VERSION.SDK_INT >= 26)
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
@@ -93,7 +87,7 @@ class FloatingBubbleService : Service() {
         try {
             bubbleView?.let { windowManager.removeView(it) }
         } catch (e: Exception) {
-            SystemLogger.logError("onDestroy cleanup error", e)
+            SystemLogger.logError("onDestroy error", e)
         }
 
         SystemLogger.logRuntime("SERVICE DESTROYED")
