@@ -1,26 +1,21 @@
 package com.dip83287.floatingbubble.utils
 
 import android.content.Context
-import android.os.Environment
-import android.util.Log
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
 object SystemLogger {
 
-    private const val TAG = "FLOATING_TRACE"
-
+    private lateinit var logDir: File
     private lateinit var runtimeFile: File
     private lateinit var errorFile: File
     private lateinit var flowFile: File
 
     fun init(context: Context) {
 
-        val logDir = File(
-            Environment.getExternalStorageDirectory(),
-            "FloatingBubbleLogs"
-        )
+        // ✅ INTERNAL STORAGE (100% safe)
+        logDir = File(context.filesDir, "FloatingBubbleLogs")
 
         if (!logDir.exists()) {
             logDir.mkdirs()
@@ -30,95 +25,30 @@ object SystemLogger {
         errorFile = File(logDir, "error_log.txt")
         flowFile = File(logDir, "flow_log.txt")
 
-        logRuntime("===== LOGGER STARTED =====")
+        logRuntime("LOGGER INIT OK -> ${logDir.absolutePath}")
     }
 
-    private fun getTime(): String {
-        return SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss",
-            Locale.getDefault()
-        ).format(Date())
+    private fun time(): String {
+        return SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+            .format(Date())
     }
 
-    // =============================
-    // Runtime Log
-    // =============================
-
-    fun logRuntime(message: String) {
-
-        val text = "[${getTime()}] $message"
-
-        Log.d(TAG, text)
-
-        try {
-            runtimeFile.appendText("$text\n")
-        } catch (_: Exception) {}
+    fun logRuntime(msg: String) {
+        runtimeFile.appendText("[${time()}] $msg\n")
     }
 
-    // =============================
-    // Error Log
-    // =============================
+    fun logError(msg: String, e: Throwable?) {
+        errorFile.appendText("""
+            
+[${time()}] ERROR: $msg
+${e?.stackTraceToString()}
 
-    fun logError(message: String, e: Throwable?) {
+-----------------------------
 
-        val stack = e?.stackTraceToString() ?: "No Stacktrace"
-
-        val text = """
-
-❌ ERROR TIME: ${getTime()}
-MESSAGE: $message
-
-STACKTRACE:
-$stack
-
-====================================
-
-        """.trimIndent()
-
-        Log.e(TAG, text)
-
-        try {
-            errorFile.appendText("$text\n")
-        } catch (_: Exception) {}
+        """.trimIndent())
     }
 
-    // =============================
-    // Flow Log
-    // =============================
-
-    fun flow(functionName: String, state: String) {
-
-        val text = "[${getTime()}] [$functionName] => $state"
-
-        try {
-            flowFile.appendText("$text\n")
-        } catch (_: Exception) {}
-    }
-
-    // =============================
-    // Safe Run Wrapper
-    // =============================
-
-    inline fun safe(
-        functionName: String,
-        block: () -> Unit
-    ) {
-
-        flow(functionName, "ENTER")
-
-        try {
-
-            block()
-
-            flow(functionName, "SUCCESS")
-
-        } catch (e: Exception) {
-
-            flow(functionName, "FAILED")
-
-            logError("Crash inside: $functionName", e)
-        }
-
-        flow(functionName, "EXIT")
+    fun flow(fn: String, state: String) {
+        flowFile.appendText("[${time()}] $fn => $state\n")
     }
 }
