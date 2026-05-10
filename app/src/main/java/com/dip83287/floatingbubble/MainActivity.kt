@@ -1,4 +1,5 @@
 package com.dip83287.floatingbubble
+import com.dip83287.floatingbubble.utils.EmergencyLog
 
 import android.Manifest
 import android.content.Intent
