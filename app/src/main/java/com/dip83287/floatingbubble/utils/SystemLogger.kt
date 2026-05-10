@@ -14,12 +14,9 @@ object SystemLogger {
 
     fun init(context: Context) {
 
-        // ✅ INTERNAL STORAGE (100% safe)
         logDir = File(context.filesDir, "FloatingBubbleLogs")
 
-        if (!logDir.exists()) {
-            logDir.mkdirs()
-        }
+        if (!logDir.exists()) logDir.mkdirs()
 
         runtimeFile = File(logDir, "runtime_log.txt")
         errorFile = File(logDir, "error_log.txt")
@@ -29,8 +26,7 @@ object SystemLogger {
     }
 
     private fun time(): String {
-        return SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-            .format(Date())
+        return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
     }
 
     fun logRuntime(msg: String) {
@@ -39,16 +35,27 @@ object SystemLogger {
 
     fun logError(msg: String, e: Throwable?) {
         errorFile.appendText("""
-            
 [${time()}] ERROR: $msg
 ${e?.stackTraceToString()}
 
------------------------------
-
+------------------------
         """.trimIndent())
     }
 
     fun flow(fn: String, state: String) {
         flowFile.appendText("[${time()}] $fn => $state\n")
+    }
+
+    // ✅ THIS WAS MISSING (MAIN FIX)
+    inline fun safe(functionName: String, block: () -> Unit) {
+        flow(functionName, "ENTER")
+        try {
+            block()
+            flow(functionName, "SUCCESS")
+        } catch (e: Exception) {
+            flow(functionName, "FAILED")
+            logError("Crash inside: $functionName", e)
+        }
+        flow(functionName, "EXIT")
     }
 }
