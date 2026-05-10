@@ -19,9 +19,9 @@ class FloatingBubbleService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // ✅ STEP-2 FIX: Logger MUST initialize here (CRITICAL)
         SystemLogger.init(this)
         SystemLogger.logRuntime("SERVICE CREATED")
+        SystemLogger.logRuntime("LOG PATH = ${SystemLogger.getPath()}")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -59,7 +59,6 @@ class FloatingBubbleService : Service() {
 
                 setOnClickListener {
                     SystemLogger.flow("bubble", "clicked")
-                    Toast.makeText(this@FloatingBubbleService, "Bubble Clicked", Toast.LENGTH_SHORT).show()
                 }
             }
 
