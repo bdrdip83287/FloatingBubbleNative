@@ -101,7 +101,7 @@ class FloatingBubbleService : Service() {
 
             val iconView = TextView(this).apply {
                 text = "📝"
-                textSize = 28f
+                textSize = 27f
                 setTextColor(Color.WHITE)
             }
             bubbleLayout.addView(iconView)
