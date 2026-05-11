@@ -1,73 +1,55 @@
-package com.dip83287.floatingbubble
+package com.dip83287.floatingbubble.utils
 
 import android.content.Context
-import android.os.Environment
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 
 object EmergencyLog {
-
     private lateinit var logFile: File
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
     fun init(context: Context) {
-
-        val logDir = File(
-            Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOCUMENTS
-            ),
-            "FloatingBubbleLogs"
-        )
-
-        if (!logDir.exists()) {
-            logDir.mkdirs()
+        val logsDir = File(context.filesDir, "logs")
+        if (!logsDir.exists()) {
+            logsDir.mkdirs()
         }
-
-        logFile = File(logDir, "runtime_log.txt")
-
-        if (!logFile.exists()) {
-            logFile.createNewFile()
-        }
-
-        log("========== APP STARTED ==========")
-        log("Log Path: ${logFile.absolutePath}")
+        logFile = File(logsDir, "emergency_log.txt")
     }
 
-    fun log(message: String) {
-
+    fun write(message: String) {
+        if (!::logFile.isInitialized) return
         try {
-
-            val time = SimpleDateFormat(
-                "yyyy-MM-dd HH:mm:ss",
-                Locale.getDefault()
-            ).format(Date())
-
-            val finalMessage = "[$time] $message\n"
-
-            logFile.appendText(finalMessage)
-
+            val timestamp = dateFormat.format(Date())
+            val logEntry = "[$timestamp] $message\n"
+            logFile.appendText(logEntry)
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    fun logError(tag: String, e: Exception) {
-
-        log("ERROR [$tag]")
-        log(e.stackTraceToString())
+    fun log(message: String) {
+        write(message)
     }
 
-    fun getLogContent(): String {
-
-        return try {
-            logFile.readText()
-        } catch (e: Exception) {
-            "Cannot read logs"
+    fun logError(tag: String, exception: Exception?) {
+        val message = if (exception != null) {
+            "$tag: ${exception.message}\n${exception.stackTraceToString()}"
+        } else {
+            tag
         }
+        write(message)
     }
 
     fun getLogPath(): String {
-        return logFile.absolutePath
+        return if (::logFile.isInitialized) logFile.absolutePath else ""
+    }
+
+    fun getLogContent(): String {
+        return if (::logFile.isInitialized && logFile.exists()) {
+            logFile.readText()
+        } else {
+            "No logs available"
+        }
     }
 }
