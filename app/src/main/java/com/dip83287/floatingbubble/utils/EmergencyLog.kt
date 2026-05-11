@@ -1,6 +1,7 @@
-package com.dip83287.floatingbubble.utils
+package com.dip83287.floatingbubble
 
 import android.content.Context
+import android.os.Environment
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -12,49 +13,61 @@ object EmergencyLog {
 
     fun init(context: Context) {
 
-        val dir = File(
-            context.getExternalFilesDir(null),
+        val logDir = File(
+            Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOCUMENTS
+            ),
             "FloatingBubbleLogs"
         )
 
-        if (!dir.exists()) {
-            dir.mkdirs()
+        if (!logDir.exists()) {
+            logDir.mkdirs()
         }
 
-        logFile = File(dir, "runtime_log.txt")
+        logFile = File(logDir, "runtime_log.txt")
 
         if (!logFile.exists()) {
             logFile.createNewFile()
         }
 
-        write("LOGGER INITIALIZED")
+        log("========== APP STARTED ==========")
+        log("Log Path: ${logFile.absolutePath}")
     }
 
-    fun write(message: String) {
+    fun log(message: String) {
 
         try {
-
-            if (!::logFile.isInitialized) {
-                return
-            }
 
             val time = SimpleDateFormat(
                 "yyyy-MM-dd HH:mm:ss",
                 Locale.getDefault()
             ).format(Date())
 
-            logFile.appendText("[$time] $message\n")
+            val finalMessage = "[$time] $message\n"
 
-        } catch (_: Exception) {
+            logFile.appendText(finalMessage)
+
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
-    fun getLogFile(): File? {
+    fun logError(tag: String, e: Exception) {
 
-        return if (::logFile.isInitialized) {
-            logFile
-        } else {
-            null
+        log("ERROR [$tag]")
+        log(e.stackTraceToString())
+    }
+
+    fun getLogContent(): String {
+
+        return try {
+            logFile.readText()
+        } catch (e: Exception) {
+            "Cannot read logs"
         }
+    }
+
+    fun getLogPath(): String {
+        return logFile.absolutePath
     }
 }
