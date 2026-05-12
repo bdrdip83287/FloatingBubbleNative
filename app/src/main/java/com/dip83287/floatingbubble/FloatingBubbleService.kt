@@ -443,7 +443,10 @@ class FloatingBubbleService : Service() {
 
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
             setOnTouchListener(TitleBarDragListener())
         }
 
@@ -452,7 +455,7 @@ class FloatingBubbleService : Service() {
             textSize = 18f
             setTextColor(Color.parseColor("#FFFFFF"))
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         titleBar.addView(title)
 
@@ -468,7 +471,9 @@ class FloatingBubbleService : Service() {
 
         val divider = View(this).apply {
             setBackgroundColor(Color.parseColor("#DDDDDD"))
-            val lp = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 2)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 2
+            )
             lp.topMargin = 16
             lp.bottomMargin = 16
             layoutParams = lp
@@ -488,7 +493,10 @@ class FloatingBubbleService : Service() {
 
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            val lp = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
             lp.topMargin = 16
             layoutParams = lp
         }
@@ -497,7 +505,7 @@ class FloatingBubbleService : Service() {
             text = "Save"
             setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
-            val lp = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             lp.marginEnd = 8
             layoutParams = lp
             setOnClickListener { saveNote() }
@@ -508,7 +516,7 @@ class FloatingBubbleService : Service() {
             text = "Clear"
             setBackgroundColor(Color.parseColor("#FF9800"))
             setTextColor(Color.WHITE)
-            val lp = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             layoutParams = lp
             setOnClickListener {
                 editText.setText("")
@@ -522,7 +530,10 @@ class FloatingBubbleService : Service() {
             text = "Open Full App"
             setBackgroundColor(Color.parseColor("#2196F3"))
             setTextColor(Color.WHITE)
-            val lp = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
             lp.topMargin = 8
             layoutParams = lp
             setOnClickListener {
@@ -538,7 +549,9 @@ class FloatingBubbleService : Service() {
             textSize = 20f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 40)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 40
+            )
             lp.topMargin = 8
             layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
@@ -567,17 +580,21 @@ class FloatingBubbleService : Service() {
                     val dx = (event.rawX - touchX).toInt()
                     val dy = (event.rawY - touchY).toInt()
                     val params = noteView?.layoutParams as WindowManager.LayoutParams
-                    params.x = initialX + dx
-                    params.y = initialY + dy
-                    windowManager.updateViewLayout(noteView, params)
+                    if (params != null) {
+                        params.x = initialX + dx
+                        params.y = initialY + dy
+                        windowManager.updateViewLayout(noteView, params)
+                    }
                     return true
                 }
                 MotionEvent.ACTION_UP -> {
-                    saveNotepadSizeAndPosition(
-                        currentNotepadWidth, currentNotepadHeight,
-                        (noteView?.layoutParams as WindowManager.LayoutParams).x,
-                        (noteView?.layoutParams as WindowManager.LayoutParams).y
-                    )
+                    val params = noteView?.layoutParams as WindowManager.LayoutParams
+                    if (params != null) {
+                        saveNotepadSizeAndPosition(
+                            currentNotepadWidth, currentNotepadHeight,
+                            params.x, params.y
+                        )
+                    }
                     return true
                 }
             }
@@ -614,11 +631,13 @@ class FloatingBubbleService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     isResizing = false
-                    saveNotepadSizeAndPosition(
-                        currentNotepadWidth, currentNotepadHeight,
-                        (noteView?.layoutParams as WindowManager.LayoutParams).x,
-                        (noteView?.layoutParams as WindowManager.LayoutParams).y
-                    )
+                    val params = noteView?.layoutParams as WindowManager.LayoutParams
+                    if (params != null) {
+                        saveNotepadSizeAndPosition(
+                            currentNotepadWidth, currentNotepadHeight,
+                            params.x, params.y
+                        )
+                    }
                     return true
                 }
             }
@@ -630,9 +649,10 @@ class FloatingBubbleService : Service() {
         if (!isExpanded) return
         EmergencyLog.logFlow("collapseToBubble", "START")
 
-        val currentNotepadX = (noteView?.layoutParams as WindowManager.LayoutParams).x
-        val currentNotepadY = (noteView?.layoutParams as WindowManager.LayoutParams).y
-        saveNotepadSizeAndPosition(currentNotepadWidth, currentNotepadHeight, currentNotepadX, currentNotepadY)
+        val params = noteView?.layoutParams as WindowManager.LayoutParams
+        if (params != null) {
+            saveNotepadSizeAndPosition(currentNotepadWidth, currentNotepadHeight, params.x, params.y)
+        }
 
         noteView?.animate()
             ?.alpha(0f)
