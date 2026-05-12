@@ -18,12 +18,12 @@ class FloatingBubbleService : Service() {
     override fun onCreate() {
         super.onCreate()
         EmergencyLog.init(this)
-        EmergencyLog.write("SERVICE CREATED")
+        EmergencyLog.log("SERVICE CREATED")
 
-        com.dip83287.floatingbubble.utils.EmergencyLog.write("FLOATING SERVICE CREATED")
+        com.dip83287.floatingbubble.utils.EmergencyLog.log("FLOATING SERVICE CREATED")
 
 
-        com.dip83287.floatingbubble.utils.EmergencyLog.write("FLOATING SERVICE CREATED")
+        com.dip83287.floatingbubble.utils.EmergencyLog.log("FLOATING SERVICE CREATED")
 
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
