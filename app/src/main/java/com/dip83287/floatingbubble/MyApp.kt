@@ -1,24 +1,67 @@
 package com.dip83287.floatingbubble
 
+import android.app.Activity
 import android.app.Application
-import com.dip83287.floatingbubble.utils.SystemLogger
+import android.os.Bundle
+import com.dip83287.floatingbubble.utils.EmergencyLog
 
 class MyApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
 
-        SystemLogger.init(this)
+        EmergencyLog.init(this)
 
-        // Global Crash Catcher
-        Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+        EmergencyLog.log("APPLICATION STARTED")
 
-            SystemLogger.logError(
-                "GLOBAL CRASH in thread: ${thread.name}",
-                e
-            )
-        }
+        registerActivityLifecycleCallbacks(
+            object : ActivityLifecycleCallbacks {
 
-        SystemLogger.logRuntime("Application Started")
+                override fun onActivityCreated(
+                    activity: Activity,
+                    savedInstanceState: Bundle?
+                ) {
+                    EmergencyLog.log(
+                        "${activity.localClassName} CREATED"
+                    )
+                }
+
+                override fun onActivityStarted(activity: Activity) {
+                    EmergencyLog.log(
+                        "${activity.localClassName} STARTED"
+                    )
+                }
+
+                override fun onActivityResumed(activity: Activity) {
+                    EmergencyLog.log(
+                        "${activity.localClassName} RESUMED"
+                    )
+                }
+
+                override fun onActivityPaused(activity: Activity) {
+                    EmergencyLog.log(
+                        "${activity.localClassName} PAUSED"
+                    )
+                }
+
+                override fun onActivityStopped(activity: Activity) {
+                    EmergencyLog.log(
+                        "${activity.localClassName} STOPPED"
+                    )
+                }
+
+                override fun onActivityDestroyed(activity: Activity) {
+                    EmergencyLog.log(
+                        "${activity.localClassName} DESTROYED"
+                    )
+                }
+
+                override fun onActivitySaveInstanceState(
+                    activity: Activity,
+                    outState: Bundle
+                ) {
+                }
+            }
+        )
     }
 }

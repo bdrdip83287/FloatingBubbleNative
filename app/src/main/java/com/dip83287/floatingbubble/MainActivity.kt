@@ -19,22 +19,26 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        EmergencyLog.init(this)
-        EmergencyLog.log("MAIN ACTIVITY STARTED")
+        EmergencyLog.log("MAIN ACTIVITY OPENED")
 
         val root = LinearLayout(this).apply {
+
             orientation = LinearLayout.VERTICAL
+
             setPadding(30, 30, 30, 30)
         }
 
         val overlayBtn = Button(this).apply {
+
             text = "Grant Overlay Permission"
 
             setOnClickListener {
 
-                EmergencyLog.log("Overlay permission button clicked")
-
                 try {
+
+                    EmergencyLog.log(
+                        "OVERLAY BUTTON CLICKED"
+                    )
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
 
@@ -44,27 +48,26 @@ class MainActivity : AppCompatActivity() {
                         )
 
                         startActivity(intent)
-
-                        EmergencyLog.log("Overlay permission screen opened")
                     }
 
                 } catch (e: Exception) {
 
-                    EmergencyLog.logError(
-                        "Overlay permission error: ${e.message}"
-                    )
+                    EmergencyLog.logException(e)
                 }
             }
         }
 
         val startBtn = Button(this).apply {
+
             text = "Start Bubble Service"
 
             setOnClickListener {
 
-                EmergencyLog.log("Start service clicked")
-
                 try {
+
+                    EmergencyLog.log(
+                        "START SERVICE BUTTON CLICKED"
+                    )
 
                     startService(
                         Intent(
@@ -73,67 +76,51 @@ class MainActivity : AppCompatActivity() {
                         )
                     )
 
-                    EmergencyLog.log("Bubble service start requested")
-
                     refreshLogs()
 
                 } catch (e: Exception) {
 
-                    EmergencyLog.logError(
-                        "Service start failed: ${e.message}"
-                    )
+                    EmergencyLog.logException(e)
                 }
             }
         }
 
         val refreshBtn = Button(this).apply {
+
             text = "Refresh Logs"
 
             setOnClickListener {
-
-                EmergencyLog.log("Refresh button clicked")
 
                 refreshLogs()
             }
         }
 
-        val pathBtn = Button(this).apply {
-            text = "Show Log Path"
+        val pathText = TextView(this).apply {
 
-            setOnClickListener {
+            textSize = 12f
 
-                try {
-
-                    val path = EmergencyLog.getLogPath()
-
-                    logText.text =
-                        "Log File Path:\n\n$path"
-
-                    EmergencyLog.log(
-                        "Displayed log path"
-                    )
-
-                } catch (e: Exception) {
-
-                    EmergencyLog.logError(
-                        "Path show error: ${e.message}"
-                    )
-                }
-            }
+            text = """
+                
+LOG FILE:
+${EmergencyLog.getLogPath()}
+                
+            """.trimIndent()
         }
 
         logText = TextView(this).apply {
-            textSize = 14f
+
+            textSize = 13f
         }
 
         val scroll = ScrollView(this).apply {
+
             addView(logText)
         }
 
         root.addView(overlayBtn)
         root.addView(startBtn)
         root.addView(refreshBtn)
-        root.addView(pathBtn)
+        root.addView(pathText)
         root.addView(scroll)
 
         setContentView(root)
@@ -145,19 +132,14 @@ class MainActivity : AppCompatActivity() {
 
         try {
 
-            val content = EmergencyLog.getLogContent()
-
-            logText.text = content
-
-            EmergencyLog.log("Logs refreshed")
+            logText.text =
+                EmergencyLog.getLogContent()
 
         } catch (e: Exception) {
 
-            logText.text = e.stackTraceToString()
+            EmergencyLog.logException(e)
 
-            EmergencyLog.logError(
-                "Refresh logs failed: ${e.message}"
-            )
+            logText.text = e.stackTraceToString()
         }
     }
 }
