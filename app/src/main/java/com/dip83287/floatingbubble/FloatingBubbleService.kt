@@ -29,6 +29,7 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_BG_COLOR = "#808080"
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 80
+    private val DELETE_ZONE_SIZE = 120
 
     private val NOTEPAD_TITLE = "📝 Floating Note"
     private val NOTEPAD_MIN_WIDTH = 300
@@ -36,13 +37,12 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_WIDTH = 600
     private val NOTEPAD_MAX_HEIGHT = 800
 
-    private val ANIMATION_DURATION = 250L
+    private val ANIMATION_DURATION = 200L
     private val SPRING_ANIMATION_DURATION = 300L
 
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
 
-    // মেমরি ভেরিয়েবল
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
     private val KEY_BUBBLE_X = "bubble_x"
@@ -147,38 +147,35 @@ class FloatingBubbleService : Service() {
             val zone = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
-                setBackgroundColor(Color.RED)
                 val shape = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(Color.RED)
                 }
                 background = shape
-                setPadding(25, 25, 25, 25)
-                // Make it visible for testing but with low opacity initially
-                alpha = 0.8f
+                setPadding(35, 35, 35, 35)
             }
 
             val cross = TextView(this).apply {
                 text = "✕"
-                textSize = 45f
+                textSize = 55f
                 setTextColor(Color.WHITE)
                 setTypeface(null, android.graphics.Typeface.BOLD)
             }
             zone.addView(cross)
 
             val params = WindowManager.LayoutParams(
-                100, 100,
+                DELETE_ZONE_SIZE, DELETE_ZONE_SIZE,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = 40
+            params.y = 80
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
-            EmergencyLog.log("Delete zone created at bottom +40px")
+            EmergencyLog.log("Delete zone created at bottom +80px")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createDeleteZone")
         }
@@ -186,27 +183,11 @@ class FloatingBubbleService : Service() {
 
     private fun showDeleteZone() {
         deleteZoneView?.visibility = View.VISIBLE
-        deleteZoneView?.animate()?.cancel()
-        deleteZoneView?.animate()
-            ?.alpha(1f)
-            ?.scaleX(1f)
-            ?.scaleY(1f)
-            ?.setDuration(150)
-            ?.start()
         EmergencyLog.logFlow("DeleteZone", "shown")
     }
 
     private fun hideDeleteZone() {
-        deleteZoneView?.animate()?.cancel()
-        deleteZoneView?.animate()
-            ?.alpha(0f)
-            ?.scaleX(0.5f)
-            ?.scaleY(0.5f)
-            ?.setDuration(150)
-            ?.withEndAction {
-                deleteZoneView?.visibility = View.GONE
-            }
-            ?.start()
+        deleteZoneView?.visibility = View.GONE
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -313,9 +294,9 @@ class FloatingBubbleService : Service() {
                         params.y = initialY + (event.rawY - touchY).toInt()
                         windowManager.updateViewLayout(bubbleView!!, params)
 
-                        // Delete zone detection (100px from bottom)
                         val screenHeight = displayMetrics.heightPixels
-                        if (params.y + BUBBLE_SIZE > screenHeight - 100) {
+                        // Delete zone visibility: when bubble is near bottom (within 150px)
+                        if (params.y + BUBBLE_SIZE > screenHeight - 150) {
                             if (!isDraggingToDelete) {
                                 isDraggingToDelete = true
                                 showDeleteZone()
@@ -398,11 +379,12 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🔥 Smooth Expand - NO SPLASH (pure scale + alpha)
+    // 🔥 Smooth Expand - NO SPLASH effect
     private fun expandToNotePad() {
         if (isExpanded) return
         EmergencyLog.logFlow("expandToNotePad", "START")
 
+        // Smooth fade out and scale down bubble without any splash
         bubbleView?.animate()
             ?.scaleX(0f)
             ?.scaleY(0f)
@@ -440,10 +422,12 @@ class FloatingBubbleService : Service() {
 
             windowManager.addView(noteView, params)
 
-            // Smooth scale from tiny to full size
-            noteView?.scaleX = 0.1f
-            noteView?.scaleY = 0.1f
+            // Smooth scale and fade in from center
+            noteView?.scaleX = 0.3f
+            noteView?.scaleY = 0.3f
             noteView?.alpha = 0f
+            noteView?.pivotX = 0f
+            noteView?.pivotY = 0f
             noteView?.animate()
                 ?.alpha(1f)
                 ?.scaleX(1f)
@@ -670,7 +654,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🔥 Smooth Collapse - NO SPLASH
+    // 🔥 Smooth Collapse - NO SPLASH effect
     private fun collapseToBubble() {
         if (!isExpanded) return
         EmergencyLog.logFlow("collapseToBubble", "START")
@@ -680,6 +664,7 @@ class FloatingBubbleService : Service() {
             saveNotepadSizeAndPosition(currentNotepadWidth, currentNotepadHeight, params.x, params.y)
         }
 
+        // Smooth fade out and scale down notepad without any splash
         noteView?.animate()
             ?.alpha(0f)
             ?.scaleX(0f)
@@ -691,9 +676,10 @@ class FloatingBubbleService : Service() {
                 noteView = null
                 isExpanded = false
                 createBubble()
+                // Bubble appears with smooth scale animation
                 bubbleView?.alpha = 0f
-                bubbleView?.scaleX = 0.1f
-                bubbleView?.scaleY = 0.1f
+                bubbleView?.scaleX = 0.3f
+                bubbleView?.scaleY = 0.3f
                 bubbleView?.animate()
                     ?.alpha(1f)
                     ?.scaleX(1f)
