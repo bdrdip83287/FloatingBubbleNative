@@ -26,8 +26,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
-import kotlin.math.PI
 
 class FloatingBubbleService : Service() {
 
@@ -77,7 +75,6 @@ class FloatingBubbleService : Service() {
 
     private var deleteZoneView: View? = null
     private var isInDeleteZone = false
-    private var springAnimator: ValueAnimator? = null
     private var flingAnimator: ValueAnimator? = null
 
     // Messenger-style physics variables
@@ -266,7 +263,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Messenger-style physics touch listener
+    // 🎯 Stable dock physics touch listener
     private fun setupBubbleTouchListener(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
@@ -291,7 +288,6 @@ class FloatingBubbleService : Service() {
                     MotionEvent.ACTION_DOWN -> {
 
                         flingAnimator?.cancel()
-                        springAnimator?.cancel()
 
                         initialX = params.x
                         initialY = params.y
@@ -361,7 +357,7 @@ class FloatingBubbleService : Service() {
                         velocityTracker?.recycle()
                         velocityTracker = null
 
-                        applyMessengerStyleFling(params, displayMetrics)
+                        applyStableDockPhysics(params, displayMetrics)
 
                         return true
                     }
@@ -389,8 +385,8 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🎯 Messenger-style fling physics
-    private fun applyMessengerStyleFling(
+    // 🎯 Stable dock physics - NO bounce, NO elastic, NO opposite side movement
+    private fun applyStableDockPhysics(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
     ) {
@@ -400,50 +396,43 @@ class FloatingBubbleService : Service() {
         val startX = params.x.toFloat()
         val startY = params.y.toFloat()
 
-        // Velocity multiplier
-        val projectedX = startX + (velocityX * 0.18f)
-        val projectedY = startY + (velocityY * 0.10f)
-
-        // Decide final dock edge ONLY by fling direction
-        val targetX = if (velocityX >= 0) {
-            screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
+        // FINAL SIDE ONLY FROM CURRENT POSITION (NOT velocity based)
+        val targetX = if (
+            params.x + (BUBBLE_SIZE / 2) < screenWidth / 2
+        ) {
+            -HIDDEN_WIDTH.toFloat()
         } else {
-            -HIDDEN_WIDTH
+            (screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH).toFloat()
         }
 
-        // Keep Y inside screen
-        val finalY = projectedY
-            .coerceIn(0f, (screenHeight - BUBBLE_SIZE - 120).toFloat())
-
-        val distanceX = targetX - startX
-        val distanceY = finalY - startY
-
-        val dynamicDuration = min(
-            700,
-            max(
-                280,
-                ((abs(distanceX) + abs(distanceY)) * 0.45f).toInt()
-            )
+        // Small vertical momentum only
+        val finalY = (
+            startY + (velocityY * 0.08f)
+        ).coerceIn(
+            0f,
+            (screenHeight - BUBBLE_SIZE - 120).toFloat()
         )
 
         flingAnimator?.cancel()
 
         flingAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
 
-            duration = dynamicDuration.toLong()
+            duration = 240L
 
+            // NO overshoot, NO bounce, NO elastic
             interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
 
                 val t = animator.animatedValue as Float
 
-                // Smooth curve motion
-                val curveOffset = sin(t * PI).toFloat() * (velocityY * 0.02f)
+                params.x = (
+                    startX + ((targetX - startX) * t)
+                ).toInt()
 
-                params.x = (startX + distanceX * t).toInt()
-
-                params.y = (startY + distanceY * t + curveOffset).toInt()
+                params.y = (
+                    startY + ((finalY - startY) * t)
+                ).toInt()
 
                 windowManager.updateViewLayout(bubbleView!!, params)
             }
@@ -458,7 +447,13 @@ class FloatingBubbleService : Service() {
 
                 override fun onAnimationEnd(animation: Animator) {
 
-                    applySpringDockEffect(params, targetX)
+                    // Final exact dock
+                    params.x = targetX.toInt()
+
+                    windowManager.updateViewLayout(bubbleView!!, params)
+
+                    // Tiny spring feel only (very small)
+                    applyTinySpringEffect(params, targetX.toInt())
                 }
             })
 
@@ -466,40 +461,36 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Corrected spring dock effect - NO opposite bounce
-    private fun applySpringDockEffect(
+    // 🎯 Tiny spring effect - minimal, no bounce
+    private fun applyTinySpringEffect(
         params: WindowManager.LayoutParams,
         targetX: Int
     ) {
-        springAnimator?.cancel()
-
         val startX = params.x.toFloat()
 
-        // Small elastic stretch amount (towards the edge, not opposite side)
+        // Very small elastic stretch (8px only)
         val stretchX = if (targetX < 0) {
-            targetX - 22f
+            targetX - 8f
         } else {
-            targetX + 22f
+            targetX + 8f
         }
 
-        springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+        val springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
 
-            duration = 320L
+            duration = 140L
 
-            // ✅ OvershootInterpolator removed - using DecelerateInterpolator
             interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
 
                 val t = animator.animatedValue as Float
 
-                // 0 → 0.75 = stretch towards edge
-                // 0.75 → 1 = return to dock position
-                val currentX = if (t < 0.75f) {
-                    val localT = t / 0.75f
+                // 0 → 0.7 = stretch, 0.7 → 1 = return
+                val currentX = if (t < 0.7f) {
+                    val localT = t / 0.7f
                     startX + ((stretchX - startX) * localT)
                 } else {
-                    val localT = (t - 0.75f) / 0.25f
+                    val localT = (t - 0.7f) / 0.3f
                     stretchX + ((targetX - stretchX) * localT)
                 }
 
@@ -530,7 +521,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Messenger-style smooth transition - Expand
+    // 🎯 Smooth transition - Expand
     private fun expandToNotePad() {
         if (isExpanded) return
 
@@ -916,7 +907,6 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        springAnimator?.cancel()
         flingAnimator?.cancel()
         velocityTracker?.recycle()
         bubbleView?.let { windowManager.removeView(it) }
