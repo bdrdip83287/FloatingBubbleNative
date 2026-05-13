@@ -1,8 +1,6 @@
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
@@ -36,7 +34,7 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_WIDTH = 600
     private val NOTEPAD_MAX_HEIGHT = 800
 
-    private val ANIMATION_DURATION = 250L
+    private val ANIMATION_DURATION = 200L
 
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
@@ -355,31 +353,75 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🎯 সঠিক স্মুথ ট্রানজিশন - বাবল থেকে নোটপ্যাড
+    // 🎯 সঠিক স্মুথ ট্রানজিশন - Pre-scale করে splash বন্ধ
     private fun expandToNotePad() {
         if (isExpanded) return
         
-        // Step 1: বাবলকে স্মুথলি অদৃশ্য করুন
-        bubbleView?.animate()
-            ?.scaleX(0f)
-            ?.scaleY(0f)
-            ?.alpha(0f)
-            ?.setDuration(ANIMATION_DURATION)
-            ?.setInterpolator(AccelerateDecelerateInterpolator())
-            ?.withEndAction {
-                // Step 2: বাবল রিমুভ করুন
+        // Step 1: নোটপ্যাড তৈরি করুন (অদৃশ্য অবস্থায়)
+        createAndShowNotePad()
+        
+        // Step 2: একই সাথে বাবল অদৃশ্য + নোটপ্যাড দৃশ্যমান করুন
+        val animatorSet = AnimatorSet()
+        
+        // বাবল অদৃশ্য হওয়ার অ্যানিমেশন
+        val bubbleAnim = bubbleView?.let {
+            ObjectAnimator.ofFloat(it, "scaleX", 1f, 0f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+            ObjectAnimator.ofFloat(it, "scaleY", 1f, 0f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+            ObjectAnimator.ofFloat(it, "alpha", 1f, 0f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+        }
+        
+        // নোটপ্যাড দৃশ্যমান হওয়ার অ্যানিমেশন
+        val noteAnim = noteView?.let {
+            it.scaleX = 0f
+            it.scaleY = 0f
+            it.alpha = 0f
+            arrayOf(
+                ObjectAnimator.ofFloat(it, "scaleX", 0f, 1f).apply {
+                    duration = ANIMATION_DURATION
+                    interpolator = AccelerateDecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(it, "scaleY", 0f, 1f).apply {
+                    duration = ANIMATION_DURATION
+                    interpolator = AccelerateDecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(it, "alpha", 0f, 1f).apply {
+                    duration = ANIMATION_DURATION
+                    interpolator = AccelerateDecelerateInterpolator()
+                }
+            )
+        }
+        
+        // সব অ্যানিমেশন একসাথে চালু করুন
+        val allAnimations = mutableListOf<Animator>()
+        bubbleAnim?.let { allAnimations.addAll(it) }
+        noteAnim?.let { allAnimations.addAll(it) }
+        
+        animatorSet.playTogether(allAnimations)
+        animatorSet.addListener(object : Animator.AnimatorListener {
+            override fun onAnimationStart(animation: Animator) {}
+            override fun onAnimationEnd(animation: Animator) {
+                // অ্যানিমেশন শেষে বাবল রিমুভ করুন
                 bubbleView?.let { windowManager.removeView(it) }
                 bubbleView = null
-                
-                // Step 3: নোটপ্যাড তৈরি করুন (অদৃশ্য অবস্থায়)
-                createAndShowNotePad()
+                isExpanded = true
             }
-            ?.start()
+            override fun onAnimationCancel(animation: Animator) {}
+            override fun onAnimationRepeat(animation: Animator) {}
+        })
+        animatorSet.start()
     }
     
     private fun createAndShowNotePad() {
         if (noteView != null) return
-        isExpanded = true
         
         try {
             val container = createResizableNotePad()
@@ -398,26 +440,12 @@ class FloatingBubbleService : Service() {
             
             windowManager.addView(noteView, params)
             
-            // Step 4: নোটপ্যাডকে অদৃশ্য অবস্থায় এনিমেট করুন
-            noteView?.scaleX = 0f
-            noteView?.scaleY = 0f
-            noteView?.alpha = 0f
-            
-            // Step 5: নোটপ্যাড স্মুথলি দৃশ্যমান করুন
-            noteView?.animate()
-                ?.alpha(1f)
-                ?.scaleX(1f)
-                ?.scaleY(1f)
-                ?.setDuration(ANIMATION_DURATION)
-                ?.setInterpolator(AccelerateDecelerateInterpolator())
-                ?.start()
-                
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showNotePad")
         }
     }
 
-    // 🎯 সঠিক স্মুথ ট্রানজিশন - নোটপ্যাড থেকে বাবল
+    // 🎯 সঠিক স্মুথ ট্রানজিশন - নোটপ্যাড থেকে বাবল (Pre-scale করে)
     private fun collapseToBubble() {
         if (!isExpanded) return
         
@@ -427,35 +455,67 @@ class FloatingBubbleService : Service() {
             saveNotepadSizeAndPosition(currentNotepadWidth, currentNotepadHeight, params.x, params.y)
         }
         
-        // Step 2: নোটপ্যাড স্মুথলি অদৃশ্য করুন
-        noteView?.animate()
-            ?.alpha(0f)
-            ?.scaleX(0f)
-            ?.scaleY(0f)
-            ?.setDuration(ANIMATION_DURATION)
-            ?.setInterpolator(AccelerateDecelerateInterpolator())
-            ?.withEndAction {
-                // Step 3: নোটপ্যাড রিমুভ করুন
+        // Step 2: বাবল তৈরি করুন (অদৃশ্য অবস্থায়)
+        createBubble()
+        bubbleView?.scaleX = 0f
+        bubbleView?.scaleY = 0f
+        bubbleView?.alpha = 0f
+        
+        // Step 3: একই সাথে নোটপ্যাড অদৃশ্য + বাবল দৃশ্যমান করুন
+        val animatorSet = AnimatorSet()
+        
+        // নোটপ্যাড অদৃশ্য হওয়ার অ্যানিমেশন
+        val noteAnim = noteView?.let {
+            ObjectAnimator.ofFloat(it, "scaleX", 1f, 0f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+            ObjectAnimator.ofFloat(it, "scaleY", 1f, 0f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+            ObjectAnimator.ofFloat(it, "alpha", 1f, 0f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+        }
+        
+        // বাবল দৃশ্যমান হওয়ার অ্যানিমেশন
+        val bubbleAnim = bubbleView?.let {
+            arrayOf(
+                ObjectAnimator.ofFloat(it, "scaleX", 0f, 1f).apply {
+                    duration = ANIMATION_DURATION
+                    interpolator = AccelerateDecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(it, "scaleY", 0f, 1f).apply {
+                    duration = ANIMATION_DURATION
+                    interpolator = AccelerateDecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(it, "alpha", 0f, 1f).apply {
+                    duration = ANIMATION_DURATION
+                    interpolator = AccelerateDecelerateInterpolator()
+                }
+            )
+        }
+        
+        // সব অ্যানিমেশন একসাথে চালু করুন
+        val allAnimations = mutableListOf<Animator>()
+        noteAnim?.let { allAnimations.addAll(it) }
+        bubbleAnim?.let { allAnimations.addAll(it) }
+        
+        animatorSet.playTogether(allAnimations)
+        animatorSet.addListener(object : Animator.AnimatorListener {
+            override fun onAnimationStart(animation: Animator) {}
+            override fun onAnimationEnd(animation: Animator) {
+                // অ্যানিমেশন শেষে নোটপ্যাড রিমুভ করুন
                 noteView?.let { windowManager.removeView(it) }
                 noteView = null
                 isExpanded = false
-                
-                // Step 4: বাবল তৈরি করুন (অদৃশ্য অবস্থায়)
-                createBubble()
-                
-                // Step 5: বাবল স্মুথলি দৃশ্যমান করুন
-                bubbleView?.scaleX = 0f
-                bubbleView?.scaleY = 0f
-                bubbleView?.alpha = 0f
-                bubbleView?.animate()
-                    ?.alpha(1f)
-                    ?.scaleX(1f)
-                    ?.scaleY(1f)
-                    ?.setDuration(ANIMATION_DURATION)
-                    ?.setInterpolator(AccelerateDecelerateInterpolator())
-                    ?.start()
             }
-            ?.start()
+            override fun onAnimationCancel(animation: Animator) {}
+            override fun onAnimationRepeat(animation: Animator) {}
+        })
+        animatorSet.start()
     }
 
     private fun createResizableNotePad(): View {
