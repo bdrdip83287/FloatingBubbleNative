@@ -24,6 +24,7 @@ import androidx.core.view.doOnLayout
 import com.dip83287.floatingbubble.utils.EmergencyLog
 import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.max
 
 class FloatingBubbleService : Service() {
 
@@ -31,8 +32,9 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_BG_COLOR = "#808080"
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 80
-    private val DELETE_ZONE_SIZE = 120
-    private val EDGE_SNAP_DISTANCE = 30
+    private val DELETE_ZONE_SIZE = 110
+    private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
+    private val EDGE_DISTANCE = 20
 
     private val NOTEPAD_TITLE = "📝 Floating Note"
     private val NOTEPAD_MIN_WIDTH = 300
@@ -74,9 +76,12 @@ class FloatingBubbleService : Service() {
     private var deleteZoneView: View? = null
     private var isInDeleteZone = false
     private var springAnimator: ValueAnimator? = null
+    private var flingAnimator: ValueAnimator? = null
 
-    private var lastFlingX = 0f
-    private var lastFlingTime = 0L
+    // Fling tracking variables
+    private var flingStartX = 0f
+    private var flingStartTime = 0L
+    private var flingVelocity = 0f
 
     override fun onCreate() {
         super.onCreate()
@@ -146,12 +151,12 @@ class FloatingBubbleService : Service() {
                     setColor(Color.RED)
                 }
                 background = shape
-                setPadding(35, 35, 35, 35)
+                setPadding(30, 30, 30, 30)
             }
 
             val cross = TextView(this).apply {
                 text = "✕"
-                textSize = 45f  // ✅ ছোট সাইজ, সেন্টারে থাকবে
+                textSize = 35f  // ✅ আরও ছোট, সেন্টারে
                 setTextColor(Color.WHITE)
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER
@@ -261,45 +266,7 @@ class FloatingBubbleService : Service() {
 
     private fun getDefaultX(displayMetrics: android.util.DisplayMetrics): Int {
         val screenWidth = displayMetrics.widthPixels
-        val hiddenPercent = 0.1f
-        val visibleWidth = BUBBLE_SIZE * (1 - hiddenPercent)
-        return (screenWidth - visibleWidth).toInt()
-    }
-
-    private fun calculateSnapPosition(params: WindowManager.LayoutParams, displayMetrics: android.util.DisplayMetrics): Int {
-        val screenWidth = displayMetrics.widthPixels
-        val bubbleCenter = params.x + BUBBLE_SIZE / 2
-        val hiddenWidth = (BUBBLE_SIZE * 0.1f).toInt()
-        
-        return if (bubbleCenter < screenWidth / 2) {
-            -hiddenWidth
-        } else {
-            screenWidth - BUBBLE_SIZE + hiddenWidth
-        }
-    }
-
-    private fun animateToEdgeWithSpring(params: WindowManager.LayoutParams, targetX: Int) {
-        if (targetX == params.x) return
-        
-        springAnimator?.cancel()
-        springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 350L
-            interpolator = OvershootInterpolator(0.7f)
-            addUpdateListener { animator ->
-                val fraction = animator.animatedValue as Float
-                params.x = (params.x + (targetX - params.x) * fraction).toInt()
-                windowManager.updateViewLayout(bubbleView!!, params)
-            }
-            addListener(object : Animator.AnimatorListener {
-                override fun onAnimationStart(animation: Animator) {}
-                override fun onAnimationEnd(animation: Animator) {
-                    saveBubblePosition(params.x, params.y)
-                }
-                override fun onAnimationCancel(animation: Animator) {}
-                override fun onAnimationRepeat(animation: Animator) {}
-            })
-            start()
-        }
+        return screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
     }
 
     private fun setupBubbleTouchListener(params: WindowManager.LayoutParams, displayMetrics: android.util.DisplayMetrics) {
@@ -314,12 +281,15 @@ class FloatingBubbleService : Service() {
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
+                        flingAnimator?.cancel()
                         initialX = params.x
                         initialY = params.y
                         touchX = event.rawX
                         touchY = event.rawY
                         lastMoveX = event.rawX
                         lastMoveTime = System.currentTimeMillis()
+                        flingStartX = event.rawX
+                        flingStartTime = System.currentTimeMillis()
                         isInDeleteZone = false
                         springAnimator?.cancel()
                         return true
@@ -369,34 +339,88 @@ class FloatingBubbleService : Service() {
                         }
                         
                         // Calculate fling velocity
-                        val timeDiff = System.currentTimeMillis() - lastMoveTime
-                        var velocityX = if (timeDiff > 0) (event.rawX - lastMoveX) * 1000 / timeDiff else 0f
-                        velocityX = velocityX.coerceIn(-3000f, 3000f)
-                        
-                        // Apply fling effect
-                        var targetX = params.x + (velocityX * 0.15f).toInt()
-                        val screenWidth = displayMetrics.widthPixels
-                        
-                        // Determine which edge to snap to with fling direction consideration
-                        val bubbleCenter = targetX + BUBBLE_SIZE / 2
-                        val hiddenWidth = (BUBBLE_SIZE * 0.1f).toInt()
-                        
-                        val finalTargetX = if (velocityX > 500) {
-                            screenWidth - BUBBLE_SIZE + hiddenWidth
-                        } else if (velocityX < -500) {
-                            -hiddenWidth
-                        } else {
-                            if (bubbleCenter < screenWidth / 2) -hiddenWidth else screenWidth - BUBBLE_SIZE + hiddenWidth
+                        val timeDiff = System.currentTimeMillis() - flingStartTime
+                        if (timeDiff > 0) {
+                            flingVelocity = (event.rawX - flingStartX) * 1000 / timeDiff
                         }
                         
-                        saveBubblePosition(params.x, params.y)
-                        animateToEdgeWithSpring(params, finalTargetX)
+                        // Apply fling effect - bubble continues moving in the direction of fling
+                        applyFlingEffect(params, displayMetrics)
                         return true
                     }
                 }
                 return false
             }
         })
+    }
+
+    private fun applyFlingEffect(params: WindowManager.LayoutParams, displayMetrics: android.util.DisplayMetrics) {
+        val screenWidth = displayMetrics.widthPixels
+        val targetEdge: Int
+        val startX = params.x
+        
+        // Determine which edge to go based on fling direction and current position
+        if (flingVelocity > 200) {
+            // Fling to the right
+            targetEdge = screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
+        } else if (flingVelocity < -200) {
+            // Fling to the left
+            targetEdge = -HIDDEN_WIDTH
+        } else {
+            // No significant fling, snap to nearest edge
+            val bubbleCenter = params.x + BUBBLE_SIZE / 2
+            targetEdge = if (bubbleCenter < screenWidth / 2) -HIDDEN_WIDTH else screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
+        }
+        
+        // Calculate distance to travel
+        val distance = targetEdge - startX
+        val duration = min(400, max(150, (abs(distance) * 1.5f).toInt()))
+        
+        flingAnimator?.cancel()
+        flingAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration.toLong()
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { animator ->
+                val fraction = animator.animatedValue as Float
+                params.x = (startX + distance * fraction).toInt()
+                windowManager.updateViewLayout(bubbleView!!, params)
+            }
+            addListener(object : Animator.AnimatorListener {
+                override fun onAnimationStart(animation: Animator) {}
+                override fun onAnimationEnd(animation: Animator) {
+                    // Apply spring effect at the end
+                    applySpringAtEdge(params, targetEdge)
+                }
+                override fun onAnimationCancel(animation: Animator) {}
+                override fun onAnimationRepeat(animation: Animator) {}
+            })
+            start()
+        }
+    }
+    
+    private fun applySpringAtEdge(params: WindowManager.LayoutParams, targetX: Int) {
+        val startX = params.x
+        if (startX == targetX) return
+        
+        springAnimator?.cancel()
+        springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 300L
+            interpolator = OvershootInterpolator(0.5f)
+            addUpdateListener { animator ->
+                val fraction = animator.animatedValue as Float
+                params.x = (startX + (targetX - startX) * fraction).toInt()
+                windowManager.updateViewLayout(bubbleView!!, params)
+            }
+            addListener(object : Animator.AnimatorListener {
+                override fun onAnimationStart(animation: Animator) {}
+                override fun onAnimationEnd(animation: Animator) {
+                    saveBubblePosition(params.x, params.y)
+                }
+                override fun onAnimationCancel(animation: Animator) {}
+                override fun onAnimationRepeat(animation: Animator) {}
+            })
+            start()
+        }
     }
 
     private fun setupBubbleLongClickListener() {
@@ -796,6 +820,7 @@ class FloatingBubbleService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         springAnimator?.cancel()
+        flingAnimator?.cancel()
         bubbleView?.let { windowManager.removeView(it) }
         noteView?.let { windowManager.removeView(it) }
         deleteZoneView?.let { windowManager.removeView(it) }
