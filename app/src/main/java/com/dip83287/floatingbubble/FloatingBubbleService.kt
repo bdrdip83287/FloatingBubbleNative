@@ -122,7 +122,7 @@ class FloatingBubbleService : Service() {
         currentNotepadHeight = prefs.getInt(KEY_NOTEPAD_HEIGHT, NOTEPAD_MIN_HEIGHT)
         notepadPosX = prefs.getInt(KEY_NOTEPAD_X, 0)
         notepadPosY = prefs.getInt(KEY_NOTEPAD_Y, 0)
-        EmergencyLog.log("Positions loaded: notepad=${currentNotepadWidth}x${currentNotepadHeight} pos=($notepadPosX,$notepadPosY)")
+        EmergencyLog.log("Positions loaded")
     }
 
     private fun saveBubblePosition(x: Int, y: Int) {
@@ -139,7 +139,7 @@ class FloatingBubbleService : Service() {
         currentNotepadHeight = height
         notepadPosX = x
         notepadPosY = y
-        EmergencyLog.log("Notepad saved: ${width}x${height} pos=($x,$y)")
+        EmergencyLog.log("Notepad saved: ${width}x${height}")
     }
 
     private fun createDeleteZone() {
@@ -172,7 +172,7 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = 50
+            params.y = 40
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
@@ -267,7 +267,7 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
-            EmergencyLog.logFlow("createBubble", "SUCCESS", "position=($defaultX,$defaultY)")
+            EmergencyLog.logFlow("createBubble", "SUCCESS")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
         }
@@ -296,12 +296,17 @@ class FloatingBubbleService : Service() {
                         windowManager.updateViewLayout(bubbleView!!, params)
 
                         val screenHeight = displayMetrics.heightPixels
-                        if (params.y + BUBBLE_SIZE > screenHeight - 150) {
-                            isDraggingToDelete = true
-                            showDeleteZone()
+                        // Delete zone detection (40px from bottom)
+                        if (params.y + BUBBLE_SIZE > screenHeight - 100) {
+                            if (!isDraggingToDelete) {
+                                isDraggingToDelete = true
+                                showDeleteZone()
+                            }
                         } else {
-                            isDraggingToDelete = false
-                            hideDeleteZone()
+                            if (isDraggingToDelete) {
+                                isDraggingToDelete = false
+                                hideDeleteZone()
+                            }
                         }
                         return true
                     }
@@ -375,6 +380,7 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
+    // 🎬 Smooth Expand with scale + alpha
     private fun expandToNotePad() {
         if (isExpanded) return
         EmergencyLog.logFlow("expandToNotePad", "START")
@@ -416,6 +422,7 @@ class FloatingBubbleService : Service() {
 
             windowManager.addView(noteView, params)
 
+            // Smooth fade-in + scale animation
             noteView?.scaleX = 0.5f
             noteView?.scaleY = 0.5f
             noteView?.alpha = 0f
@@ -427,7 +434,7 @@ class FloatingBubbleService : Service() {
                 ?.setInterpolator(AccelerateDecelerateInterpolator())
                 ?.start()
 
-            EmergencyLog.logFlow("showNotePad", "SUCCESS", "size=${currentNotepadWidth}x${currentNotepadHeight}")
+            EmergencyLog.logFlow("showNotePad", "SUCCESS")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showNotePad")
         }
@@ -645,6 +652,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // 🎬 Smooth Collapse with scale + alpha
     private fun collapseToBubble() {
         if (!isExpanded) return
         EmergencyLog.logFlow("collapseToBubble", "START")
