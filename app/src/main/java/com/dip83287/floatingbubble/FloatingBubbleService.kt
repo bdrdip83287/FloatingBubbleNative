@@ -1,6 +1,8 @@
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
@@ -22,9 +24,6 @@ import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
 
-    // ============================================================
-    // 🔧 কাস্টমাইজেশন সেকশন
-    // ============================================================
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#808080"
     private val BUBBLE_ICON = "📝"
@@ -37,7 +36,7 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_WIDTH = 600
     private val NOTEPAD_MAX_HEIGHT = 800
 
-    private val ANIMATION_DURATION = 200L
+    private val ANIMATION_DURATION = 250L
 
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
@@ -73,8 +72,6 @@ class FloatingBubbleService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        EmergencyLog.logFlow("FloatingBubbleService", "onCreate", "START")
-        
         try {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -82,7 +79,6 @@ class FloatingBubbleService : Service() {
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
-            EmergencyLog.logFlow("FloatingBubbleService", "onCreate", "SUCCESS")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
         }
@@ -90,20 +86,14 @@ class FloatingBubbleService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                val channel = NotificationChannel(
-                    "floating_bubble_channel",
-                    "Floating Bubble",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "Keeps floating bubble alive"
-                }
-                val manager = getSystemService(NotificationManager::class.java)
-                manager.createNotificationChannel(channel)
-                EmergencyLog.log("Notification channel created")
-            } catch (e: Exception) {
-                EmergencyLog.logException(e, "createNotificationChannel")
+            val channel = NotificationChannel(
+                "floating_bubble_channel",
+                "Floating Bubble",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps floating bubble alive"
             }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
@@ -172,7 +162,6 @@ class FloatingBubbleService : Service() {
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
-            EmergencyLog.log("Delete zone created at bottom +80px")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createDeleteZone")
         }
@@ -181,7 +170,6 @@ class FloatingBubbleService : Service() {
     private fun showDeleteZone() {
         if (deleteZoneView?.visibility != View.VISIBLE) {
             deleteZoneView?.visibility = View.VISIBLE
-            EmergencyLog.log("Delete zone shown")
         }
     }
 
@@ -287,7 +275,6 @@ class FloatingBubbleService : Service() {
                         val screenHeight = displayMetrics.heightPixels
                         val deleteZoneY = screenHeight - DELETE_ZONE_SIZE - 80
                         
-                        // Delete zone detection - enters zone area when bubble bottom reaches delete zone
                         if (params.y + BUBBLE_SIZE > deleteZoneY) {
                             if (!isInDeleteZone) {
                                 isInDeleteZone = true
@@ -304,7 +291,6 @@ class FloatingBubbleService : Service() {
                     MotionEvent.ACTION_UP -> {
                         hideDeleteZone()
                         if (isInDeleteZone) {
-                            EmergencyLog.log("Bubble deleted via delete zone")
                             deleteBubble()
                             return true
                         }
@@ -324,7 +310,6 @@ class FloatingBubbleService : Service() {
 
     private fun setupBubbleLongClickListener() {
         bubbleView?.setOnLongClickListener {
-            EmergencyLog.log("Bubble closed by long press")
             stopSelf()
             true
         }
@@ -367,15 +352,14 @@ class FloatingBubbleService : Service() {
     }
 
     private fun deleteBubble() {
-        EmergencyLog.log("Bubble service stopping")
         stopSelf()
     }
 
-    // 🔥 স্মুথ এক্সপান্ড - কোনো স্প্ল্যাশ নেই
+    // 🎯 সঠিক স্মুথ ট্রানজিশন - বাবল থেকে নোটপ্যাড
     private fun expandToNotePad() {
         if (isExpanded) return
-
-        // বাবল স্মুথলি ফেইড আউট এবং স্কেল ডাউন
+        
+        // Step 1: বাবলকে স্মুথলি অদৃশ্য করুন
         bubbleView?.animate()
             ?.scaleX(0f)
             ?.scaleY(0f)
@@ -383,21 +367,24 @@ class FloatingBubbleService : Service() {
             ?.setDuration(ANIMATION_DURATION)
             ?.setInterpolator(AccelerateDecelerateInterpolator())
             ?.withEndAction {
+                // Step 2: বাবল রিমুভ করুন
                 bubbleView?.let { windowManager.removeView(it) }
                 bubbleView = null
-                showNotePad()
+                
+                // Step 3: নোটপ্যাড তৈরি করুন (অদৃশ্য অবস্থায়)
+                createAndShowNotePad()
             }
             ?.start()
     }
-
-    private fun showNotePad() {
+    
+    private fun createAndShowNotePad() {
         if (noteView != null) return
         isExpanded = true
-
+        
         try {
             val container = createResizableNotePad()
             noteView = container
-
+            
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -408,15 +395,15 @@ class FloatingBubbleService : Service() {
             params.gravity = Gravity.TOP or Gravity.START
             params.x = notepadPosX
             params.y = notepadPosY
-
+            
             windowManager.addView(noteView, params)
-
-            // নোটপ্যাড স্মুথলি ফেইড ইন (কেন্দ্র থেকে স্কেল)
-            noteView?.pivotX = 0f
-            noteView?.pivotY = 0f
-            noteView?.scaleX = 0.3f
-            noteView?.scaleY = 0.3f
+            
+            // Step 4: নোটপ্যাডকে অদৃশ্য অবস্থায় এনিমেট করুন
+            noteView?.scaleX = 0f
+            noteView?.scaleY = 0f
             noteView?.alpha = 0f
+            
+            // Step 5: নোটপ্যাড স্মুথলি দৃশ্যমান করুন
             noteView?.animate()
                 ?.alpha(1f)
                 ?.scaleX(1f)
@@ -424,10 +411,51 @@ class FloatingBubbleService : Service() {
                 ?.setDuration(ANIMATION_DURATION)
                 ?.setInterpolator(AccelerateDecelerateInterpolator())
                 ?.start()
-
+                
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showNotePad")
         }
+    }
+
+    // 🎯 সঠিক স্মুথ ট্রানজিশন - নোটপ্যাড থেকে বাবল
+    private fun collapseToBubble() {
+        if (!isExpanded) return
+        
+        // Step 1: নোটপ্যাডের পজিশন সেভ করুন
+        val params = noteView?.layoutParams as WindowManager.LayoutParams
+        if (params != null) {
+            saveNotepadSizeAndPosition(currentNotepadWidth, currentNotepadHeight, params.x, params.y)
+        }
+        
+        // Step 2: নোটপ্যাড স্মুথলি অদৃশ্য করুন
+        noteView?.animate()
+            ?.alpha(0f)
+            ?.scaleX(0f)
+            ?.scaleY(0f)
+            ?.setDuration(ANIMATION_DURATION)
+            ?.setInterpolator(AccelerateDecelerateInterpolator())
+            ?.withEndAction {
+                // Step 3: নোটপ্যাড রিমুভ করুন
+                noteView?.let { windowManager.removeView(it) }
+                noteView = null
+                isExpanded = false
+                
+                // Step 4: বাবল তৈরি করুন (অদৃশ্য অবস্থায়)
+                createBubble()
+                
+                // Step 5: বাবল স্মুথলি দৃশ্যমান করুন
+                bubbleView?.scaleX = 0f
+                bubbleView?.scaleY = 0f
+                bubbleView?.alpha = 0f
+                bubbleView?.animate()
+                    ?.alpha(1f)
+                    ?.scaleX(1f)
+                    ?.scaleY(1f)
+                    ?.setDuration(ANIMATION_DURATION)
+                    ?.setInterpolator(AccelerateDecelerateInterpolator())
+                    ?.start()
+            }
+            ?.start()
     }
 
     private fun createResizableNotePad(): View {
@@ -642,41 +670,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🔥 স্মুথ কোলাপ্স - কোনো স্প্ল্যাশ নেই
-    private fun collapseToBubble() {
-        if (!isExpanded) return
-
-        val params = noteView?.layoutParams as WindowManager.LayoutParams
-        if (params != null) {
-            saveNotepadSizeAndPosition(currentNotepadWidth, currentNotepadHeight, params.x, params.y)
-        }
-
-        // নোটপ্যাড স্মুথলি ফেইড আউট
-        noteView?.animate()
-            ?.alpha(0f)
-            ?.scaleX(0f)
-            ?.scaleY(0f)
-            ?.setDuration(ANIMATION_DURATION)
-            ?.setInterpolator(AccelerateDecelerateInterpolator())
-            ?.withEndAction {
-                noteView?.let { windowManager.removeView(it) }
-                noteView = null
-                isExpanded = false
-                createBubble()
-                bubbleView?.alpha = 0f
-                bubbleView?.scaleX = 0.3f
-                bubbleView?.scaleY = 0.3f
-                bubbleView?.animate()
-                    ?.alpha(1f)
-                    ?.scaleX(1f)
-                    ?.scaleY(1f)
-                    ?.setDuration(ANIMATION_DURATION)
-                    ?.setInterpolator(AccelerateDecelerateInterpolator())
-                    ?.start()
-            }
-            ?.start()
-    }
-
     private fun loadNoteCount(countView: TextView) {
         val count = getSharedPreferences("notes_prefs", MODE_PRIVATE).getInt(STORAGE_NOTE_COUNT, 0)
         if (count > 0) {
@@ -699,7 +692,6 @@ class FloatingBubbleService : Service() {
             updateNoteCount()
             Toast.makeText(this, "Note saved! Total: ${currentCount + 1}", Toast.LENGTH_SHORT).show()
             editText.setText("")
-            EmergencyLog.log("Note saved, total count: ${currentCount + 1}")
         } else {
             Toast.makeText(this, "Please write something", Toast.LENGTH_SHORT).show()
         }
