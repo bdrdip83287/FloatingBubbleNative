@@ -37,6 +37,7 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_SIZE = 80
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
+    private val EDGE_BOUNCE_OFFSET = 40
 
     private val NOTEPAD_TITLE = "📝 Floating Note"
     private val NOTEPAD_MIN_WIDTH = 300
@@ -389,7 +390,7 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🎯 Corrected fling direction - goes to the side you fling to
+    // 🎯 Corrected fling - goes exactly where you throw, then bounces at that edge
     private fun applyMessengerStyleFling(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
@@ -400,30 +401,24 @@ class FloatingBubbleService : Service() {
         val startX = params.x.toFloat()
         val startY = params.y.toFloat()
 
-        // ✅ Fling direction decides the target edge
-        // If velocityX is positive (fling to right), target is right edge
-        // If velocityX is negative (fling to left), target is left edge
-        val targetX = if (velocityX >= 0) {
-            screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH  // Right edge
+        // 🔥 Fling direction decides the target edge (same direction)
+        val targetX = if (velocityX > 0) {
+            // Threw to the right -> go to right edge
+            screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
         } else {
-            -HIDDEN_WIDTH  // Left edge
+            // Threw to the left -> go to left edge
+            -HIDDEN_WIDTH
         }
 
-        // Keep Y within screen bounds
-        val finalY = startY + (velocityY * 0.10f)
-        val clampedY = finalY.coerceIn(0f, (screenHeight - BUBBLE_SIZE - 120).toFloat())
+        // Y position with slight inertia
+        val finalY = startY + (velocityY * 0.08f)
+        val clampedY = finalY.coerceIn(0f, (screenHeight - BUBBLE_SIZE - 100).toFloat())
 
         val distanceX = targetX - startX
         val distanceY = clampedY - startY
 
-        // Calculate duration based on distance and velocity
-        val dynamicDuration = min(
-            650,
-            max(
-            250,
-            ((abs(distanceX) * 0.6f).toInt())
-            )
-        ).toLong()
+        // Dynamic duration based on distance
+        val dynamicDuration = min(500, max(200, (abs(distanceX) * 0.5f).toInt())).toLong()
 
         flingAnimator?.cancel()
 
@@ -434,8 +429,7 @@ class FloatingBubbleService : Service() {
 
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
-                
-                // Ease out curve for smooth stop
+                // Smooth ease-out curve
                 val easedT = 1f - (1f - t) * (1f - t)
                 
                 params.x = (startX + distanceX * easedT).toInt()
@@ -449,8 +443,8 @@ class FloatingBubbleService : Service() {
                 override fun onAnimationRepeat(animation: Animator) {}
                 override fun onAnimationCancel(animation: Animator) {}
                 override fun onAnimationEnd(animation: Animator) {
-                    // Apply spring effect after reaching target
-                    applySpringDockEffect(params, targetX)
+                    // Apply elastic bounce at the same edge (not opposite!)
+                    applyElasticBounce(params, targetX)
                 }
             })
 
@@ -458,45 +452,42 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Elastic spring effect - bounces at the edge
-    private fun applySpringDockEffect(
+    // 🎯 Elastic bounce at the same edge - bounces but stays on same side
+    private fun applyElasticBounce(
         params: WindowManager.LayoutParams,
         targetX: Int
     ) {
-        // Calculate overshoot target (bounce beyond the edge)
-        val overshootX = if (targetX < 0) {
-            targetX - 45  // Bounce left beyond left edge
+        // Calculate bounce target (overshoot beyond the edge, then come back)
+        val bounceTargetX = if (targetX < 0) {
+            // Left edge: overshoot further left by 35px
+            targetX - EDGE_BOUNCE_OFFSET
         } else {
-            targetX + 45  // Bounce right beyond right edge
+            // Right edge: overshoot further right by 35px
+            targetX + EDGE_BOUNCE_OFFSET
         }
 
         springAnimator?.cancel()
 
         springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
 
-            duration = 500L
-            interpolator = OvershootInterpolator(2.2f)  // Stronger spring effect
+            duration = 450L
+            interpolator = OvershootInterpolator(1.5f)
 
             val startX = params.x
 
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
                 
-                // Overshoot then settle to target
-                val currentTarget = if (t < 0.6f) {
-                    overshootX
+                // Bounce effect: go to bounce target first, then settle to target
+                val currentX = if (t < 0.5f) {
+                    val progress = t / 0.5f
+                    startX + (bounceTargetX - startX) * progress
                 } else {
-                    // Smooth transition from overshoot to target
-                    val overshootProgress = t / 0.6f
-                    val settleProgress = (t - 0.6f) / 0.4f
-                    if (t < 0.6f) {
-                        startX + (overshootX - startX) * overshootProgress
-                    } else {
-                        overshootX + (targetX - overshootX) * settleProgress
-                    }
+                    val progress = (t - 0.5f) / 0.5f
+                    bounceTargetX + (targetX - bounceTargetX) * progress
                 }
                 
-                params.x = currentTarget.toInt()
+                params.x = currentX.toInt()
                 windowManager.updateViewLayout(bubbleView!!, params)
             }
 
@@ -505,7 +496,7 @@ class FloatingBubbleService : Service() {
                 override fun onAnimationRepeat(animation: Animator) {}
                 override fun onAnimationCancel(animation: Animator) {}
                 override fun onAnimationEnd(animation: Animator) {
-                    // Final exact position
+                    // Final position exactly at target edge
                     params.x = targetX
                     windowManager.updateViewLayout(bubbleView!!, params)
                     saveBubblePosition(params.x, params.y)
