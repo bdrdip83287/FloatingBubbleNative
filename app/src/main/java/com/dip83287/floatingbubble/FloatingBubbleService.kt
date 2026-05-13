@@ -17,8 +17,10 @@ import android.os.*
 import android.provider.Settings
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.core.app.NotificationCompat
+import androidx.core.view.doOnLayout
 import com.dip83287.floatingbubble.utils.EmergencyLog
 import kotlin.math.abs
 
@@ -356,63 +358,68 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
+    // 🎯 Messenger-style smooth transition - Expand
     private fun expandToNotePad() {
         if (isExpanded) return
-        
-        // Step 1: নোটপ্যাড তৈরি করুন (অদৃশ্য অবস্থায়)
-        createAndShowNotePad()
-        
-        // Step 2: একসাথে অ্যানিমেশন চালান
-        val animatorSet = AnimatorSet()
-        val animations = mutableListOf<Animator>()
-        
-        // বাবল অদৃশ্য হওয়ার অ্যানিমেশন
-        bubbleView?.let { view ->
-            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 1f, 0f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 1f, 0f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "alpha", 1f, 0f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-        }
-        
-        // নোটপ্যাড দৃশ্যমান হওয়ার অ্যানিমেশন
-        noteView?.let { view ->
-            view.scaleX = 0f
-            view.scaleY = 0f
-            view.alpha = 0f
-            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 0f, 1f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 0f, 1f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "alpha", 0f, 1f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-        }
-        
-        animatorSet.playTogether(animations)
-        animatorSet.addListener(object : Animator.AnimatorListener {
-            override fun onAnimationStart(animation: Animator) {}
-            override fun onAnimationEnd(animation: Animator) {
-                bubbleView?.let { windowManager.removeView(it) }
-                bubbleView = null
-                isExpanded = true
+
+        try {
+            createAndShowNotePad()
+
+            val bubble = bubbleView ?: return
+            val note = noteView ?: return
+
+            // Hardware layer for smoother rendering
+            bubble.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            note.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+            // Initial hidden state
+            note.alpha = 0f
+            note.scaleX = 0.85f
+            note.scaleY = 0.85f
+            note.translationY = 40f
+
+            note.doOnLayout {
+
+                // Proper pivot
+                note.pivotX = (note.width / 2).toFloat()
+                note.pivotY = 0f
+
+                bubble.animate()
+                    .alpha(0f)
+                    .scaleX(0.6f)
+                    .scaleY(0.6f)
+                    .setDuration(140)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .start()
+
+                note.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationY(0f)
+                    .setDuration(220)
+                    .setInterpolator(OvershootInterpolator(0.6f))
+                    .withEndAction {
+
+                        try {
+                            bubbleView?.let {
+                                windowManager.removeView(it)
+                            }
+                        } catch (_: Exception) {
+                        }
+
+                        bubbleView = null
+                        isExpanded = true
+
+                        bubble.setLayerType(View.LAYER_TYPE_NONE, null)
+                        note.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
             }
-            override fun onAnimationCancel(animation: Animator) {}
-            override fun onAnimationRepeat(animation: Animator) {}
-        })
-        animatorSet.start()
+
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "expandToNotePad")
+        }
     }
     
     private fun createAndShowNotePad() {
@@ -440,69 +447,78 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // 🎯 Messenger-style smooth transition - Collapse
     private fun collapseToBubble() {
         if (!isExpanded) return
-        
-        // Step 1: নোটপ্যাডের পজিশন সেভ করুন
-        val params = noteView?.layoutParams as WindowManager.LayoutParams
-        if (params != null) {
-            saveNotepadSizeAndPosition(currentNotepadWidth, currentNotepadHeight, params.x, params.y)
-        }
-        
-        // Step 2: বাবল তৈরি করুন (অদৃশ্য অবস্থায়)
-        createBubble()
-        bubbleView?.scaleX = 0f
-        bubbleView?.scaleY = 0f
-        bubbleView?.alpha = 0f
-        
-        // Step 3: একসাথে অ্যানিমেশন চালান
-        val animatorSet = AnimatorSet()
-        val animations = mutableListOf<Animator>()
-        
-        // নোটপ্যাড অদৃশ্য হওয়ার অ্যানিমেশন
-        noteView?.let { view ->
-            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 1f, 0f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 1f, 0f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "alpha", 1f, 0f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-        }
-        
-        // বাবল দৃশ্যমান হওয়ার অ্যানিমেশন
-        bubbleView?.let { view ->
-            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 0f, 1f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 0f, 1f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-            animations.add(ObjectAnimator.ofFloat(view, "alpha", 0f, 1f).apply {
-                duration = ANIMATION_DURATION
-                interpolator = AccelerateDecelerateInterpolator()
-            })
-        }
-        
-        animatorSet.playTogether(animations)
-        animatorSet.addListener(object : Animator.AnimatorListener {
-            override fun onAnimationStart(animation: Animator) {}
-            override fun onAnimationEnd(animation: Animator) {
-                noteView?.let { windowManager.removeView(it) }
-                noteView = null
-                isExpanded = false
+
+        try {
+
+            val note = noteView ?: return
+
+            val params = note.layoutParams as WindowManager.LayoutParams
+
+            saveNotepadSizeAndPosition(
+                currentNotepadWidth,
+                currentNotepadHeight,
+                params.x,
+                params.y
+            )
+
+            createBubble()
+
+            val bubble = bubbleView ?: return
+
+            bubble.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            note.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+            // Bubble initial state
+            bubble.alpha = 0f
+            bubble.scaleX = 0.5f
+            bubble.scaleY = 0.5f
+            bubble.translationY = 30f
+
+            bubble.doOnLayout {
+
+                bubble.pivotX = (bubble.width / 2).toFloat()
+                bubble.pivotY = (bubble.height / 2).toFloat()
+
+                note.animate()
+                    .alpha(0f)
+                    .scaleX(0.88f)
+                    .scaleY(0.88f)
+                    .translationY(25f)
+                    .setDuration(160)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .start()
+
+                bubble.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationY(0f)
+                    .setDuration(220)
+                    .setInterpolator(OvershootInterpolator(0.55f))
+                    .withEndAction {
+
+                        try {
+                            noteView?.let {
+                                windowManager.removeView(it)
+                            }
+                        } catch (_: Exception) {
+                        }
+
+                        noteView = null
+                        isExpanded = false
+
+                        bubble.setLayerType(View.LAYER_TYPE_NONE, null)
+                        note.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
             }
-            override fun onAnimationCancel(animation: Animator) {}
-            override fun onAnimationRepeat(animation: Animator) {}
-        })
-        animatorSet.start()
+
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "collapseToBubble")
+        }
     }
 
     private fun createResizableNotePad(): View {
@@ -616,7 +632,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(openAppBtn)
 
-        // ✅ সঠিক রিসাইজ হ্যান্ডেল
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 20f
@@ -675,7 +690,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ সঠিক রিসাইজ টাচ লিসেনার
     inner class ResizeTouchListener : View.OnTouchListener {
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
