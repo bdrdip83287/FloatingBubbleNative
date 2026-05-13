@@ -1,6 +1,8 @@
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
@@ -63,6 +65,7 @@ class FloatingBubbleService : Service() {
     private var resizeStartY = 0
     private var resizeStartWidth = 0
     private var resizeStartHeight = 0
+    private var resizeTouchTime = 0L
 
     private var deleteZoneView: View? = null
     private var isInDeleteZone = false
@@ -353,63 +356,55 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🎯 সঠিক স্মুথ ট্রানজিশন - Pre-scale করে splash বন্ধ
     private fun expandToNotePad() {
         if (isExpanded) return
         
         // Step 1: নোটপ্যাড তৈরি করুন (অদৃশ্য অবস্থায়)
         createAndShowNotePad()
         
-        // Step 2: একই সাথে বাবল অদৃশ্য + নোটপ্যাড দৃশ্যমান করুন
+        // Step 2: একসাথে অ্যানিমেশন চালান
         val animatorSet = AnimatorSet()
+        val animations = mutableListOf<Animator>()
         
         // বাবল অদৃশ্য হওয়ার অ্যানিমেশন
-        val bubbleAnim = bubbleView?.let {
-            ObjectAnimator.ofFloat(it, "scaleX", 1f, 0f).apply {
+        bubbleView?.let { view ->
+            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 1f, 0f).apply {
                 duration = ANIMATION_DURATION
                 interpolator = AccelerateDecelerateInterpolator()
-            }
-            ObjectAnimator.ofFloat(it, "scaleY", 1f, 0f).apply {
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 1f, 0f).apply {
                 duration = ANIMATION_DURATION
                 interpolator = AccelerateDecelerateInterpolator()
-            }
-            ObjectAnimator.ofFloat(it, "alpha", 1f, 0f).apply {
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "alpha", 1f, 0f).apply {
                 duration = ANIMATION_DURATION
                 interpolator = AccelerateDecelerateInterpolator()
-            }
+            })
         }
         
         // নোটপ্যাড দৃশ্যমান হওয়ার অ্যানিমেশন
-        val noteAnim = noteView?.let {
-            it.scaleX = 0f
-            it.scaleY = 0f
-            it.alpha = 0f
-            arrayOf(
-                ObjectAnimator.ofFloat(it, "scaleX", 0f, 1f).apply {
-                    duration = ANIMATION_DURATION
-                    interpolator = AccelerateDecelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(it, "scaleY", 0f, 1f).apply {
-                    duration = ANIMATION_DURATION
-                    interpolator = AccelerateDecelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(it, "alpha", 0f, 1f).apply {
-                    duration = ANIMATION_DURATION
-                    interpolator = AccelerateDecelerateInterpolator()
-                }
-            )
+        noteView?.let { view ->
+            view.scaleX = 0f
+            view.scaleY = 0f
+            view.alpha = 0f
+            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 0f, 1f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 0f, 1f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "alpha", 0f, 1f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            })
         }
         
-        // সব অ্যানিমেশন একসাথে চালু করুন
-        val allAnimations = mutableListOf<Animator>()
-        bubbleAnim?.let { allAnimations.addAll(it) }
-        noteAnim?.let { allAnimations.addAll(it) }
-        
-        animatorSet.playTogether(allAnimations)
+        animatorSet.playTogether(animations)
         animatorSet.addListener(object : Animator.AnimatorListener {
             override fun onAnimationStart(animation: Animator) {}
             override fun onAnimationEnd(animation: Animator) {
-                // অ্যানিমেশন শেষে বাবল রিমুভ করুন
                 bubbleView?.let { windowManager.removeView(it) }
                 bubbleView = null
                 isExpanded = true
@@ -445,7 +440,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 সঠিক স্মুথ ট্রানজিশন - নোটপ্যাড থেকে বাবল (Pre-scale করে)
     private fun collapseToBubble() {
         if (!isExpanded) return
         
@@ -461,53 +455,46 @@ class FloatingBubbleService : Service() {
         bubbleView?.scaleY = 0f
         bubbleView?.alpha = 0f
         
-        // Step 3: একই সাথে নোটপ্যাড অদৃশ্য + বাবল দৃশ্যমান করুন
+        // Step 3: একসাথে অ্যানিমেশন চালান
         val animatorSet = AnimatorSet()
+        val animations = mutableListOf<Animator>()
         
         // নোটপ্যাড অদৃশ্য হওয়ার অ্যানিমেশন
-        val noteAnim = noteView?.let {
-            ObjectAnimator.ofFloat(it, "scaleX", 1f, 0f).apply {
+        noteView?.let { view ->
+            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 1f, 0f).apply {
                 duration = ANIMATION_DURATION
                 interpolator = AccelerateDecelerateInterpolator()
-            }
-            ObjectAnimator.ofFloat(it, "scaleY", 1f, 0f).apply {
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 1f, 0f).apply {
                 duration = ANIMATION_DURATION
                 interpolator = AccelerateDecelerateInterpolator()
-            }
-            ObjectAnimator.ofFloat(it, "alpha", 1f, 0f).apply {
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "alpha", 1f, 0f).apply {
                 duration = ANIMATION_DURATION
                 interpolator = AccelerateDecelerateInterpolator()
-            }
+            })
         }
         
         // বাবল দৃশ্যমান হওয়ার অ্যানিমেশন
-        val bubbleAnim = bubbleView?.let {
-            arrayOf(
-                ObjectAnimator.ofFloat(it, "scaleX", 0f, 1f).apply {
-                    duration = ANIMATION_DURATION
-                    interpolator = AccelerateDecelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(it, "scaleY", 0f, 1f).apply {
-                    duration = ANIMATION_DURATION
-                    interpolator = AccelerateDecelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(it, "alpha", 0f, 1f).apply {
-                    duration = ANIMATION_DURATION
-                    interpolator = AccelerateDecelerateInterpolator()
-                }
-            )
+        bubbleView?.let { view ->
+            animations.add(ObjectAnimator.ofFloat(view, "scaleX", 0f, 1f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "scaleY", 0f, 1f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            })
+            animations.add(ObjectAnimator.ofFloat(view, "alpha", 0f, 1f).apply {
+                duration = ANIMATION_DURATION
+                interpolator = AccelerateDecelerateInterpolator()
+            })
         }
         
-        // সব অ্যানিমেশন একসাথে চালু করুন
-        val allAnimations = mutableListOf<Animator>()
-        noteAnim?.let { allAnimations.addAll(it) }
-        bubbleAnim?.let { allAnimations.addAll(it) }
-        
-        animatorSet.playTogether(allAnimations)
+        animatorSet.playTogether(animations)
         animatorSet.addListener(object : Animator.AnimatorListener {
             override fun onAnimationStart(animation: Animator) {}
             override fun onAnimationEnd(animation: Animator) {
-                // অ্যানিমেশন শেষে নোটপ্যাড রিমুভ করুন
                 noteView?.let { windowManager.removeView(it) }
                 noteView = null
                 isExpanded = false
@@ -629,6 +616,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(openAppBtn)
 
+        // ✅ সঠিক রিসাইজ হ্যান্ডেল
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 20f
@@ -687,6 +675,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ✅ সঠিক রিসাইজ টাচ লিসেনার
     inner class ResizeTouchListener : View.OnTouchListener {
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -696,14 +685,16 @@ class FloatingBubbleService : Service() {
                     resizeStartY = event.rawY.toInt()
                     resizeStartWidth = currentNotepadWidth
                     resizeStartHeight = currentNotepadHeight
+                    resizeTouchTime = System.currentTimeMillis()
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (isResizing) {
                         val dx = event.rawX.toInt() - resizeStartX
                         val dy = event.rawY.toInt() - resizeStartY
-                        val newWidth = (resizeStartWidth + dx).coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
-                        val newHeight = (resizeStartHeight + dy).coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
+                        var newWidth = (resizeStartWidth + dx).coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
+                        var newHeight = (resizeStartHeight + dy).coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
+                        
                         if (newWidth != currentNotepadWidth || newHeight != currentNotepadHeight) {
                             currentNotepadWidth = newWidth
                             currentNotepadHeight = newHeight
@@ -717,7 +708,7 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP -> {
                     isResizing = false
                     val params = noteView?.layoutParams as WindowManager.LayoutParams
-                    if (params != null) {
+                    if (params != null && System.currentTimeMillis() - resizeTouchTime > 100) {
                         saveNotepadSizeAndPosition(
                             currentNotepadWidth, currentNotepadHeight,
                             params.x, params.y
