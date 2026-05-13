@@ -23,6 +23,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
 import com.dip83287.floatingbubble.utils.EmergencyLog
 import kotlin.math.abs
+import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -31,6 +32,7 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 80
     private val DELETE_ZONE_SIZE = 120
+    private val EDGE_SNAP_DISTANCE = 30
 
     private val NOTEPAD_TITLE = "📝 Floating Note"
     private val NOTEPAD_MIN_WIDTH = 300
@@ -72,6 +74,9 @@ class FloatingBubbleService : Service() {
     private var deleteZoneView: View? = null
     private var isInDeleteZone = false
     private var springAnimator: ValueAnimator? = null
+
+    private var lastFlingX = 0f
+    private var lastFlingTime = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -146,10 +151,11 @@ class FloatingBubbleService : Service() {
 
             val cross = TextView(this).apply {
                 text = "✕"
-                textSize = 55f
+                textSize = 45f  // ✅ ছোট সাইজ, সেন্টারে থাকবে
                 setTextColor(Color.WHITE)
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER
+                setPadding(0, 0, 0, 0)
             }
             zone.addView(cross)
 
@@ -238,7 +244,7 @@ class FloatingBubbleService : Service() {
             params.gravity = Gravity.TOP or Gravity.START
 
             val displayMetrics = resources.displayMetrics
-            val defaultX = prefs.getInt(KEY_BUBBLE_X, displayMetrics.widthPixels - BUBBLE_SIZE - 20)
+            val defaultX = prefs.getInt(KEY_BUBBLE_X, getDefaultX(displayMetrics))
             val defaultY = prefs.getInt(KEY_BUBBLE_Y, 150)
             params.x = defaultX
             params.y = defaultY
@@ -253,12 +259,57 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    private fun getDefaultX(displayMetrics: android.util.DisplayMetrics): Int {
+        val screenWidth = displayMetrics.widthPixels
+        val hiddenPercent = 0.1f
+        val visibleWidth = BUBBLE_SIZE * (1 - hiddenPercent)
+        return (screenWidth - visibleWidth).toInt()
+    }
+
+    private fun calculateSnapPosition(params: WindowManager.LayoutParams, displayMetrics: android.util.DisplayMetrics): Int {
+        val screenWidth = displayMetrics.widthPixels
+        val bubbleCenter = params.x + BUBBLE_SIZE / 2
+        val hiddenWidth = (BUBBLE_SIZE * 0.1f).toInt()
+        
+        return if (bubbleCenter < screenWidth / 2) {
+            -hiddenWidth
+        } else {
+            screenWidth - BUBBLE_SIZE + hiddenWidth
+        }
+    }
+
+    private fun animateToEdgeWithSpring(params: WindowManager.LayoutParams, targetX: Int) {
+        if (targetX == params.x) return
+        
+        springAnimator?.cancel()
+        springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 350L
+            interpolator = OvershootInterpolator(0.7f)
+            addUpdateListener { animator ->
+                val fraction = animator.animatedValue as Float
+                params.x = (params.x + (targetX - params.x) * fraction).toInt()
+                windowManager.updateViewLayout(bubbleView!!, params)
+            }
+            addListener(object : Animator.AnimatorListener {
+                override fun onAnimationStart(animation: Animator) {}
+                override fun onAnimationEnd(animation: Animator) {
+                    saveBubblePosition(params.x, params.y)
+                }
+                override fun onAnimationCancel(animation: Animator) {}
+                override fun onAnimationRepeat(animation: Animator) {}
+            })
+            start()
+        }
+    }
+
     private fun setupBubbleTouchListener(params: WindowManager.LayoutParams, displayMetrics: android.util.DisplayMetrics) {
         bubbleView?.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var touchX = 0f
             private var touchY = 0f
+            private var lastMoveX = 0f
+            private var lastMoveTime = 0L
 
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
@@ -267,14 +318,18 @@ class FloatingBubbleService : Service() {
                         initialY = params.y
                         touchX = event.rawX
                         touchY = event.rawY
+                        lastMoveX = event.rawX
+                        lastMoveTime = System.currentTimeMillis()
                         isInDeleteZone = false
+                        springAnimator?.cancel()
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params.x = initialX + (event.rawX - touchX).toInt()
-                        params.y = initialY + (event.rawY - touchY).toInt()
-                        windowManager.updateViewLayout(bubbleView!!, params)
-
+                        val dx = event.rawX - touchX
+                        val dy = event.rawY - touchY
+                        params.x = initialX + dx.toInt()
+                        params.y = initialY + dy.toInt()
+                        
                         val screenHeight = displayMetrics.heightPixels
                         val deleteZoneY = screenHeight - DELETE_ZONE_SIZE - 80
                         
@@ -289,20 +344,53 @@ class FloatingBubbleService : Service() {
                                 hideDeleteZone()
                             }
                         }
+                        
+                        windowManager.updateViewLayout(bubbleView!!, params)
+                        
+                        lastMoveX = event.rawX
+                        lastMoveTime = System.currentTimeMillis()
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
                         hideDeleteZone()
+                        
                         if (isInDeleteZone) {
                             deleteBubble()
                             return true
                         }
-                        if (abs(event.rawX - touchX) < 10 && abs(event.rawY - touchY) < 10) {
+                        
+                        val deltaX = abs(event.rawX - touchX)
+                        val deltaY = abs(event.rawY - touchY)
+                        
+                        // Click detection
+                        if (deltaX < 10 && deltaY < 10) {
                             expandToNotePad()
-                        } else {
-                            saveBubblePosition(params.x, params.y)
-                            springToEdge(params)
+                            return true
                         }
+                        
+                        // Calculate fling velocity
+                        val timeDiff = System.currentTimeMillis() - lastMoveTime
+                        var velocityX = if (timeDiff > 0) (event.rawX - lastMoveX) * 1000 / timeDiff else 0f
+                        velocityX = velocityX.coerceIn(-3000f, 3000f)
+                        
+                        // Apply fling effect
+                        var targetX = params.x + (velocityX * 0.15f).toInt()
+                        val screenWidth = displayMetrics.widthPixels
+                        
+                        // Determine which edge to snap to with fling direction consideration
+                        val bubbleCenter = targetX + BUBBLE_SIZE / 2
+                        val hiddenWidth = (BUBBLE_SIZE * 0.1f).toInt()
+                        
+                        val finalTargetX = if (velocityX > 500) {
+                            screenWidth - BUBBLE_SIZE + hiddenWidth
+                        } else if (velocityX < -500) {
+                            -hiddenWidth
+                        } else {
+                            if (bubbleCenter < screenWidth / 2) -hiddenWidth else screenWidth - BUBBLE_SIZE + hiddenWidth
+                        }
+                        
+                        saveBubblePosition(params.x, params.y)
+                        animateToEdgeWithSpring(params, finalTargetX)
                         return true
                     }
                 }
@@ -318,47 +406,10 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun springToEdge(params: WindowManager.LayoutParams) {
-        val displayMetrics = resources.displayMetrics
-        val screenWidth = displayMetrics.widthPixels
-        val edgeDistance = 50
-        val targetX: Int
-        val startX = params.x
-
-        if (params.x + BUBBLE_SIZE / 2 > screenWidth / 2) {
-            targetX = screenWidth - BUBBLE_SIZE - edgeDistance
-        } else {
-            targetX = edgeDistance
-        }
-
-        if (targetX != startX) {
-            springAnimator?.cancel()
-            springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 300L
-                interpolator = AccelerateDecelerateInterpolator()
-                addUpdateListener { animator ->
-                    val fraction = animator.animatedValue as Float
-                    params.x = (startX + (targetX - startX) * fraction).toInt()
-                    windowManager.updateViewLayout(bubbleView!!, params)
-                }
-                addListener(object : Animator.AnimatorListener {
-                    override fun onAnimationStart(animation: Animator) {}
-                    override fun onAnimationEnd(animation: Animator) {
-                        saveBubblePosition(params.x, params.y)
-                    }
-                    override fun onAnimationCancel(animation: Animator) {}
-                    override fun onAnimationRepeat(animation: Animator) {}
-                })
-                start()
-            }
-        }
-    }
-
     private fun deleteBubble() {
         stopSelf()
     }
 
-    // 🎯 Messenger-style smooth transition - Expand
     private fun expandToNotePad() {
         if (isExpanded) return
 
@@ -368,19 +419,15 @@ class FloatingBubbleService : Service() {
             val bubble = bubbleView ?: return
             val note = noteView ?: return
 
-            // Hardware layer for smoother rendering
             bubble.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             note.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-            // Initial hidden state
             note.alpha = 0f
             note.scaleX = 0.85f
             note.scaleY = 0.85f
             note.translationY = 40f
 
             note.doOnLayout {
-
-                // Proper pivot
                 note.pivotX = (note.width / 2).toFloat()
                 note.pivotY = 0f
 
@@ -400,13 +447,9 @@ class FloatingBubbleService : Service() {
                     .setDuration(220)
                     .setInterpolator(OvershootInterpolator(0.6f))
                     .withEndAction {
-
                         try {
-                            bubbleView?.let {
-                                windowManager.removeView(it)
-                            }
-                        } catch (_: Exception) {
-                        }
+                            bubbleView?.let { windowManager.removeView(it) }
+                        } catch (_: Exception) { }
 
                         bubbleView = null
                         isExpanded = true
@@ -416,7 +459,6 @@ class FloatingBubbleService : Service() {
                     }
                     .start()
             }
-
         } catch (e: Exception) {
             EmergencyLog.logException(e, "expandToNotePad")
         }
@@ -447,14 +489,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Messenger-style smooth transition - Collapse
     private fun collapseToBubble() {
         if (!isExpanded) return
 
         try {
-
             val note = noteView ?: return
-
             val params = note.layoutParams as WindowManager.LayoutParams
 
             saveNotepadSizeAndPosition(
@@ -465,20 +504,17 @@ class FloatingBubbleService : Service() {
             )
 
             createBubble()
-
             val bubble = bubbleView ?: return
 
             bubble.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             note.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-            // Bubble initial state
             bubble.alpha = 0f
             bubble.scaleX = 0.5f
             bubble.scaleY = 0.5f
             bubble.translationY = 30f
 
             bubble.doOnLayout {
-
                 bubble.pivotX = (bubble.width / 2).toFloat()
                 bubble.pivotY = (bubble.height / 2).toFloat()
 
@@ -499,13 +535,9 @@ class FloatingBubbleService : Service() {
                     .setDuration(220)
                     .setInterpolator(OvershootInterpolator(0.55f))
                     .withEndAction {
-
                         try {
-                            noteView?.let {
-                                windowManager.removeView(it)
-                            }
-                        } catch (_: Exception) {
-                        }
+                            noteView?.let { windowManager.removeView(it) }
+                        } catch (_: Exception) { }
 
                         noteView = null
                         isExpanded = false
@@ -515,7 +547,6 @@ class FloatingBubbleService : Service() {
                     }
                     .start()
             }
-
         } catch (e: Exception) {
             EmergencyLog.logException(e, "collapseToBubble")
         }
@@ -706,8 +737,8 @@ class FloatingBubbleService : Service() {
                     if (isResizing) {
                         val dx = event.rawX.toInt() - resizeStartX
                         val dy = event.rawY.toInt() - resizeStartY
-                        var newWidth = (resizeStartWidth + dx).coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
-                        var newHeight = (resizeStartHeight + dy).coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
+                        val newWidth = (resizeStartWidth + dx).coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
+                        val newHeight = (resizeStartHeight + dy).coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
                         
                         if (newWidth != currentNotepadWidth || newHeight != currentNotepadHeight) {
                             currentNotepadWidth = newWidth
