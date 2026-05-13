@@ -18,7 +18,6 @@ import android.provider.Settings
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
@@ -26,8 +25,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
-import kotlin.math.PI
 
 class FloatingBubbleService : Service() {
 
@@ -37,7 +34,6 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_SIZE = 80
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
-    private val EDGE_BOUNCE_OFFSET = 40
 
     private val NOTEPAD_TITLE = "📝 Floating Note"
     private val NOTEPAD_MIN_WIDTH = 300
@@ -78,7 +74,6 @@ class FloatingBubbleService : Service() {
 
     private var deleteZoneView: View? = null
     private var isInDeleteZone = false
-    private var springAnimator: ValueAnimator? = null
     private var flingAnimator: ValueAnimator? = null
 
     // Messenger-style physics variables
@@ -292,7 +287,6 @@ class FloatingBubbleService : Service() {
                     MotionEvent.ACTION_DOWN -> {
 
                         flingAnimator?.cancel()
-                        springAnimator?.cancel()
 
                         initialX = params.x
                         initialY = params.y
@@ -390,7 +384,7 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🎯 Corrected fling - goes exactly where you throw, then bounces at that edge
+    // 🎯 Simple fling - goes exactly where you throw, smooth stop at edge
     private fun applyMessengerStyleFling(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
@@ -401,7 +395,7 @@ class FloatingBubbleService : Service() {
         val startX = params.x.toFloat()
         val startY = params.y.toFloat()
 
-        // 🔥 Fling direction decides the target edge (same direction)
+        // Fling direction decides the target edge (same direction)
         val targetX = if (velocityX > 0) {
             // Threw to the right -> go to right edge
             screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
@@ -443,60 +437,7 @@ class FloatingBubbleService : Service() {
                 override fun onAnimationRepeat(animation: Animator) {}
                 override fun onAnimationCancel(animation: Animator) {}
                 override fun onAnimationEnd(animation: Animator) {
-                    // Apply elastic bounce at the same edge (not opposite!)
-                    applyElasticBounce(params, targetX)
-                }
-            })
-
-            start()
-        }
-    }
-
-    // 🎯 Elastic bounce at the same edge - bounces but stays on same side
-    private fun applyElasticBounce(
-        params: WindowManager.LayoutParams,
-        targetX: Int
-    ) {
-        // Calculate bounce target (overshoot beyond the edge, then come back)
-        val bounceTargetX = if (targetX < 0) {
-            // Left edge: overshoot further left by 35px
-            targetX - EDGE_BOUNCE_OFFSET
-        } else {
-            // Right edge: overshoot further right by 35px
-            targetX + EDGE_BOUNCE_OFFSET
-        }
-
-        springAnimator?.cancel()
-
-        springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-
-            duration = 450L
-            interpolator = OvershootInterpolator(1.5f)
-
-            val startX = params.x
-
-            addUpdateListener { animator ->
-                val t = animator.animatedValue as Float
-                
-                // Bounce effect: go to bounce target first, then settle to target
-                val currentX = if (t < 0.5f) {
-                    val progress = t / 0.5f
-                    startX + (bounceTargetX - startX) * progress
-                } else {
-                    val progress = (t - 0.5f) / 0.5f
-                    bounceTargetX + (targetX - bounceTargetX) * progress
-                }
-                
-                params.x = currentX.toInt()
-                windowManager.updateViewLayout(bubbleView!!, params)
-            }
-
-            addListener(object : Animator.AnimatorListener {
-                override fun onAnimationStart(animation: Animator) {}
-                override fun onAnimationRepeat(animation: Animator) {}
-                override fun onAnimationCancel(animation: Animator) {}
-                override fun onAnimationEnd(animation: Animator) {
-                    // Final position exactly at target edge
+                    // Final exact position at target edge
                     params.x = targetX
                     windowManager.updateViewLayout(bubbleView!!, params)
                     saveBubblePosition(params.x, params.y)
@@ -543,7 +484,7 @@ class FloatingBubbleService : Service() {
                     .scaleY(1f)
                     .translationY(0f)
                     .setDuration(220)
-                    .setInterpolator(OvershootInterpolator(0.6f))
+                    .setInterpolator(AccelerateDecelerateInterpolator())
                     .withEndAction {
                         try {
                             bubbleView?.let { windowManager.removeView(it) }
@@ -631,7 +572,7 @@ class FloatingBubbleService : Service() {
                     .scaleY(1f)
                     .translationY(0f)
                     .setDuration(220)
-                    .setInterpolator(OvershootInterpolator(0.55f))
+                    .setInterpolator(AccelerateDecelerateInterpolator())
                     .withEndAction {
                         try {
                             noteView?.let { windowManager.removeView(it) }
@@ -893,7 +834,6 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        springAnimator?.cancel()
         flingAnimator?.cancel()
         velocityTracker?.recycle()
         bubbleView?.let { windowManager.removeView(it) }
