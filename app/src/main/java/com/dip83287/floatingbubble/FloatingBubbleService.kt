@@ -14,7 +14,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.*
 import android.provider.Settings
 import android.view.*
-import android.view.animation.*
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import com.dip83287.floatingbubble.utils.EmergencyLog
@@ -68,7 +68,7 @@ class FloatingBubbleService : Service() {
     private var resizeStartHeight = 0
 
     private var deleteZoneView: View? = null
-    private var isDraggingToDelete = false
+    private var isInDeleteZone = false
     private var springAnimator: ValueAnimator? = null
 
     override fun onCreate() {
@@ -80,6 +80,7 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
             createNotificationChannel()
+            startForeground(1001, createNotification())
             createDeleteZone()
             EmergencyLog.logFlow("FloatingBubbleService", "onCreate", "SUCCESS")
         } catch (e: Exception) {
@@ -120,7 +121,6 @@ class FloatingBubbleService : Service() {
         currentNotepadHeight = prefs.getInt(KEY_NOTEPAD_HEIGHT, NOTEPAD_MIN_HEIGHT)
         notepadPosX = prefs.getInt(KEY_NOTEPAD_X, 0)
         notepadPosY = prefs.getInt(KEY_NOTEPAD_Y, 0)
-        EmergencyLog.log("Positions loaded")
     }
 
     private fun saveBubblePosition(x: Int, y: Int) {
@@ -172,18 +172,23 @@ class FloatingBubbleService : Service() {
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
-            EmergencyLog.log("Delete zone created")
+            EmergencyLog.log("Delete zone created at bottom +80px")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createDeleteZone")
         }
     }
 
     private fun showDeleteZone() {
-        deleteZoneView?.visibility = View.VISIBLE
+        if (deleteZoneView?.visibility != View.VISIBLE) {
+            deleteZoneView?.visibility = View.VISIBLE
+            EmergencyLog.log("Delete zone shown")
+        }
     }
 
     private fun hideDeleteZone() {
-        deleteZoneView?.visibility = View.GONE
+        if (deleteZoneView?.visibility != View.GONE) {
+            deleteZoneView?.visibility = View.GONE
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -249,6 +254,7 @@ class FloatingBubbleService : Service() {
 
             loadNoteCount(countView)
             setupBubbleTouchListener(params, displayMetrics)
+            setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
         } catch (e: Exception) {
@@ -270,7 +276,7 @@ class FloatingBubbleService : Service() {
                         initialY = params.y
                         touchX = event.rawX
                         touchY = event.rawY
-                        isDraggingToDelete = false
+                        isInDeleteZone = false
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
@@ -279,14 +285,17 @@ class FloatingBubbleService : Service() {
                         windowManager.updateViewLayout(bubbleView!!, params)
 
                         val screenHeight = displayMetrics.heightPixels
-                        if (params.y + BUBBLE_SIZE > screenHeight - 150) {
-                            if (!isDraggingToDelete) {
-                                isDraggingToDelete = true
+                        val deleteZoneY = screenHeight - DELETE_ZONE_SIZE - 80
+                        
+                        // Delete zone detection - enters zone area when bubble bottom reaches delete zone
+                        if (params.y + BUBBLE_SIZE > deleteZoneY) {
+                            if (!isInDeleteZone) {
+                                isInDeleteZone = true
                                 showDeleteZone()
                             }
                         } else {
-                            if (isDraggingToDelete) {
-                                isDraggingToDelete = false
+                            if (isInDeleteZone) {
+                                isInDeleteZone = false
                                 hideDeleteZone()
                             }
                         }
@@ -294,7 +303,8 @@ class FloatingBubbleService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         hideDeleteZone()
-                        if (isDraggingToDelete) {
+                        if (isInDeleteZone) {
+                            EmergencyLog.log("Bubble deleted via delete zone")
                             deleteBubble()
                             return true
                         }
@@ -310,8 +320,11 @@ class FloatingBubbleService : Service() {
                 return false
             }
         })
-        
+    }
+
+    private fun setupBubbleLongClickListener() {
         bubbleView?.setOnLongClickListener {
+            EmergencyLog.log("Bubble closed by long press")
             stopSelf()
             true
         }
@@ -354,6 +367,7 @@ class FloatingBubbleService : Service() {
     }
 
     private fun deleteBubble() {
+        EmergencyLog.log("Bubble service stopping")
         stopSelf()
     }
 
@@ -361,7 +375,7 @@ class FloatingBubbleService : Service() {
     private fun expandToNotePad() {
         if (isExpanded) return
 
-        // বাবল স্মুথলি ফেইড আউট
+        // বাবল স্মুথলি ফেইড আউট এবং স্কেল ডাউন
         bubbleView?.animate()
             ?.scaleX(0f)
             ?.scaleY(0f)
@@ -397,7 +411,9 @@ class FloatingBubbleService : Service() {
 
             windowManager.addView(noteView, params)
 
-            // নোটপ্যাড স্মুথলি ফেইড ইন
+            // নোটপ্যাড স্মুথলি ফেইড ইন (কেন্দ্র থেকে স্কেল)
+            noteView?.pivotX = 0f
+            noteView?.pivotY = 0f
             noteView?.scaleX = 0.3f
             noteView?.scaleY = 0.3f
             noteView?.alpha = 0f
@@ -683,6 +699,7 @@ class FloatingBubbleService : Service() {
             updateNoteCount()
             Toast.makeText(this, "Note saved! Total: ${currentCount + 1}", Toast.LENGTH_SHORT).show()
             editText.setText("")
+            EmergencyLog.log("Note saved, total count: ${currentCount + 1}")
         } else {
             Toast.makeText(this, "Please write something", Toast.LENGTH_SHORT).show()
         }
