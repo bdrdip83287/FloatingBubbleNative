@@ -389,7 +389,7 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🎯 Messenger-style fling physics
+    // 🎯 Corrected fling direction - goes to the side you fling to
     private fun applyMessengerStyleFling(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
@@ -400,64 +400,56 @@ class FloatingBubbleService : Service() {
         val startX = params.x.toFloat()
         val startY = params.y.toFloat()
 
-        // Velocity multiplier
-        val projectedX = startX + (velocityX * 0.18f)
-        val projectedY = startY + (velocityY * 0.10f)
-
-        // Decide final dock edge ONLY by fling direction
+        // ✅ Fling direction decides the target edge
+        // If velocityX is positive (fling to right), target is right edge
+        // If velocityX is negative (fling to left), target is left edge
         val targetX = if (velocityX >= 0) {
-            screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
+            screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH  // Right edge
         } else {
-            -HIDDEN_WIDTH
+            -HIDDEN_WIDTH  // Left edge
         }
 
-        // Keep Y inside screen
-        val finalY = projectedY
-            .coerceIn(0f, (screenHeight - BUBBLE_SIZE - 120).toFloat())
+        // Keep Y within screen bounds
+        val finalY = startY + (velocityY * 0.10f)
+        val clampedY = finalY.coerceIn(0f, (screenHeight - BUBBLE_SIZE - 120).toFloat())
 
         val distanceX = targetX - startX
-        val distanceY = finalY - startY
+        val distanceY = clampedY - startY
 
+        // Calculate duration based on distance and velocity
         val dynamicDuration = min(
-            700,
+            650,
             max(
-                280,
-                ((abs(distanceX) + abs(distanceY)) * 0.45f).toInt()
+            250,
+            ((abs(distanceX) * 0.6f).toInt())
             )
-        )
+        ).toLong()
 
         flingAnimator?.cancel()
 
         flingAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
 
-            duration = dynamicDuration.toLong()
-
+            duration = dynamicDuration
             interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
-
                 val t = animator.animatedValue as Float
-
-                // Smooth curve motion
-                val curveOffset = sin(t * PI).toFloat() * (velocityY * 0.02f)
-
-                params.x = (startX + distanceX * t).toInt()
-
-                params.y = (startY + distanceY * t + curveOffset).toInt()
+                
+                // Ease out curve for smooth stop
+                val easedT = 1f - (1f - t) * (1f - t)
+                
+                params.x = (startX + distanceX * easedT).toInt()
+                params.y = (startY + distanceY * t).toInt()
 
                 windowManager.updateViewLayout(bubbleView!!, params)
             }
 
             addListener(object : Animator.AnimatorListener {
-
                 override fun onAnimationStart(animation: Animator) {}
-
                 override fun onAnimationRepeat(animation: Animator) {}
-
                 override fun onAnimationCancel(animation: Animator) {}
-
                 override fun onAnimationEnd(animation: Animator) {
-
+                    // Apply spring effect after reaching target
                     applySpringDockEffect(params, targetX)
                 }
             })
@@ -466,52 +458,56 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Messenger-style spring dock effect
+    // 🎯 Elastic spring effect - bounces at the edge
     private fun applySpringDockEffect(
         params: WindowManager.LayoutParams,
         targetX: Int
     ) {
-        val overshoot = if (targetX < 0) {
-            targetX - 35
+        // Calculate overshoot target (bounce beyond the edge)
+        val overshootX = if (targetX < 0) {
+            targetX - 45  // Bounce left beyond left edge
         } else {
-            targetX + 35
+            targetX + 45  // Bounce right beyond right edge
         }
 
         springAnimator?.cancel()
 
         springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
 
-            duration = 420L
-
-            interpolator = OvershootInterpolator(1.8f)
+            duration = 500L
+            interpolator = OvershootInterpolator(2.2f)  // Stronger spring effect
 
             val startX = params.x
 
             addUpdateListener { animator ->
-
                 val t = animator.animatedValue as Float
-
-                val currentTarget = if (t < 0.7f) overshoot else targetX
-
-                params.x = (startX + (currentTarget - startX) * t).toInt()
-
+                
+                // Overshoot then settle to target
+                val currentTarget = if (t < 0.6f) {
+                    overshootX
+                } else {
+                    // Smooth transition from overshoot to target
+                    val overshootProgress = t / 0.6f
+                    val settleProgress = (t - 0.6f) / 0.4f
+                    if (t < 0.6f) {
+                        startX + (overshootX - startX) * overshootProgress
+                    } else {
+                        overshootX + (targetX - overshootX) * settleProgress
+                    }
+                }
+                
+                params.x = currentTarget.toInt()
                 windowManager.updateViewLayout(bubbleView!!, params)
             }
 
             addListener(object : Animator.AnimatorListener {
-
                 override fun onAnimationStart(animation: Animator) {}
-
                 override fun onAnimationRepeat(animation: Animator) {}
-
                 override fun onAnimationCancel(animation: Animator) {}
-
                 override fun onAnimationEnd(animation: Animator) {
-
+                    // Final exact position
                     params.x = targetX
-
                     windowManager.updateViewLayout(bubbleView!!, params)
-
                     saveBubblePosition(params.x, params.y)
                 }
             })
