@@ -925,8 +925,7 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // Selection
-            isTextSelectable = true
+            // Selection - Fixed: Removed isTextSelectable = true (it's read-only)
             setTextIsSelectable(true)
             customSelectionActionModeCallback = object : ActionMode.Callback {
                 override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean = true
@@ -944,9 +943,8 @@ class FloatingBubbleService : Service() {
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // Performance layer
+            // Performance layer - Fixed: Removed setTextKeepState(true)
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            setTextKeepState(true)
             isScrollbarFadingEnabled = false
             scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
             
