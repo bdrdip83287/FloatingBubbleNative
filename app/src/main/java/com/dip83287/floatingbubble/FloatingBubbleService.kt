@@ -19,7 +19,6 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
-import android.text.method.ScrollingMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -99,7 +98,7 @@ class FloatingBubbleService : Service() {
     private lateinit var recyclerView: RecyclerView
     private var isInEditorMode = false
     private var currentEditingNoteId = -1L
-    private var saveHandler = Handler(Looper.getMainLooper())
+    private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
     data class NoteItem(
@@ -700,7 +699,7 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
         }
 
-        // Top bar with drag handle and minimize button
+        // Top bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -749,7 +748,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(noteCountText)
 
-        // RecyclerView for notes list
+        // RecyclerView
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -879,7 +878,7 @@ class FloatingBubbleService : Service() {
         topBar.addView(minimizeBtn)
         container.addView(topBar)
 
-        // Optimized Title Input
+        // Title input
         titleInput = EditText(this).apply {
             setText(note.title)
             hint = "Title"
@@ -903,7 +902,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // Ultra-optimized EditText with native text selection
+        // Optimized EditText
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -919,14 +918,14 @@ class FloatingBubbleService : Service() {
             maxLines = Int.MAX_VALUE
             minHeight = 300
             
-            // Android native text engine
+            // Text input type
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // Cursor + selection
+            // Selection
             isTextSelectable = true
             setTextIsSelectable(true)
             customSelectionActionModeCallback = object : ActionMode.Callback {
@@ -936,7 +935,7 @@ class FloatingBubbleService : Service() {
                 override fun onDestroyActionMode(mode: ActionMode?) {}
             }
             
-            // Smooth cursor movement
+            // Cursor movement
             movementMethod = ArrowKeyMovementMethod.getInstance()
             
             setOnClickListener {
@@ -945,13 +944,13 @@ class FloatingBubbleService : Service() {
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // Huge text performance
+            // Performance layer
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             setTextKeepState(true)
             isScrollbarFadingEnabled = false
             scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
             
-            // No lag text watcher with delayed auto-save
+            // Text watcher with auto-save
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
@@ -960,11 +959,12 @@ class FloatingBubbleService : Service() {
                     saveRunnable = Runnable {
                         val index = notesList.indexOfFirst { it.id == note.id }
                         if (index != -1) {
-                            notesList[index] = notesList[index].copy(
+                            val updatedNote = notesList[index].copy(
                                 content = text.toString(),
                                 title = titleInput.text.toString(),
                                 lastEdited = System.currentTimeMillis()
                             )
+                            notesList[index] = updatedNote
                             saveNotesToPrefs()
                         }
                     }
@@ -1073,11 +1073,12 @@ class FloatingBubbleService : Service() {
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
-            notesList[index] = notesList[index].copy(
+            val updatedNote = notesList[index].copy(
                 title = titleInput.text.toString().ifEmpty { "Untitled Note" },
                 content = editText.text.toString(),
                 lastEdited = System.currentTimeMillis()
             )
+            notesList[index] = updatedNote
             saveNotesToPrefs()
             notesAdapter.updateList(notesList)
             updateBubbleCount()
