@@ -8,6 +8,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.PixelFormat
@@ -15,10 +17,14 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.*
 import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
+import android.text.method.ScrollingMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.view.inputmethod.EditorInfo
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
@@ -37,8 +43,8 @@ class FloatingBubbleService : Service() {
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
     private val NOTEPAD_TITLE = "📝 Floating Note"
-    private val NOTEPAD_MIN_WIDTH = 300
-    private val NOTEPAD_MIN_HEIGHT = 400
+    private val NOTEPAD_MIN_WIDTH = 350
+    private val NOTEPAD_MIN_HEIGHT = 450
     private val NOTEPAD_MAX_WIDTH = 600
     private val NOTEPAD_MAX_HEIGHT = 800
 
@@ -61,6 +67,7 @@ class FloatingBubbleService : Service() {
     private var noteView: View? = null
     private var isExpanded = false
     private lateinit var editText: EditText
+    private lateinit var wordCountView: TextView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
@@ -81,6 +88,11 @@ class FloatingBubbleService : Service() {
     private var velocityTracker: VelocityTracker? = null
     private var velocityX = 0f
     private var velocityY = 0f
+
+    // Undo/Redo stacks
+    private val undoStack = mutableListOf<String>()
+    private val redoStack = mutableListOf<String>()
+    private var isUndoRedoOperation = false
 
     override fun onCreate() {
         super.onCreate()
@@ -263,7 +275,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Stable dock physics touch listener
     private fun setupBubbleTouchListener(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
@@ -343,7 +354,6 @@ class FloatingBubbleService : Service() {
                         val deltaX = abs(event.rawX - touchX)
                         val deltaY = abs(event.rawY - touchY)
 
-                        // Click detection
                         if (deltaX < 10 && deltaY < 10) {
                             expandToNotePad()
                             return true
@@ -385,7 +395,6 @@ class FloatingBubbleService : Service() {
         stopSelf()
     }
 
-    // 🎯 Stable dock physics - NO bounce, NO elastic, NO opposite side movement
     private fun applyStableDockPhysics(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
@@ -396,7 +405,6 @@ class FloatingBubbleService : Service() {
         val startX = params.x.toFloat()
         val startY = params.y.toFloat()
 
-        // FINAL SIDE ONLY FROM CURRENT POSITION (NOT velocity based)
         val targetX = if (
             params.x + (BUBBLE_SIZE / 2) < screenWidth / 2
         ) {
@@ -405,7 +413,6 @@ class FloatingBubbleService : Service() {
             (screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH).toFloat()
         }
 
-        // Small vertical momentum only
         val finalY = (
             startY + (velocityY * 0.08f)
         ).coerceIn(
@@ -418,8 +425,6 @@ class FloatingBubbleService : Service() {
         flingAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
 
             duration = 240L
-
-            // NO overshoot, NO bounce, NO elastic
             interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
@@ -440,19 +445,12 @@ class FloatingBubbleService : Service() {
             addListener(object : Animator.AnimatorListener {
 
                 override fun onAnimationStart(animation: Animator) {}
-
                 override fun onAnimationRepeat(animation: Animator) {}
-
                 override fun onAnimationCancel(animation: Animator) {}
-
                 override fun onAnimationEnd(animation: Animator) {
 
-                    // Final exact dock
                     params.x = targetX.toInt()
-
                     windowManager.updateViewLayout(bubbleView!!, params)
-
-                    // Tiny spring feel only (very small)
                     applyTinySpringEffect(params, targetX.toInt())
                 }
             })
@@ -461,14 +459,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Tiny spring effect - minimal, no bounce
     private fun applyTinySpringEffect(
         params: WindowManager.LayoutParams,
         targetX: Int
     ) {
         val startX = params.x.toFloat()
-
-        // Very small elastic stretch (8px only)
         val stretchX = if (targetX < 0) {
             targetX - 8f
         } else {
@@ -478,14 +473,12 @@ class FloatingBubbleService : Service() {
         val springAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
 
             duration = 140L
-
             interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
 
                 val t = animator.animatedValue as Float
 
-                // 0 → 0.7 = stretch, 0.7 → 1 = return
                 val currentX = if (t < 0.7f) {
                     val localT = t / 0.7f
                     startX + ((stretchX - startX) * localT)
@@ -495,24 +488,18 @@ class FloatingBubbleService : Service() {
                 }
 
                 params.x = currentX.toInt()
-
                 windowManager.updateViewLayout(bubbleView!!, params)
             }
 
             addListener(object : Animator.AnimatorListener {
 
                 override fun onAnimationStart(animation: Animator) {}
-
                 override fun onAnimationRepeat(animation: Animator) {}
-
                 override fun onAnimationCancel(animation: Animator) {}
-
                 override fun onAnimationEnd(animation: Animator) {
 
                     params.x = targetX
-
                     windowManager.updateViewLayout(bubbleView!!, params)
-
                     saveBubblePosition(params.x, params.y)
                 }
             })
@@ -521,7 +508,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎯 Smooth transition - Expand
+    // 📝 Messenger-style complete note pad with all features
     private fun expandToNotePad() {
         if (isExpanded) return
 
@@ -664,14 +651,16 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // 🎨 Complete Messenger-style note pad with all features
     private fun createResizableNotePad(): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            setPadding(24, 24, 24, 24)
+            setPadding(20, 20, 20, 20)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 24f
         }
 
+        // Title bar
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -679,6 +668,7 @@ class FloatingBubbleService : Service() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             setOnTouchListener(TitleBarDragListener())
+            setPadding(8, 8, 8, 8)
         }
 
         val title = TextView(this).apply {
@@ -700,89 +690,203 @@ class FloatingBubbleService : Service() {
         titleBar.addView(minimizeBtn)
         container.addView(titleBar)
 
+        // Divider
         val divider = View(this).apply {
             setBackgroundColor(Color.parseColor("#DDDDDD"))
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 2
-            )
-            lp.topMargin = 16
-            lp.bottomMargin = 16
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 2)
+            lp.topMargin = 12
+            lp.bottomMargin = 12
             layoutParams = lp
         }
         container.addView(divider)
 
+        // 📝 Messenger-style EditText with full features
         editText = EditText(this).apply {
-            hint = "Write your note here..."
-            minHeight = 250
-            gravity = Gravity.TOP
+            hint = "Type your note here..."
+            textSize = 16f
+            gravity = Gravity.TOP or Gravity.START
             setPadding(16, 16, 16, 16)
             setBackgroundColor(Color.parseColor("#F5F5F5"))
+            minHeight = 280
+            maxHeight = 400
+            movementMethod = ScrollingMovementMethod()
+            isVerticalScrollBarEnabled = true
+            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
+            
+            // Fast scrolling optimization
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_ALWAYS
+            
+            // Word count and character limit
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5000))
+            
+            // IME options for better keyboard handling
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            setHorizontallyScrolling(false)
+            
+            // Text change listener for undo/redo and word count
+            addTextChangedListener(object : TextWatcher {
+                private var textBeforeChange = ""
+                
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+                    textBeforeChange = s?.toString() ?: ""
+                    if (!isUndoRedoOperation) {
+                        redoStack.clear()
+                    }
+                }
+                
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    updateWordCount()
+                }
+                
+                override fun afterTextChanged(s: Editable?) {
+                    if (!isUndoRedoOperation && s?.toString() != textBeforeChange) {
+                        undoStack.add(textBeforeChange)
+                        if (undoStack.size > 50) undoStack.removeAt(0)
+                    }
+                }
+            })
         }
+        
+        // Make EditText scrollable with fling
+        editText.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_UP) {
+                // Allow normal scrolling
+                false
+            } else {
+                false
+            }
+        }
+        
         container.addView(editText)
 
+        // Load saved note
         editText.setText(getSharedPreferences("notes_prefs", MODE_PRIVATE).getString(STORAGE_LAST_NOTE, ""))
 
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val lp = LinearLayout.LayoutParams(
+        // Word count display
+        wordCountView = TextView(this).apply {
+            textSize = 11f
+            setTextColor(Color.parseColor("#999999"))
+            setPadding(16, 8, 16, 8)
+            layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.topMargin = 16
-            layoutParams = lp
+        }
+        updateWordCount()
+        container.addView(wordCountView)
+
+        // Toolbar with all actions
+        val toolbarLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(8, 8, 8, 8)
+        }
+        
+        // Undo button
+        val undoBtn = TextView(this).apply {
+            text = "↩️"
+            textSize = 22f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener { performUndo() }
+        }
+        toolbarLayout.addView(undoBtn)
+        
+        // Redo button
+        val redoBtn = TextView(this).apply {
+            text = "↪️"
+            textSize = 22f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener { performRedo() }
+        }
+        toolbarLayout.addView(redoBtn)
+        
+        // Copy button
+        val copyBtn = TextView(this).apply {
+            text = "📋"
+            textSize = 22f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener { copyText() }
+        }
+        toolbarLayout.addView(copyBtn)
+        
+        // Paste button
+        val pasteBtn = TextView(this).apply {
+            text = "📎"
+            textSize = 22f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener { pasteText() }
+        }
+        toolbarLayout.addView(pasteBtn)
+        
+        // Select all button
+        val selectAllBtn = TextView(this).apply {
+            text = "🔲"
+            textSize = 22f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener { editText.selectAll() }
+        }
+        toolbarLayout.addView(selectAllBtn)
+        
+        // Clear button
+        val clearBtn = TextView(this).apply {
+            text = "🗑️"
+            textSize = 22f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener {
+                editText.setText("")
+                Toast.makeText(this@FloatingBubbleService, "Cleared", Toast.LENGTH_SHORT).show()
+            }
+        }
+        toolbarLayout.addView(clearBtn)
+        
+        container.addView(toolbarLayout)
+
+        // Action buttons row
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(0, 8, 0, 8)
         }
 
         val saveBtn = Button(this).apply {
             text = "Save"
             setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
-            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            lp.marginEnd = 8
-            layoutParams = lp
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
             setOnClickListener { saveNote() }
         }
         buttonRow.addView(saveBtn)
-
-        val clearBtn = Button(this).apply {
-            text = "Clear"
-            setBackgroundColor(Color.parseColor("#FF9800"))
-            setTextColor(Color.WHITE)
-            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            layoutParams = lp
-            setOnClickListener {
-                editText.setText("")
-                Toast.makeText(this@FloatingBubbleService, "Cleared", Toast.LENGTH_SHORT).show()
-            }
-        }
-        buttonRow.addView(clearBtn)
-        container.addView(buttonRow)
 
         val openAppBtn = Button(this).apply {
             text = "Open Full App"
             setBackgroundColor(Color.parseColor("#2196F3"))
             setTextColor(Color.WHITE)
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = 8
-            layoutParams = lp
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener {
                 val intent = Intent(this@FloatingBubbleService, MainActivity::class.java)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(intent)
+                collapseToBubble()
             }
         }
-        container.addView(openAppBtn)
+        buttonRow.addView(openAppBtn)
+        
+        container.addView(buttonRow)
 
+        // Resize handle
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 20f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 40
-            )
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 40)
             lp.topMargin = 8
             layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
@@ -790,6 +894,70 @@ class FloatingBubbleService : Service() {
         container.addView(resizeHandleView)
 
         return container
+    }
+    
+    private fun updateWordCount() {
+        val text = editText.text.toString()
+        val charCount = text.length
+        val wordCount = if (text.isBlank()) 0 else text.trim().split(Regex("\\s+")).size
+        wordCountView.text = "$wordCount words • $charCount characters"
+    }
+    
+    private fun performUndo() {
+        if (undoStack.isNotEmpty()) {
+            isUndoRedoOperation = true
+            val previousText = undoStack.removeAt(undoStack.size - 1)
+            redoStack.add(editText.text.toString())
+            editText.setText(previousText)
+            editText.setSelection(editText.text.length)
+            isUndoRedoOperation = false
+            Toast.makeText(this, "Undo", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Nothing to undo", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun performRedo() {
+        if (redoStack.isNotEmpty()) {
+            isUndoRedoOperation = true
+            val nextText = redoStack.removeAt(redoStack.size - 1)
+            undoStack.add(editText.text.toString())
+            editText.setText(nextText)
+            editText.setSelection(editText.text.length)
+            isUndoRedoOperation = false
+            Toast.makeText(this, "Redo", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Nothing to redo", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun copyText() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text = editText.text.toString()
+        if (text.isNotEmpty()) {
+            android.content.ClipData.newPlainText("note", text).let { clipboard.setPrimaryClip(it) }
+            Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun pasteText() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        if (clipboard.hasPrimaryClip()) {
+            val item = clipboard.primaryClip?.getItemAt(0)
+            val pastedText = item?.text?.toString() ?: ""
+            if (pastedText.isNotEmpty()) {
+                val start = editText.selectionStart
+                val end = editText.selectionEnd
+                val newText = editText.text.toString()
+                editText.setText(newText.substring(0, start) + pastedText + newText.substring(end))
+                editText.setSelection(start + pastedText.length)
+                Toast.makeText(this, "Pasted", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(this, "Nothing to paste", Toast.LENGTH_SHORT).show()
+        }
     }
 
     inner class TitleBarDragListener : View.OnTouchListener {
@@ -898,7 +1066,7 @@ class FloatingBubbleService : Service() {
             val currentCount = prefs.getInt(STORAGE_NOTE_COUNT, 0)
             prefs.edit().putString(STORAGE_LAST_NOTE, noteContent).putInt(STORAGE_NOTE_COUNT, currentCount + 1).apply()
             updateNoteCount()
-            Toast.makeText(this, "Note saved! Total: ${currentCount + 1}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Note saved! Total: ${currentCount + 1}\nWords: ${noteContent.trim().split(Regex("\\s+")).size}", Toast.LENGTH_SHORT).show()
             editText.setText("")
         } else {
             Toast.makeText(this, "Please write something", Toast.LENGTH_SHORT).show()
