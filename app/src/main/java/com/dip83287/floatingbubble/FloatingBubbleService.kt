@@ -29,6 +29,8 @@ import androidx.core.view.doOnLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.dip83287.floatingbubble.utils.EmergencyLog
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -119,11 +121,10 @@ class FloatingBubbleService : Service() {
 
     private fun loadNotes() {
         val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
-        if (notesJson.isNotEmpty()) {
+        if (!notesJson.isNullOrEmpty()) {
             try {
-                val gson = com.google.gson.Gson()
-                val type = object : com.google.gson.reflect.TypeToken<List<NoteItem>>() {}.type
-                val loaded = gson.fromJson<List<NoteItem>>(notesJson, type)
+                val type = object : TypeToken<List<NoteItem>>() {}.type
+                val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
                 notesList.clear()
                 notesList.addAll(loaded)
             } catch (e: Exception) {
@@ -140,8 +141,7 @@ class FloatingBubbleService : Service() {
     }
 
     private fun saveNotesToPrefs() {
-        val gson = com.google.gson.Gson()
-        val notesJson = gson.toJson(notesList)
+        val notesJson = Gson().toJson(notesList)
         prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
     }
 
@@ -1065,8 +1065,8 @@ class FloatingBubbleService : Service() {
         override fun getItemCount(): Int = notes.size
 
         inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            private val titleView = itemView.findViewById<android.widget.TextView>(android.R.id.text1)
-            private val contentView = itemView.findViewById<android.widget.TextView>(android.R.id.text2)
+            private val titleView = itemView.findViewById<TextView>(android.R.id.text1)
+            private val contentView = itemView.findViewById<TextView>(android.R.id.text2)
 
             fun bind(note: NoteItem) {
                 titleView.text = note.title
