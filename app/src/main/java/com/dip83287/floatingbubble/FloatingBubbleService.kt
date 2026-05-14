@@ -956,7 +956,7 @@ class FloatingBubbleService : Service() {
                 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     saveRunnable?.let { saveHandler.removeCallbacks(it) }
-                    saveRunnable = Runnable {
+                    val runnable = Runnable {
                         val index = notesList.indexOfFirst { it.id == note.id }
                         if (index != -1) {
                             val updatedNote = notesList[index].copy(
@@ -968,7 +968,8 @@ class FloatingBubbleService : Service() {
                             saveNotesToPrefs()
                         }
                     }
-                    saveHandler.postDelayed(saveRunnable!!, 600)
+                    saveRunnable = runnable
+                    saveHandler.postDelayed(runnable, 600)
                 }
                 
                 override fun afterTextChanged(s: Editable?) {}
