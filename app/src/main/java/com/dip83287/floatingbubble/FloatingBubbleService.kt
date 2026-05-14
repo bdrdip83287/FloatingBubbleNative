@@ -24,7 +24,6 @@ import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
-import android.widget.ScrollView
 import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -66,7 +65,7 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
-    private lateinit var contentScrollView: ScrollView
+    private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
@@ -876,7 +875,7 @@ class FloatingBubbleService : Service() {
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            imeOptions = EditorInfo.IME_ACTION_DONE
             setTextIsSelectable(true)
         }
         container.addView(titleInput)
@@ -890,16 +889,20 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // ✅ PERFECT EDIT TEXT - All features working
-        // Using ScrollView + EditText combination for smooth scrolling without crash
-        contentScrollView = ScrollView(this).apply {
+        // ✅ FIXED: Use ScrollView for proper scrolling + EditText with full features
+        scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
             )
-            isVerticalScrollBarEnabled = false // ScrollView handles scrolling
+            isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_ALWAYS
+            setPadding(0, 0, 0, 0)
+            
+            // Allow ScrollView to handle scrolling
+            isFocusable = false
+            isFocusableInTouchMode = false
         }
         
         editText = EditText(this).apply {
@@ -910,7 +913,7 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // ✅ Smooth scrolling properties
+            // ✅ Smooth scrolling properties - EditText won't scroll, ScrollView handles it
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
@@ -928,13 +931,42 @@ class FloatingBubbleService : Service() {
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
-            // ✅ Better touch handling
+            // ✅ Make EditText focusable but let ScrollView handle scrolling
+            isFocusable = true
+            isFocusableInTouchMode = true
+            
+            // ✅ Better touch handling - prevent ScrollView from intercepting when selecting text
             setOnTouchListener { v, event ->
-                v.parent?.requestDisallowInterceptTouchEvent(true)
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        // Request focus on touch
+                        v.requestFocus()
+                        // Allow ScrollView to scroll if needed
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        // If selecting text, prevent ScrollView from intercepting
+                        if (hasSelection()) {
+                            v.parent.requestDisallowInterceptTouchEvent(true)
+                        } else {
+                            v.parent.requestDisallowInterceptTouchEvent(false)
+                        }
+                    }
+                    else -> {
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                    }
+                }
                 false
             }
             
             // ✅ Focus and keyboard
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) {
+                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+            
             setOnClickListener {
                 requestFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -969,8 +1001,8 @@ class FloatingBubbleService : Service() {
                 override fun afterTextChanged(s: Editable?) {}
             })
         }
-        contentScrollView.addView(editText)
-        container.addView(contentScrollView)
+        scrollView.addView(editText)
+        container.addView(scrollView)
 
         // Button row
         val buttonRow = LinearLayout(this).apply {
@@ -1066,8 +1098,16 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // Set focus to edit text for better UX
-        editText.requestFocus()
+        // Request focus after a short delay to ensure view is attached
+        scrollView.postDelayed({
+            editText.requestFocus()
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+        }, 200)
+    }
+
+    private fun EditText.hasSelection(): Boolean {
+        return selectionStart != selectionEnd
     }
 
     private fun saveCurrentNote(noteId: Long) {
