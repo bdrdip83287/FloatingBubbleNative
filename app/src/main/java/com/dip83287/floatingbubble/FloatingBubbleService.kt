@@ -19,6 +19,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
+import android.text.method.ScrollingMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -760,6 +761,9 @@ class FloatingBubbleService : Service() {
             setHasFixedSize(true)
             itemAnimator = null
             setItemViewCacheSize(20)
+            // Smooth scrolling
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_ALWAYS
         }
         
         notesAdapter = NoteAdapter(notesList,
@@ -902,7 +906,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // Optimized EditText - FIXED scrollbar issues
+        // Optimized EditText - Native selection + Smooth scroll
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -911,7 +915,7 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // Performance - REMOVED scrollbar configurations that cause crash
+            // Performance
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 300
@@ -923,14 +927,24 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // Selection
+            // ✅ Native selection popup (Copy/Paste/Cut/Select all)
             setTextIsSelectable(true)
-            customSelectionActionModeCallback = object : ActionMode.Callback {
-                override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean = true
-                override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
-                override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean = false
+            setCustomSelectionActionModeCallback(object : ActionMode.Callback {
+                override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                    // Android system will handle the menu
+                    return true
+                }
+                override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                    return false
+                }
+                override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
+                    return false
+                }
                 override fun onDestroyActionMode(mode: ActionMode?) {}
-            }
+            })
+            
+            // ✅ Enable native selection handle
+            setTextIsSelectable(true)
             
             // Cursor movement
             movementMethod = ArrowKeyMovementMethod.getInstance()
@@ -941,7 +955,7 @@ class FloatingBubbleService : Service() {
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // Performance layer - NO scrollbar config
+            // Performance layer
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
             // Text watcher with auto-save
