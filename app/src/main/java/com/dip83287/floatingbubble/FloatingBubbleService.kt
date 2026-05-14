@@ -16,13 +16,16 @@ import android.graphics.drawable.GradientDrawable
 import android.os.*
 import android.provider.Settings
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
+import android.text.method.ArrowKeyMovementMethod
 import android.text.method.ScrollingMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
@@ -96,6 +99,8 @@ class FloatingBubbleService : Service() {
     private lateinit var recyclerView: RecyclerView
     private var isInEditorMode = false
     private var currentEditingNoteId = -1L
+    private var saveHandler = Handler(Looper.getMainLooper())
+    private var saveRunnable: Runnable? = null
 
     data class NoteItem(
         val id: Long,
@@ -609,7 +614,8 @@ class FloatingBubbleService : Service() {
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
@@ -752,6 +758,9 @@ class FloatingBubbleService : Service() {
             )
             layoutManager = LinearLayoutManager(this@FloatingBubbleService)
             setPadding(8, 8, 8, 8)
+            setHasFixedSize(true)
+            itemAnimator = null
+            setItemViewCacheSize(20)
         }
         
         notesAdapter = NoteAdapter(notesList,
@@ -870,7 +879,7 @@ class FloatingBubbleService : Service() {
         topBar.addView(minimizeBtn)
         container.addView(topBar)
 
-        // Title input
+        // Optimized Title Input
         titleInput = EditText(this).apply {
             setText(note.title)
             hint = "Title"
@@ -879,6 +888,9 @@ class FloatingBubbleService : Service() {
             setPadding(8, 16, 8, 8)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setTextIsSelectable(true)
         }
         container.addView(titleInput)
 
@@ -891,17 +903,76 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // Content input
+        // Ultra-optimized EditText with native text selection
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
             textSize = 16f
-            gravity = Gravity.TOP
-            minHeight = 300
-            setPadding(8, 16, 8, 16)
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
-            movementMethod = ScrollingMovementMethod()
+            
+            // Performance
             isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            setHorizontallyScrolling(false)
+            maxLines = Int.MAX_VALUE
+            minHeight = 300
+            
+            // Android native text engine
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            
+            // Cursor + selection
+            isTextSelectable = true
+            setTextIsSelectable(true)
+            customSelectionActionModeCallback = object : ActionMode.Callback {
+                override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean = true
+                override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
+                override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean = false
+                override fun onDestroyActionMode(mode: ActionMode?) {}
+            }
+            
+            // Smooth cursor movement
+            movementMethod = ArrowKeyMovementMethod.getInstance()
+            
+            setOnClickListener {
+                requestFocus()
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            }
+            
+            // Huge text performance
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            setTextKeepState(true)
+            isScrollbarFadingEnabled = false
+            scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
+            
+            // No lag text watcher with delayed auto-save
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
+                    saveRunnable = Runnable {
+                        val index = notesList.indexOfFirst { it.id == note.id }
+                        if (index != -1) {
+                            notesList[index] = notesList[index].copy(
+                                content = text.toString(),
+                                title = titleInput.text.toString(),
+                                lastEdited = System.currentTimeMillis()
+                            )
+                            saveNotesToPrefs()
+                        }
+                    }
+                    saveHandler.postDelayed(saveRunnable!!, 600)
+                }
+                
+                override fun afterTextChanged(s: Editable?) {}
+            })
         }
         container.addView(editText)
 
@@ -988,7 +1059,8 @@ class FloatingBubbleService : Service() {
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -1025,7 +1097,8 @@ class FloatingBubbleService : Service() {
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -1048,8 +1121,8 @@ class FloatingBubbleService : Service() {
     ) : RecyclerView.Adapter<NoteAdapter.ViewHolder>() {
 
         fun updateList(newNotes: List<NoteItem>) {
-            notes = newNotes
-            notifyDataSetChanged()
+            notes = newNotes.toList()
+            notifyItemRangeChanged(0, notes.size)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -1170,6 +1243,7 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
         velocityTracker?.recycle()
         bubbleView?.let { windowManager.removeView(it) }
