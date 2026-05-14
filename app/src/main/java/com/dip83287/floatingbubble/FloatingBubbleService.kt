@@ -1,8 +1,6 @@
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
@@ -84,12 +82,10 @@ class FloatingBubbleService : Service() {
     private var isInDeleteZone = false
     private var flingAnimator: ValueAnimator? = null
 
-    // Messenger-style physics variables
     private var velocityTracker: VelocityTracker? = null
     private var velocityX = 0f
     private var velocityY = 0f
 
-    // Undo/Redo stacks
     private val undoStack = mutableListOf<String>()
     private val redoStack = mutableListOf<String>()
     private var isUndoRedoOperation = false
@@ -508,19 +504,22 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 📝 Messenger-style complete note pad with all features
+    // 📝 Fixed expand function
     private fun expandToNotePad() {
         if (isExpanded) return
 
         try {
+            // Create note pad first
             createAndShowNotePad()
 
             val bubble = bubbleView ?: return
             val note = noteView ?: return
 
+            // Hardware acceleration for smooth animation
             bubble.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             note.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
+            // Initial state for note pad (hidden)
             note.alpha = 0f
             note.scaleX = 0.85f
             note.scaleY = 0.85f
@@ -530,6 +529,7 @@ class FloatingBubbleService : Service() {
                 note.pivotX = (note.width / 2).toFloat()
                 note.pivotY = 0f
 
+                // Bubble fade out animation
                 bubble.animate()
                     .alpha(0f)
                     .scaleX(0.6f)
@@ -538,6 +538,7 @@ class FloatingBubbleService : Service() {
                     .setInterpolator(AccelerateDecelerateInterpolator())
                     .start()
 
+                // Note pad fade in animation
                 note.animate()
                     .alpha(1f)
                     .scaleX(1f)
@@ -567,7 +568,7 @@ class FloatingBubbleService : Service() {
         if (noteView != null) return
         
         try {
-            val container = createResizableNotePad()
+            val container = createFullNotePad()
             noteView = container
             
             val params = WindowManager.LayoutParams(
@@ -584,7 +585,7 @@ class FloatingBubbleService : Service() {
             windowManager.addView(noteView, params)
             
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "showNotePad")
+            EmergencyLog.logException(e, "createAndShowNotePad")
         }
     }
 
@@ -651,8 +652,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 🎨 Complete Messenger-style note pad with all features
-    private fun createResizableNotePad(): View {
+    private fun createFullNotePad(): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
@@ -700,7 +700,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // 📝 Messenger-style EditText with full features
+        // EditText
         editText = EditText(this).apply {
             hint = "Type your note here..."
             textSize = 16f
@@ -712,19 +712,11 @@ class FloatingBubbleService : Service() {
             movementMethod = ScrollingMovementMethod()
             isVerticalScrollBarEnabled = true
             scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-            
-            // Fast scrolling optimization
             isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_ALWAYS
-            
-            // Word count and character limit
-            filters = arrayOf(android.text.InputFilter.LengthFilter(5000))
-            
-            // IME options for better keyboard handling
             imeOptions = EditorInfo.IME_ACTION_DONE
             setHorizontallyScrolling(false)
             
-            // Text change listener for undo/redo and word count
             addTextChangedListener(object : TextWatcher {
                 private var textBeforeChange = ""
                 
@@ -747,23 +739,11 @@ class FloatingBubbleService : Service() {
                 }
             })
         }
-        
-        // Make EditText scrollable with fling
-        editText.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_UP) {
-                // Allow normal scrolling
-                false
-            } else {
-                false
-            }
-        }
-        
         container.addView(editText)
 
-        // Load saved note
         editText.setText(getSharedPreferences("notes_prefs", MODE_PRIVATE).getString(STORAGE_LAST_NOTE, ""))
 
-        // Word count display
+        // Word count
         wordCountView = TextView(this).apply {
             textSize = 11f
             setTextColor(Color.parseColor("#999999"))
@@ -776,7 +756,7 @@ class FloatingBubbleService : Service() {
         updateWordCount()
         container.addView(wordCountView)
 
-        // Toolbar with all actions
+        // Toolbar
         val toolbarLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -786,7 +766,6 @@ class FloatingBubbleService : Service() {
             setPadding(8, 8, 8, 8)
         }
         
-        // Undo button
         val undoBtn = TextView(this).apply {
             text = "↩️"
             textSize = 22f
@@ -795,7 +774,6 @@ class FloatingBubbleService : Service() {
         }
         toolbarLayout.addView(undoBtn)
         
-        // Redo button
         val redoBtn = TextView(this).apply {
             text = "↪️"
             textSize = 22f
@@ -804,7 +782,6 @@ class FloatingBubbleService : Service() {
         }
         toolbarLayout.addView(redoBtn)
         
-        // Copy button
         val copyBtn = TextView(this).apply {
             text = "📋"
             textSize = 22f
@@ -813,7 +790,6 @@ class FloatingBubbleService : Service() {
         }
         toolbarLayout.addView(copyBtn)
         
-        // Paste button
         val pasteBtn = TextView(this).apply {
             text = "📎"
             textSize = 22f
@@ -822,7 +798,6 @@ class FloatingBubbleService : Service() {
         }
         toolbarLayout.addView(pasteBtn)
         
-        // Select all button
         val selectAllBtn = TextView(this).apply {
             text = "🔲"
             textSize = 22f
@@ -831,7 +806,6 @@ class FloatingBubbleService : Service() {
         }
         toolbarLayout.addView(selectAllBtn)
         
-        // Clear button
         val clearBtn = TextView(this).apply {
             text = "🗑️"
             textSize = 22f
@@ -842,10 +816,9 @@ class FloatingBubbleService : Service() {
             }
         }
         toolbarLayout.addView(clearBtn)
-        
         container.addView(toolbarLayout)
 
-        // Action buttons row
+        // Action buttons
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -877,7 +850,6 @@ class FloatingBubbleService : Service() {
             }
         }
         buttonRow.addView(openAppBtn)
-        
         container.addView(buttonRow)
 
         // Resize handle
@@ -1066,7 +1038,7 @@ class FloatingBubbleService : Service() {
             val currentCount = prefs.getInt(STORAGE_NOTE_COUNT, 0)
             prefs.edit().putString(STORAGE_LAST_NOTE, noteContent).putInt(STORAGE_NOTE_COUNT, currentCount + 1).apply()
             updateNoteCount()
-            Toast.makeText(this, "Note saved! Total: ${currentCount + 1}\nWords: ${noteContent.trim().split(Regex("\\s+")).size}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Note saved! Total: ${currentCount + 1}", Toast.LENGTH_SHORT).show()
             editText.setText("")
         } else {
             Toast.makeText(this, "Please write something", Toast.LENGTH_SHORT).show()
