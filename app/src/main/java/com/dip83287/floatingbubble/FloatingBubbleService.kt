@@ -17,7 +17,6 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
-import android.text.method.ArrowKeyMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -25,6 +24,7 @@ import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
+import android.widget.ScrollView
 import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -66,6 +66,7 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
+    private lateinit var contentScrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
@@ -88,7 +89,6 @@ class FloatingBubbleService : Service() {
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
-    private var isInEditorMode = false
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
@@ -739,7 +739,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(noteCountText)
 
-        // RecyclerView - REMOVED scroll bar config to avoid crash
+        // RecyclerView
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -751,7 +751,6 @@ class FloatingBubbleService : Service() {
             setHasFixedSize(true)
             itemAnimator = null
             setItemViewCacheSize(20)
-            // ⚠️ CRASH FIX: Removed scrollbar config that causes crash on Android 15
         }
         
         notesAdapter = NoteAdapter(notesList,
@@ -818,8 +817,6 @@ class FloatingBubbleService : Service() {
     }
 
     private fun openEditorForNote(note: NoteItem) {
-        isInEditorMode = true
-        
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
@@ -893,7 +890,18 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // ✅ OPTIMIZED EDIT TEXT - CRASH FIXED (removed scrollbar config)
+        // ✅ PERFECT EDIT TEXT - All features working
+        // Using ScrollView + EditText combination for smooth scrolling without crash
+        contentScrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+            isVerticalScrollBarEnabled = false // ScrollView handles scrolling
+            overScrollMode = View.OVER_SCROLL_ALWAYS
+        }
+        
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -902,31 +910,25 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // ⚠️ CRASH FIX: Removed problematic scrollbar configuration
-            // isVerticalScrollBarEnabled = true  // REMOVED - causes crash on Android 15
-            // scrollBarStyle = View.SCROLLBARS_INSIDE_INSET  // REMOVED - causes crash
-            // isScrollbarFadingEnabled = false  // REMOVED - causes crash
-            // overScrollMode = View.OVER_SCROLL_ALWAYS  // REMOVED - causes crash
-            
-            // ✅ Safe scrolling - default behavior
+            // ✅ Smooth scrolling properties
             setHorizontallyScrolling(false)
+            maxLines = Int.MAX_VALUE
+            minHeight = 400
             
-            // Input type
+            // ✅ Input type for good editing experience
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            maxLines = Int.MAX_VALUE
-            minHeight = 300
             
-            // ✅ Native selection popup (Copy/Paste/Cut/Select All)
+            // ✅ NATIVE SELECTION POPUP - Copy/Paste/Cut/Select All
             setTextIsSelectable(true)
             isLongClickable = true
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
-            // ✅ Better touch handling - parent touch interception prevention
+            // ✅ Better touch handling
             setOnTouchListener { v, event ->
                 v.parent?.requestDisallowInterceptTouchEvent(true)
                 false
@@ -942,7 +944,7 @@ class FloatingBubbleService : Service() {
             // ✅ Performance
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
-            // Text watcher with auto-save
+            // Auto-save
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
@@ -967,7 +969,8 @@ class FloatingBubbleService : Service() {
                 override fun afterTextChanged(s: Editable?) {}
             })
         }
-        container.addView(editText)
+        contentScrollView.addView(editText)
+        container.addView(contentScrollView)
 
         // Button row
         val buttonRow = LinearLayout(this).apply {
@@ -1062,6 +1065,9 @@ class FloatingBubbleService : Service() {
         params.y = notepadPosY
         
         windowManager.addView(noteView, params)
+        
+        // Set focus to edit text for better UX
+        editText.requestFocus()
     }
 
     private fun saveCurrentNote(noteId: Long) {
@@ -1082,8 +1088,6 @@ class FloatingBubbleService : Service() {
     }
 
     private fun showNoteList() {
-        isInEditorMode = false
-        
         val container = createFullNotePad()
         noteView?.let { windowManager.removeView(it) }
         noteView = container
