@@ -615,7 +615,8 @@ class FloatingBubbleService : Service() {
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
@@ -761,7 +762,6 @@ class FloatingBubbleService : Service() {
             setHasFixedSize(true)
             itemAnimator = null
             setItemViewCacheSize(20)
-            // Smooth scrolling
             isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_ALWAYS
         }
@@ -906,7 +906,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // Optimized EditText - Native selection + Smooth scroll
+        // ✅ OPTIMIZED EDIT TEXT - Native selection + Smooth fling scroll
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -915,50 +915,48 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // Performance
+            // ✅ Performance & smooth scrolling
             setHorizontallyScrolling(false)
-            maxLines = Int.MAX_VALUE
-            minHeight = 300
+            overScrollMode = View.OVER_SCROLL_ALWAYS
+            isVerticalScrollBarEnabled = true
+            scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
+            isScrollbarFadingEnabled = false
             
-            // Text input type
+            // ✅ Setup scroller for smooth fling
+            setScroller(android.widget.Scroller(context))
+            
+            // ✅ Input type
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            maxLines = Int.MAX_VALUE
+            minHeight = 300
             
-            // ✅ Native selection popup (Copy/Paste/Cut/Select all)
+            // ✅ NATIVE SELECTION POPUP (Copy/Paste/Cut/Select All)
             setTextIsSelectable(true)
-            setCustomSelectionActionModeCallback(object : ActionMode.Callback {
-                override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
-                    // Android system will handle the menu
-                    return true
-                }
-                override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
-                    return false
-                }
-                override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
-                    return false
-                }
-                override fun onDestroyActionMode(mode: ActionMode?) {}
-            })
+            isLongClickable = true
+            customInsertionActionModeCallback = null
+            customSelectionActionModeCallback = null
             
-            // ✅ Enable native selection handle
-            setTextIsSelectable(true)
+            // ✅ Better touch handling - parent touch interception prevention
+            setOnTouchListener { v, event ->
+                v.parent?.requestDisallowInterceptTouchEvent(true)
+                false
+            }
             
-            // Cursor movement
-            movementMethod = ArrowKeyMovementMethod.getInstance()
-            
+            // ✅ Focus and keyboard
             setOnClickListener {
                 requestFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // Performance layer
+            // ✅ Performance - keep hardware layer
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
-            // Text watcher with auto-save
+            // ✅ Text watcher with auto-save
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
@@ -1069,7 +1067,8 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -1108,7 +1107,8 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
