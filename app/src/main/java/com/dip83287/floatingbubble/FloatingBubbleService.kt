@@ -875,7 +875,7 @@ class FloatingBubbleService : Service() {
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = EditorInfo.IME_ACTION_DONE
+            imeOptions = EditorInfo.IME_ACTION_NEXT
             setTextIsSelectable(true)
         }
         container.addView(titleInput)
@@ -889,7 +889,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // ✅ FIXED: Use ScrollView for proper scrolling + EditText with full features
+        // ScrollView for content
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -900,11 +900,12 @@ class FloatingBubbleService : Service() {
             overScrollMode = View.OVER_SCROLL_ALWAYS
             setPadding(0, 0, 0, 0)
             
-            // Allow ScrollView to handle scrolling
+            // Let ScrollView handle scrolling
             isFocusable = false
             isFocusableInTouchMode = false
         }
         
+        // ✅ PERFECT EDIT TEXT - With proper keyboard and popup
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -913,53 +914,44 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // ✅ Smooth scrolling properties - EditText won't scroll, ScrollView handles it
+            // Performance
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
             
-            // ✅ Input type for good editing experience
+            // Input type
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
-            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
             
-            // ✅ NATIVE SELECTION POPUP - Copy/Paste/Cut/Select All
+            // ✅ CRITICAL: Enable native selection popup (Copy/Paste/Cut/Select All)
             setTextIsSelectable(true)
             isLongClickable = true
+            
+            // ✅ Don't override callbacks - let Android system handle them
+            // This ensures native popup appears on long press
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
-            // ✅ Make EditText focusable but let ScrollView handle scrolling
+            // ✅ Focus handling for keyboard
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Better touch handling - prevent ScrollView from intercepting when selecting text
+            // ✅ Touch handling - ensure keyboard shows on tap
             setOnTouchListener { v, event ->
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
-                        // Request focus on touch
                         v.requestFocus()
-                        // Allow ScrollView to scroll if needed
-                        v.parent.requestDisallowInterceptTouchEvent(false)
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        // If selecting text, prevent ScrollView from intercepting
-                        if (hasSelection()) {
-                            v.parent.requestDisallowInterceptTouchEvent(true)
-                        } else {
-                            v.parent.requestDisallowInterceptTouchEvent(false)
-                        }
-                    }
-                    else -> {
+                        // Don't intercept touch events
                         v.parent.requestDisallowInterceptTouchEvent(false)
                     }
                 }
                 false
             }
             
-            // ✅ Focus and keyboard
+            // ✅ Focus change listener to show keyboard
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) {
                     val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -967,13 +959,14 @@ class FloatingBubbleService : Service() {
                 }
             }
             
+            // ✅ Click listener to ensure keyboard shows
             setOnClickListener {
                 requestFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // ✅ Performance
+            // Performance layer
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
             // Auto-save
@@ -1098,16 +1091,12 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // Request focus after a short delay to ensure view is attached
-        scrollView.postDelayed({
+        // ✅ IMPORTANT: Show keyboard automatically when editor opens
+        editText.postDelayed({
             editText.requestFocus()
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
-        }, 200)
-    }
-
-    private fun EditText.hasSelection(): Boolean {
-        return selectionStart != selectionEnd
+        }, 300)
     }
 
     private fun saveCurrentNote(noteId: Long) {
