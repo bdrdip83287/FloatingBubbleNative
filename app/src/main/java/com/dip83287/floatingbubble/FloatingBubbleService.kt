@@ -738,7 +738,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(noteCountText)
 
-        // RecyclerView
+        // RecyclerView - NO SCROLLBAR CONFIGURATION
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -750,6 +750,7 @@ class FloatingBubbleService : Service() {
             setHasFixedSize(true)
             itemAnimator = null
             setItemViewCacheSize(20)
+            // ⚠️ CRITICAL: No scrollbar configuration to avoid Android 15 crash
         }
         
         notesAdapter = NoteAdapter(notesList,
@@ -889,23 +890,23 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // ScrollView for content
+        // ✅ ScrollView - NO SCROLLBAR CONFIGURATION to avoid crash
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
             )
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_ALWAYS
+            // ⚠️ CRITICAL: Remove all scrollbar configurations
+            // Do NOT set: isVerticalScrollBarEnabled, scrollBarStyle, etc.
             setPadding(0, 0, 0, 0)
             
-            // Let ScrollView handle scrolling
+            // Let ScrollView handle scrolling naturally
             isFocusable = false
             isFocusableInTouchMode = false
         }
         
-        // ✅ PERFECT EDIT TEXT - With proper keyboard and popup
+        // ✅ PERFECT EDIT TEXT - With proper keyboard and native selection popup
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -914,7 +915,7 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // Performance
+            // Performance - keep it simple
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
@@ -926,32 +927,30 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
             
-            // ✅ CRITICAL: Enable native selection popup (Copy/Paste/Cut/Select All)
+            // ✅ CRITICAL FOR NATIVE POPUP: Enable text selection
             setTextIsSelectable(true)
             isLongClickable = true
             
-            // ✅ Don't override callbacks - let Android system handle them
-            // This ensures native popup appears on long press
+            // ✅ Let Android system handle selection popup
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
-            // ✅ Focus handling for keyboard
+            // Focus handling
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Touch handling - ensure keyboard shows on tap
+            // Touch handling
             setOnTouchListener { v, event ->
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         v.requestFocus()
-                        // Don't intercept touch events
                         v.parent.requestDisallowInterceptTouchEvent(false)
                     }
                 }
                 false
             }
             
-            // ✅ Focus change listener to show keyboard
+            // Focus change to show keyboard
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) {
                     val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -959,14 +958,14 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ Click listener to ensure keyboard shows
+            // Click to show keyboard
             setOnClickListener {
                 requestFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // Performance layer
+            // Performance
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
             // Auto-save
@@ -1091,7 +1090,7 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // ✅ IMPORTANT: Show keyboard automatically when editor opens
+        // Show keyboard automatically
         editText.postDelayed({
             editText.requestFocus()
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
