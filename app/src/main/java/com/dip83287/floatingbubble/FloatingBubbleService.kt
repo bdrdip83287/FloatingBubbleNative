@@ -26,6 +26,8 @@ import android.view.inputmethod.EditorInfo
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.dip83287.floatingbubble.utils.EmergencyLog
 import kotlin.math.abs
 import kotlin.math.max
@@ -34,22 +36,23 @@ import kotlin.math.min
 class FloatingBubbleService : Service() {
 
     private val BUBBLE_COLOR = "#808080"
-    private val NOTEPAD_BG_COLOR = "#808080"
+    private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 80
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
-    private val NOTEPAD_TITLE = "📝 Floating Note"
-    private val NOTEPAD_MIN_WIDTH = 350
-    private val NOTEPAD_MIN_HEIGHT = 450
-    private val NOTEPAD_MAX_WIDTH = 600
-    private val NOTEPAD_MAX_HEIGHT = 800
+    private val NOTEPAD_TITLE = "Floating Notes"
+    private val NOTEPAD_MIN_WIDTH = 380
+    private val NOTEPAD_MIN_HEIGHT = 500
+    private val NOTEPAD_MAX_WIDTH = 650
+    private val NOTEPAD_MAX_HEIGHT = 850
 
     private val ANIMATION_DURATION = 200L
 
     private val STORAGE_NOTE_COUNT = "note_count"
     private val STORAGE_LAST_NOTE = "last_note"
+    private val STORAGE_NOTES_LIST = "notes_list"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -65,7 +68,7 @@ class FloatingBubbleService : Service() {
     private var noteView: View? = null
     private var isExpanded = false
     private lateinit var editText: EditText
-    private var wordCountView: TextView? = null
+    private lateinit var titleInput: EditText
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
@@ -86,9 +89,18 @@ class FloatingBubbleService : Service() {
     private var velocityX = 0f
     private var velocityY = 0f
 
-    private val undoStack = mutableListOf<String>()
-    private val redoStack = mutableListOf<String>()
-    private var isUndoRedoOperation = false
+    private val notesList = mutableListOf<NoteItem>()
+    private lateinit var notesAdapter: NoteAdapter
+    private lateinit var recyclerView: RecyclerView
+    private var isInEditorMode = false
+    private var currentEditingNoteId = -1L
+
+    data class NoteItem(
+        val id: Long,
+        var title: String,
+        var content: String,
+        val lastEdited: Long = System.currentTimeMillis()
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -96,12 +108,41 @@ class FloatingBubbleService : Service() {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
+            loadNotes()
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
         }
+    }
+
+    private fun loadNotes() {
+        val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
+        if (notesJson.isNotEmpty()) {
+            try {
+                val gson = com.google.gson.Gson()
+                val type = object : com.google.gson.reflect.TypeToken<List<NoteItem>>() {}.type
+                val loaded = gson.fromJson<List<NoteItem>>(notesJson, type)
+                notesList.clear()
+                notesList.addAll(loaded)
+            } catch (e: Exception) {
+                if (notesList.isEmpty()) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+            }
+        } else {
+            if (notesList.isEmpty()) {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            }
+        }
+        saveNotesToPrefs()
+    }
+
+    private fun saveNotesToPrefs() {
+        val gson = com.google.gson.Gson()
+        val notesJson = gson.toJson(notesList)
+        prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
     }
 
     private fun createNotificationChannel() {
@@ -120,7 +161,7 @@ class FloatingBubbleService : Service() {
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, "floating_bubble_channel")
             .setContentTitle("Floating Notes")
-            .setContentText("Tap bubble to write note")
+            .setContentText("${notesList.size} notes available")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -234,13 +275,13 @@ class FloatingBubbleService : Service() {
             bubbleLayout.addView(iconView)
 
             val countView = TextView(this).apply {
-                text = "0"
+                text = notesList.size.toString()
                 textSize = 11f
                 setTextColor(Color.WHITE)
                 setBackgroundColor(Color.RED)
                 setPadding(6, 3, 6, 3)
                 gravity = Gravity.CENTER
-                visibility = View.GONE
+                visibility = if (notesList.size > 0) View.VISIBLE else View.GONE
             }
             bubbleLayout.addView(countView)
 
@@ -261,7 +302,6 @@ class FloatingBubbleService : Service() {
             params.x = defaultX
             params.y = defaultY
 
-            loadNoteCount(countView)
             setupBubbleTouchListener(params, displayMetrics)
             setupBubbleLongClickListener()
 
@@ -650,29 +690,39 @@ class FloatingBubbleService : Service() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            setPadding(20, 20, 20, 20)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 24f
+            setPadding(16, 16, 16, 16)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
         }
 
-        // Title bar
-        val titleBar = LinearLayout(this).apply {
+        // Top bar with drag handle and minimize button
+        val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             setOnTouchListener(TitleBarDragListener())
-            setPadding(8, 8, 8, 8)
+            setPadding(8, 12, 8, 12)
+            setBackgroundColor(Color.parseColor("#F9E79F"))
         }
 
-        val title = TextView(this).apply {
-            text = NOTEPAD_TITLE
-            textSize = 18f
-            setTextColor(Color.parseColor("#FFFFFF"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
+        val dragHandle = TextView(this).apply {
+            text = "⋯"
+            textSize = 24f
+            setTextColor(Color.parseColor("#333333"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        titleBar.addView(title)
+        topBar.addView(dragHandle)
+
+        val titleText = TextView(this).apply {
+            text = NOTEPAD_TITLE
+            textSize = 16f
+            setTextColor(Color.parseColor("#333333"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER
+        }
+        topBar.addView(titleText)
 
         val minimizeBtn = TextView(this).apply {
             text = "−"
@@ -681,181 +731,71 @@ class FloatingBubbleService : Service() {
             setPadding(16, 0, 8, 0)
             setOnClickListener { collapseToBubble() }
         }
-        titleBar.addView(minimizeBtn)
-        container.addView(titleBar)
+        topBar.addView(minimizeBtn)
+        container.addView(topBar)
 
-        // Divider
-        val divider = View(this).apply {
-            setBackgroundColor(Color.parseColor("#DDDDDD"))
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 2)
-            lp.topMargin = 12
-            lp.bottomMargin = 12
-            layoutParams = lp
+        // Note count text
+        val noteCountText = TextView(this).apply {
+            text = "Note List (${notesList.size})"
+            textSize = 14f
+            setTextColor(Color.parseColor("#666666"))
+            setPadding(12, 16, 12, 8)
         }
-        container.addView(divider)
+        container.addView(noteCountText)
 
-        // EditText - create wordCountView first before setting text
-        wordCountView = TextView(this).apply {
-            textSize = 11f
-            setTextColor(Color.parseColor("#999999"))
-            setPadding(16, 8, 16, 8)
+        // RecyclerView for notes list
+        recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                0,
+                1f
             )
-        }
-        
-        editText = EditText(this).apply {
-            hint = "Type your note here..."
-            textSize = 16f
-            gravity = Gravity.TOP or Gravity.START
-            setPadding(16, 16, 16, 16)
-            setBackgroundColor(Color.parseColor("#F5F5F5"))
-            minHeight = 280
-            maxHeight = 400
-            movementMethod = ScrollingMovementMethod()
-            isVerticalScrollBarEnabled = true
-            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_ALWAYS
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            setHorizontallyScrolling(false)
-            
-            addTextChangedListener(object : TextWatcher {
-                private var textBeforeChange = ""
-                
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
-                    textBeforeChange = s?.toString() ?: ""
-                    if (!isUndoRedoOperation) {
-                        redoStack.clear()
-                    }
-                }
-                
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    updateWordCount()
-                }
-                
-                override fun afterTextChanged(s: Editable?) {
-                    if (!isUndoRedoOperation && s?.toString() != textBeforeChange) {
-                        undoStack.add(textBeforeChange)
-                        if (undoStack.size > 50) undoStack.removeAt(0)
-                    }
-                }
-            })
-        }
-        container.addView(editText)
-
-        // Set text after TextWatcher is added
-        val savedText = getSharedPreferences("notes_prefs", MODE_PRIVATE).getString(STORAGE_LAST_NOTE, "")
-        editText.setText(savedText)
-        
-        container.addView(wordCountView)
-        updateWordCount()
-
-        // Toolbar
-        val toolbarLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+            layoutManager = LinearLayoutManager(this@FloatingBubbleService)
             setPadding(8, 8, 8, 8)
         }
         
-        val undoBtn = TextView(this).apply {
-            text = "↩️"
-            textSize = 22f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener { performUndo() }
-        }
-        toolbarLayout.addView(undoBtn)
-        
-        val redoBtn = TextView(this).apply {
-            text = "↪️"
-            textSize = 22f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener { performRedo() }
-        }
-        toolbarLayout.addView(redoBtn)
-        
-        val copyBtn = TextView(this).apply {
-            text = "📋"
-            textSize = 22f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener { copyText() }
-        }
-        toolbarLayout.addView(copyBtn)
-        
-        val pasteBtn = TextView(this).apply {
-            text = "📎"
-            textSize = 22f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener { pasteText() }
-        }
-        toolbarLayout.addView(pasteBtn)
-        
-        val selectAllBtn = TextView(this).apply {
-            text = "🔲"
-            textSize = 22f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener { editText.selectAll() }
-        }
-        toolbarLayout.addView(selectAllBtn)
-        
-        val clearBtn = TextView(this).apply {
-            text = "🗑️"
-            textSize = 22f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener {
-                editText.setText("")
-                Toast.makeText(this@FloatingBubbleService, "Cleared", Toast.LENGTH_SHORT).show()
+        notesAdapter = NoteAdapter(notesList,
+            onItemClick = { note ->
+                openEditorForNote(note)
+            },
+            onDeleteClick = { note ->
+                notesList.remove(note)
+                saveNotesToPrefs()
+                notesAdapter.updateList(notesList)
+                updateBubbleCount()
+                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
             }
-        }
-        toolbarLayout.addView(clearBtn)
-        container.addView(toolbarLayout)
+        )
+        recyclerView.adapter = notesAdapter
+        container.addView(recyclerView)
 
-        // Action buttons
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        // Add note button
+        val addButton = Button(this).apply {
+            text = "+ New Note"
+            setBackgroundColor(Color.parseColor("#F9E79F"))
+            setTextColor(Color.parseColor("#333333"))
+            setAllCaps(false)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            setPadding(0, 8, 0, 8)
-        }
-
-        val saveBtn = Button(this).apply {
-            text = "Save"
-            setBackgroundColor(Color.parseColor("#4CAF50"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
-            setOnClickListener { saveNote() }
-        }
-        buttonRow.addView(saveBtn)
-
-        val openAppBtn = Button(this).apply {
-            text = "Open Full App"
-            setBackgroundColor(Color.parseColor("#2196F3"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            ).apply {
+                topMargin = 8
+                bottomMargin = 8
+            }
             setOnClickListener {
-                val intent = Intent(this@FloatingBubbleService, MainActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                collapseToBubble()
+                createNewNote()
             }
         }
-        buttonRow.addView(openAppBtn)
-        container.addView(buttonRow)
+        container.addView(addButton)
 
         // Resize handle
         val resizeHandleView = TextView(this).apply {
             text = "◢"
-            textSize = 20f
+            textSize = 18f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 40)
-            lp.topMargin = 8
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
+            lp.topMargin = 4
             layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
         }
@@ -863,69 +803,282 @@ class FloatingBubbleService : Service() {
 
         return container
     }
-    
-    private fun updateWordCount() {
-        if (!::editText.isInitialized) return
-        val text = editText.text.toString()
-        val charCount = text.length
-        val wordCount = if (text.isBlank()) 0 else text.trim().split(Regex("\\s+")).size
-        wordCountView?.text = "$wordCount words • $charCount characters"
+
+    private fun createNewNote() {
+        val newNote = NoteItem(
+            id = System.currentTimeMillis(),
+            title = "Untitled Note",
+            content = ""
+        )
+        notesList.add(0, newNote)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+        openEditorForNote(newNote)
     }
-    
-    private fun performUndo() {
-        if (undoStack.isNotEmpty()) {
-            isUndoRedoOperation = true
-            val previousText = undoStack.removeAt(undoStack.size - 1)
-            redoStack.add(editText.text.toString())
-            editText.setText(previousText)
-            editText.setSelection(editText.text.length)
-            isUndoRedoOperation = false
-            Toast.makeText(this, "Undo", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "Nothing to undo", Toast.LENGTH_SHORT).show()
+
+    private fun openEditorForNote(note: NoteItem) {
+        isInEditorMode = true
+        currentEditingNoteId = note.id
+        
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
+            setPadding(16, 16, 16, 16)
         }
-    }
-    
-    private fun performRedo() {
-        if (redoStack.isNotEmpty()) {
-            isUndoRedoOperation = true
-            val nextText = redoStack.removeAt(redoStack.size - 1)
-            undoStack.add(editText.text.toString())
-            editText.setText(nextText)
-            editText.setSelection(editText.text.length)
-            isUndoRedoOperation = false
-            Toast.makeText(this, "Redo", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "Nothing to redo", Toast.LENGTH_SHORT).show()
+
+        // Editor top bar
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnTouchListener(TitleBarDragListener())
+            setPadding(8, 12, 8, 12)
+            setBackgroundColor(Color.parseColor("#F9E79F"))
         }
-    }
-    
-    private fun copyText() {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = editText.text.toString()
-        if (text.isNotEmpty()) {
-            android.content.ClipData.newPlainText("note", text).let { clipboard.setPrimaryClip(it) }
-            Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show()
-        }
-    }
-    
-    private fun pasteText() {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        if (clipboard.hasPrimaryClip()) {
-            val item = clipboard.primaryClip?.getItemAt(0)
-            val pastedText = item?.text?.toString() ?: ""
-            if (pastedText.isNotEmpty()) {
-                val start = editText.selectionStart
-                val end = editText.selectionEnd
-                val newText = editText.text.toString()
-                editText.setText(newText.substring(0, start) + pastedText + newText.substring(end))
-                editText.setSelection(start + pastedText.length)
-                Toast.makeText(this, "Pasted", Toast.LENGTH_SHORT).show()
+
+        val backBtn = TextView(this).apply {
+            text = "←"
+            textSize = 24f
+            setTextColor(Color.parseColor("#333333"))
+            setPadding(8, 0, 16, 0)
+            setOnClickListener {
+                showNoteList()
             }
-        } else {
-            Toast.makeText(this, "Nothing to paste", Toast.LENGTH_SHORT).show()
+        }
+        topBar.addView(backBtn)
+
+        val editorTitle = TextView(this).apply {
+            text = "Edit Note"
+            textSize = 16f
+            setTextColor(Color.parseColor("#333333"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER
+        }
+        topBar.addView(editorTitle)
+
+        val minimizeBtn = TextView(this).apply {
+            text = "−"
+            textSize = 28f
+            setTextColor(Color.parseColor("#C0392B"))
+            setPadding(16, 0, 8, 0)
+            setOnClickListener { collapseToBubble() }
+        }
+        topBar.addView(minimizeBtn)
+        container.addView(topBar)
+
+        // Title input
+        titleInput = EditText(this).apply {
+            setText(note.title)
+            hint = "Title"
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(8, 16, 8, 8)
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            setSingleLine(true)
+        }
+        container.addView(titleInput)
+
+        // Divider
+        val divider = View(this).apply {
+            setBackgroundColor(Color.parseColor("#DDDDDD"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 2
+            )
+        }
+        container.addView(divider)
+
+        // Content input
+        editText = EditText(this).apply {
+            setText(note.content)
+            hint = "Write your note here..."
+            textSize = 16f
+            gravity = Gravity.TOP
+            minHeight = 300
+            setPadding(8, 16, 8, 16)
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            movementMethod = ScrollingMovementMethod()
+            isVerticalScrollBarEnabled = true
+        }
+        container.addView(editText)
+
+        // Button row
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 16
+            }
+        }
+
+        val saveBtn = Button(this).apply {
+            text = "Save"
+            setBackgroundColor(Color.parseColor("#4CAF50"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
+            setOnClickListener {
+                saveCurrentNote(note.id)
+            }
+        }
+        buttonRow.addView(saveBtn)
+
+        val deleteBtn = Button(this).apply {
+            text = "Delete"
+            setBackgroundColor(Color.parseColor("#E74C3C"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                notesList.removeAll { it.id == note.id }
+                saveNotesToPrefs()
+                notesAdapter.updateList(notesList)
+                updateBubbleCount()
+                showNoteList()
+                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
+            }
+        }
+        buttonRow.addView(deleteBtn)
+        container.addView(buttonRow)
+
+        // Share button
+        val shareBtn = Button(this).apply {
+            text = "Share"
+            setBackgroundColor(Color.parseColor("#2196F3"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 8
+            }
+            setOnClickListener {
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(android.content.Intent.EXTRA_TEXT, "${titleInput.text}\n\n${editText.text}")
+                }
+                val chooser = android.content.Intent.createChooser(shareIntent, "Share Note")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(chooser)
+            }
+        }
+        container.addView(shareBtn)
+
+        // Resize handle
+        val resizeHandleView = TextView(this).apply {
+            text = "◢"
+            textSize = 18f
+            setTextColor(Color.parseColor("#999999"))
+            gravity = Gravity.END or Gravity.BOTTOM
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
+            lp.topMargin = 8
+            layoutParams = lp
+            setOnTouchListener(ResizeTouchListener())
+        }
+        container.addView(resizeHandleView)
+
+        // Replace current view
+        noteView?.let { windowManager.removeView(it) }
+        noteView = container
+        
+        val params = WindowManager.LayoutParams(
+            currentNotepadWidth, currentNotepadHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = notepadPosX
+        params.y = notepadPosY
+        
+        windowManager.addView(noteView, params)
+    }
+
+    private fun saveCurrentNote(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index != -1) {
+            notesList[index] = notesList[index].copy(
+                title = titleInput.text.toString().ifEmpty { "Untitled Note" },
+                content = editText.text.toString(),
+                lastEdited = System.currentTimeMillis()
+            )
+            saveNotesToPrefs()
+            notesAdapter.updateList(notesList)
+            updateBubbleCount()
+            Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+            showNoteList()
+        }
+    }
+
+    private fun showNoteList() {
+        isInEditorMode = false
+        
+        val container = createFullNotePad()
+        noteView?.let { windowManager.removeView(it) }
+        noteView = container
+        
+        val params = WindowManager.LayoutParams(
+            currentNotepadWidth, currentNotepadHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = notepadPosX
+        params.y = notepadPosY
+        
+        windowManager.addView(noteView, params)
+    }
+
+    private fun updateBubbleCount() {
+        val countView = (bubbleView as? LinearLayout)?.getChildAt(1) as? TextView
+        countView?.text = notesList.size.toString()
+        countView?.visibility = if (notesList.size > 0) View.VISIBLE else View.GONE
+    }
+
+    inner class NoteAdapter(
+        private var notes: List<NoteItem>,
+        private val onItemClick: (NoteItem) -> Unit,
+        private val onDeleteClick: (NoteItem) -> Unit
+    ) : RecyclerView.Adapter<NoteAdapter.ViewHolder>() {
+
+        fun updateList(newNotes: List<NoteItem>) {
+            notes = newNotes
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(android.R.layout.simple_list_item_2, parent, false)
+            return ViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            holder.bind(notes[position])
+        }
+
+        override fun getItemCount(): Int = notes.size
+
+        inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            private val titleView = itemView.findViewById<android.widget.TextView>(android.R.id.text1)
+            private val contentView = itemView.findViewById<android.widget.TextView>(android.R.id.text2)
+
+            fun bind(note: NoteItem) {
+                titleView.text = note.title
+                val preview = if (note.content.length > 50) note.content.take(50) + "..." else note.content
+                contentView.text = preview.ifEmpty { "No content" }
+                
+                itemView.setOnClickListener { onItemClick(note) }
+                itemView.setOnLongClickListener {
+                    onDeleteClick(note)
+                    true
+                }
+            }
         }
     }
 
@@ -1012,33 +1165,6 @@ class FloatingBubbleService : Service() {
                 }
             }
             return false
-        }
-    }
-
-    private fun loadNoteCount(countView: TextView) {
-        val count = getSharedPreferences("notes_prefs", MODE_PRIVATE).getInt(STORAGE_NOTE_COUNT, 0)
-        if (count > 0) {
-            countView.text = count.toString()
-            countView.visibility = View.VISIBLE
-        }
-    }
-
-    private fun updateNoteCount() {
-        val count = getSharedPreferences("notes_prefs", MODE_PRIVATE).getInt(STORAGE_NOTE_COUNT, 0)
-        (bubbleView as? LinearLayout)?.getChildAt(1)?.let { (it as TextView).text = count.toString() }
-    }
-
-    private fun saveNote() {
-        val noteContent = editText.text.toString()
-        if (noteContent.isNotEmpty()) {
-            val prefs = getSharedPreferences("notes_prefs", MODE_PRIVATE)
-            val currentCount = prefs.getInt(STORAGE_NOTE_COUNT, 0)
-            prefs.edit().putString(STORAGE_LAST_NOTE, noteContent).putInt(STORAGE_NOTE_COUNT, currentCount + 1).apply()
-            updateNoteCount()
-            Toast.makeText(this, "Note saved! Total: ${currentCount + 1}", Toast.LENGTH_SHORT).show()
-            editText.setText("")
-        } else {
-            Toast.makeText(this, "Please write something", Toast.LENGTH_SHORT).show()
         }
     }
 
