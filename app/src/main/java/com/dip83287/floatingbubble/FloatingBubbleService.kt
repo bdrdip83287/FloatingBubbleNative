@@ -6,7 +6,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -19,7 +18,6 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
-import android.text.method.ScrollingMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -35,8 +33,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -53,10 +49,6 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_WIDTH = 650
     private val NOTEPAD_MAX_HEIGHT = 850
 
-    private val ANIMATION_DURATION = 200L
-
-    private val STORAGE_NOTE_COUNT = "note_count"
-    private val STORAGE_LAST_NOTE = "last_note"
     private val STORAGE_NOTES_LIST = "notes_list"
 
     private lateinit var prefs: SharedPreferences
@@ -91,14 +83,12 @@ class FloatingBubbleService : Service() {
     private var flingAnimator: ValueAnimator? = null
 
     private var velocityTracker: VelocityTracker? = null
-    private var velocityX = 0f
     private var velocityY = 0f
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
     private var isInEditorMode = false
-    private var currentEditingNoteId = -1L
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
@@ -402,7 +392,6 @@ class FloatingBubbleService : Service() {
 
                         velocityTracker?.computeCurrentVelocity(1000)
 
-                        velocityX = velocityTracker?.xVelocity ?: 0f
                         velocityY = velocityTracker?.yVelocity ?: 0f
 
                         velocityTracker?.recycle()
@@ -750,7 +739,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(noteCountText)
 
-        // RecyclerView
+        // RecyclerView - REMOVED scroll bar config to avoid crash
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -762,8 +751,7 @@ class FloatingBubbleService : Service() {
             setHasFixedSize(true)
             itemAnimator = null
             setItemViewCacheSize(20)
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_ALWAYS
+            // ⚠️ CRASH FIX: Removed scrollbar config that causes crash on Android 15
         }
         
         notesAdapter = NoteAdapter(notesList,
@@ -831,7 +819,6 @@ class FloatingBubbleService : Service() {
 
     private fun openEditorForNote(note: NoteItem) {
         isInEditorMode = true
-        currentEditingNoteId = note.id
         
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -906,7 +893,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // ✅ OPTIMIZED EDIT TEXT - Native selection + Smooth fling scroll
+        // ✅ OPTIMIZED EDIT TEXT - CRASH FIXED (removed scrollbar config)
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -915,17 +902,16 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // ✅ Performance & smooth scrolling
+            // ⚠️ CRASH FIX: Removed problematic scrollbar configuration
+            // isVerticalScrollBarEnabled = true  // REMOVED - causes crash on Android 15
+            // scrollBarStyle = View.SCROLLBARS_INSIDE_INSET  // REMOVED - causes crash
+            // isScrollbarFadingEnabled = false  // REMOVED - causes crash
+            // overScrollMode = View.OVER_SCROLL_ALWAYS  // REMOVED - causes crash
+            
+            // ✅ Safe scrolling - default behavior
             setHorizontallyScrolling(false)
-            overScrollMode = View.OVER_SCROLL_ALWAYS
-            isVerticalScrollBarEnabled = true
-            scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
-            isScrollbarFadingEnabled = false
             
-            // ✅ Setup scroller for smooth fling
-            setScroller(android.widget.Scroller(context))
-            
-            // ✅ Input type
+            // Input type
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
@@ -934,7 +920,7 @@ class FloatingBubbleService : Service() {
             maxLines = Int.MAX_VALUE
             minHeight = 300
             
-            // ✅ NATIVE SELECTION POPUP (Copy/Paste/Cut/Select All)
+            // ✅ Native selection popup (Copy/Paste/Cut/Select All)
             setTextIsSelectable(true)
             isLongClickable = true
             customInsertionActionModeCallback = null
@@ -953,10 +939,10 @@ class FloatingBubbleService : Service() {
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // ✅ Performance - keep hardware layer
+            // ✅ Performance
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
-            // ✅ Text watcher with auto-save
+            // Text watcher with auto-save
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
@@ -1132,7 +1118,7 @@ class FloatingBubbleService : Service() {
 
         fun updateList(newNotes: List<NoteItem>) {
             notes = newNotes.toList()
-            notifyItemRangeChanged(0, notes.size)
+            notifyDataSetChanged()
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
