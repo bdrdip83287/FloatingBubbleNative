@@ -65,7 +65,7 @@ class FloatingBubbleService : Service() {
     private var noteView: View? = null
     private var isExpanded = false
     private lateinit var editText: EditText
-    private lateinit var wordCountView: TextView
+    private var wordCountView: TextView? = null
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
@@ -504,22 +504,18 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 📝 Fixed expand function
     private fun expandToNotePad() {
         if (isExpanded) return
 
         try {
-            // Create note pad first
             createAndShowNotePad()
 
             val bubble = bubbleView ?: return
             val note = noteView ?: return
 
-            // Hardware acceleration for smooth animation
             bubble.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             note.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-            // Initial state for note pad (hidden)
             note.alpha = 0f
             note.scaleX = 0.85f
             note.scaleY = 0.85f
@@ -529,7 +525,6 @@ class FloatingBubbleService : Service() {
                 note.pivotX = (note.width / 2).toFloat()
                 note.pivotY = 0f
 
-                // Bubble fade out animation
                 bubble.animate()
                     .alpha(0f)
                     .scaleX(0.6f)
@@ -538,7 +533,6 @@ class FloatingBubbleService : Service() {
                     .setInterpolator(AccelerateDecelerateInterpolator())
                     .start()
 
-                // Note pad fade in animation
                 note.animate()
                     .alpha(1f)
                     .scaleX(1f)
@@ -700,7 +694,17 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // EditText
+        // EditText - create wordCountView first before setting text
+        wordCountView = TextView(this).apply {
+            textSize = 11f
+            setTextColor(Color.parseColor("#999999"))
+            setPadding(16, 8, 16, 8)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        
         editText = EditText(this).apply {
             hint = "Type your note here..."
             textSize = 16f
@@ -741,20 +745,12 @@ class FloatingBubbleService : Service() {
         }
         container.addView(editText)
 
-        editText.setText(getSharedPreferences("notes_prefs", MODE_PRIVATE).getString(STORAGE_LAST_NOTE, ""))
-
-        // Word count
-        wordCountView = TextView(this).apply {
-            textSize = 11f
-            setTextColor(Color.parseColor("#999999"))
-            setPadding(16, 8, 16, 8)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        updateWordCount()
+        // Set text after TextWatcher is added
+        val savedText = getSharedPreferences("notes_prefs", MODE_PRIVATE).getString(STORAGE_LAST_NOTE, "")
+        editText.setText(savedText)
+        
         container.addView(wordCountView)
+        updateWordCount()
 
         // Toolbar
         val toolbarLayout = LinearLayout(this).apply {
@@ -869,10 +865,11 @@ class FloatingBubbleService : Service() {
     }
     
     private fun updateWordCount() {
+        if (!::editText.isInitialized) return
         val text = editText.text.toString()
         val charCount = text.length
         val wordCount = if (text.isBlank()) 0 else text.trim().split(Regex("\\s+")).size
-        wordCountView.text = "$wordCount words • $charCount characters"
+        wordCountView?.text = "$wordCount words • $charCount characters"
     }
     
     private fun performUndo() {
