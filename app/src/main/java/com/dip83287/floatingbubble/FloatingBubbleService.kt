@@ -902,7 +902,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // Optimized EditText
+        // Optimized EditText - FIXED scrollbar issues
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -911,9 +911,7 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // Performance
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            // Performance - REMOVED scrollbar configurations that cause crash
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 300
@@ -925,7 +923,7 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // Selection - Fixed: Removed isTextSelectable = true (it's read-only)
+            // Selection
             setTextIsSelectable(true)
             customSelectionActionModeCallback = object : ActionMode.Callback {
                 override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean = true
@@ -943,10 +941,8 @@ class FloatingBubbleService : Service() {
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // Performance layer - Fixed: Removed setTextKeepState(true)
+            // Performance layer - NO scrollbar config
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            isScrollbarFadingEnabled = false
-            scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
             
             // Text watcher with auto-save
             addTextChangedListener(object : TextWatcher {
