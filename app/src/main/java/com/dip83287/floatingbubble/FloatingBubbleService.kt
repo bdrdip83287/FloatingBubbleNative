@@ -17,7 +17,6 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
-import android.text.method.ScrollingMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -66,6 +65,7 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
+    private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
@@ -598,13 +598,13 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
+            // ✅ STEP 1: FIXED - Removed FLAG_ALT_FOCUSABLE_IM
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
@@ -875,7 +875,7 @@ class FloatingBubbleService : Service() {
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = EditorInfo.IME_ACTION_NEXT
+            imeOptions = EditorInfo.IME_ACTION_DONE
             setTextIsSelectable(true)
         }
         container.addView(titleInput)
@@ -889,170 +889,121 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // ✅ Native Android Messenger-like Editor (NO ScrollView wrapper)
-        editText = EditText(this).apply {
-
-            setText(note.content)
-
-            hint = "Write your note here..."
-
-            textSize = 16f
-
-            gravity = Gravity.TOP or Gravity.START
-
-            setPadding(18, 18, 18, 18)
-
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
-
-            // ✅ TRUE native multiline editor
-            inputType =
-                InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
-
-            imeOptions =
-                EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-                EditorInfo.IME_ACTION_NONE
-
-            // ✅ Android native selection system
-            setTextIsSelectable(true)
-
-            isLongClickable = true
-
-            customSelectionActionModeCallback = null
-
-            customInsertionActionModeCallback = null
-
-            // ✅ Cursor anywhere
-            isFocusable = true
-
-            isFocusableInTouchMode = true
-
-            // ✅ Internal smooth scrolling
-            isVerticalScrollBarEnabled = true
-
-            overScrollMode = View.OVER_SCROLL_ALWAYS
-
-            scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
-
-            movementMethod = ScrollingMovementMethod()
-
-            setHorizontallyScrolling(false)
-
-            maxLines = Int.MAX_VALUE
-
-            minLines = 20
-
-            minHeight = 600
-
-            // ✅ Messenger-like touch behavior
-            setOnTouchListener { v, event ->
-
-                when (event.actionMasked) {
-
-                    MotionEvent.ACTION_DOWN -> {
-
-                        v.parent?.requestDisallowInterceptTouchEvent(true)
-
-                        requestFocus()
-                    }
-
-                    MotionEvent.ACTION_UP,
-                    MotionEvent.ACTION_CANCEL -> {
-
-                        v.parent?.requestDisallowInterceptTouchEvent(false)
-                    }
-                }
-
-                false
-            }
-
-            // ✅ Auto keyboard
-            setOnClickListener {
-
-                requestFocus()
-
-                val imm =
-                    getSystemService(Context.INPUT_METHOD_SERVICE)
-                            as InputMethodManager
-
-                imm.showSoftInput(
-                    this,
-                    InputMethodManager.SHOW_IMPLICIT
-                )
-            }
-
-            // ✅ Hardware acceleration
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
-
-            // ✅ Auto save
-            addTextChangedListener(object : TextWatcher {
-
-                override fun beforeTextChanged(
-                    s: CharSequence?,
-                    start: Int,
-                    count: Int,
-                    after: Int
-                ) {}
-
-                override fun onTextChanged(
-                    s: CharSequence?,
-                    start: Int,
-                    before: Int,
-                    count: Int
-                ) {
-
-                    saveRunnable?.let {
-                        saveHandler.removeCallbacks(it)
-                    }
-
-                    val runnable = Runnable {
-
-                        val index =
-                            notesList.indexOfFirst {
-                                it.id == note.id
-                            }
-
-                        if (index != -1) {
-
-                            val updatedNote =
-                                notesList[index].copy(
-
-                                    content = text.toString(),
-
-                                    title = titleInput.text.toString(),
-
-                                    lastEdited =
-                                        System.currentTimeMillis()
-                                )
-
-                            notesList[index] = updatedNote
-
-                            saveNotesToPrefs()
-                        }
-                    }
-
-                    saveRunnable = runnable
-
-                    saveHandler.postDelayed(runnable, 500)
-                }
-
-                override fun afterTextChanged(
-                    s: Editable?
-                ) {}
-            })
-        }
-
-        // ✅ Direct add (NO ScrollView wrapper)
-        container.addView(
-            editText,
-            LinearLayout.LayoutParams(
+        // ScrollView for content
+        scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
             )
-        )
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_ALWAYS
+            setPadding(0, 0, 0, 0)
+            
+            isFocusable = false
+            isFocusableInTouchMode = false
+        }
+        
+        // ✅ STEP 2: EditText with proper configuration
+        editText = EditText(this).apply {
+            setText(note.content)
+            hint = "Write your note here..."
+            textSize = 16f
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(18, 18, 18, 18)
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            
+            // Smooth scrolling properties
+            setHorizontallyScrolling(false)
+            maxLines = Int.MAX_VALUE
+            minHeight = 400
+            
+            // Input type for good editing experience
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            
+            // ✅ Native selection popup - Copy/Paste/Cut/Select All
+            setTextIsSelectable(true)
+            isLongClickable = true
+            customInsertionActionModeCallback = null
+            customSelectionActionModeCallback = null
+            
+            // ✅ STEP 2: Add these important lines
+            isClickable = true
+            isCursorVisible = true
+            
+            // Focusable properties
+            isFocusable = true
+            isFocusableInTouchMode = true
+            
+            // Better touch handling
+            setOnTouchListener { v, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        v.requestFocus()
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (hasSelection()) {
+                            v.parent.requestDisallowInterceptTouchEvent(true)
+                        } else {
+                            v.parent.requestDisallowInterceptTouchEvent(false)
+                        }
+                    }
+                    else -> {
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                    }
+                }
+                false
+            }
+            
+            // Focus and keyboard
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) {
+                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+            
+            setOnClickListener {
+                requestFocus()
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            }
+            
+            // Performance
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            
+            // Auto-save
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
+                    val runnable = Runnable {
+                        val index = notesList.indexOfFirst { it.id == note.id }
+                        if (index != -1) {
+                            val updatedNote = notesList[index].copy(
+                                content = text.toString(),
+                                title = titleInput.text.toString(),
+                                lastEdited = System.currentTimeMillis()
+                            )
+                            notesList[index] = updatedNote
+                            saveNotesToPrefs()
+                        }
+                    }
+                    saveRunnable = runnable
+                    saveHandler.postDelayed(runnable, 600)
+                }
+                
+                override fun afterTextChanged(s: Editable?) {}
+            })
+        }
+        scrollView.addView(editText)
+        container.addView(scrollView)
 
         // Button row
         val buttonRow = LinearLayout(this).apply {
@@ -1129,6 +1080,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(resizeHandleView)
 
+        // ✅ STEP 1: FIXED - Removed FLAG_ALT_FOCUSABLE_IM
         // Replace current view
         noteView?.let { windowManager.removeView(it) }
         noteView = container
@@ -1138,8 +1090,7 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -1148,12 +1099,19 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // ✅ Show keyboard automatically when editor opens
-        editText.postDelayed({
+        // ✅ STEP 3: Force keyboard to show with proper flags
+        scrollView.postDelayed({
+            editText.isFocusable = true
+            editText.isFocusableInTouchMode = true
             editText.requestFocus()
+            
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
         }, 300)
+    }
+
+    private fun EditText.hasSelection(): Boolean {
+        return selectionStart != selectionEnd
     }
 
     private fun saveCurrentNote(noteId: Long) {
@@ -1178,13 +1136,13 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
+        // ✅ STEP 1: FIXED - Removed FLAG_ALT_FOCUSABLE_IM
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
