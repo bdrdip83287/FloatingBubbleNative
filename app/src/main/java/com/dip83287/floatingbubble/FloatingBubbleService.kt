@@ -6,6 +6,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -598,7 +599,6 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
-            // ✅ STEP 1: FIXED - Removed FLAG_ALT_FOCUSABLE_IM
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -904,7 +904,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // ✅ STEP 2: EditText with proper configuration
+        // ✅ FIXED: EditText with FULL native selection support
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -925,13 +925,19 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ Native selection popup - Copy/Paste/Cut/Select All
+            // ✅ CRITICAL: Native selection popup fix
+            // এই তিনটি লাইন নিশ্চিত করে যে Android native popup আসবে
             setTextIsSelectable(true)
             isLongClickable = true
-            customInsertionActionModeCallback = null
-            customSelectionActionModeCallback = null
+            setCustomSelectionActionModeCallback(null)
+            setCustomInsertionActionModeCallback(null)
             
-            // ✅ STEP 2: Add these important lines
+            // ✅ For Android 11+ (API 30+), these are required for native popup
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                setCustomSelectionActionModeCallback(null)
+                setCustomInsertionActionModeCallback(null)
+            }
+            
             isClickable = true
             isCursorVisible = true
             
@@ -939,7 +945,7 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // Better touch handling
+            // Better touch handling for selection
             setOnTouchListener { v, event ->
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
@@ -1080,7 +1086,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(resizeHandleView)
 
-        // ✅ STEP 1: FIXED - Removed FLAG_ALT_FOCUSABLE_IM
         // Replace current view
         noteView?.let { windowManager.removeView(it) }
         noteView = container
@@ -1099,7 +1104,7 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // ✅ STEP 3: Force keyboard to show with proper flags
+        // Force keyboard to show
         scrollView.postDelayed({
             editText.isFocusable = true
             editText.isFocusableInTouchMode = true
@@ -1136,7 +1141,6 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
-        // ✅ STEP 1: FIXED - Removed FLAG_ALT_FOCUSABLE_IM
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
