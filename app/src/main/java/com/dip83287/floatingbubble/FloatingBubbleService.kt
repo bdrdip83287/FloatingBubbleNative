@@ -6,6 +6,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -65,6 +66,7 @@ class FloatingBubbleService : Service() {
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
     private var noteView: View? = null
+    private var actionModeBar: View? = null
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
@@ -817,6 +819,164 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
+    // ✅ CUSTOM ACTION MODE BAR - Native Copy/Paste/Cut/Select All functionality
+    private fun showCustomActionModeBar() {
+        // Remove existing action mode bar if any
+        actionModeBar?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+            actionModeBar = null
+        }
+
+        val hasTextSelected = editText.selectionStart != editText.selectionEnd
+        if (!hasTextSelected) return
+
+        // Create custom action bar
+        val actionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.parseColor("#333333"))
+            setPadding(20, 12, 20, 12)
+            gravity = Gravity.CENTER
+            elevation = 16f
+            
+            // Rounded corners
+            val shape = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 40f
+                setColor(Color.parseColor("#333333"))
+            }
+            background = shape
+        }
+
+        // Select All button
+        val selectAllBtn = TextView(this).apply {
+            text = "Select all"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 8, 16, 8)
+            setOnClickListener {
+                editText.selectAll()
+                hideActionModeBar()
+                showCustomActionModeBar() // Refresh bar after selection
+            }
+        }
+        actionBar.addView(selectAllBtn)
+
+        // Divider
+        actionBar.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(2, 36)
+            setBackgroundColor(Color.parseColor("#666666"))
+            setPadding(0, 0, 0, 0)
+        })
+
+        // Cut button
+        val cutBtn = TextView(this).apply {
+            text = "Cut"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 8, 16, 8)
+            setOnClickListener {
+                val start = editText.selectionStart
+                val end = editText.selectionEnd
+                if (start != end) {
+                    val selectedText = editText.text.toString().substring(start, end)
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("text", selectedText))
+                    editText.text.delete(start, end)
+                }
+                hideActionModeBar()
+            }
+        }
+        actionBar.addView(cutBtn)
+
+        // Copy button
+        val copyBtn = TextView(this).apply {
+            text = "Copy"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 8, 16, 8)
+            setOnClickListener {
+                val start = editText.selectionStart
+                val end = editText.selectionEnd
+                if (start != end) {
+                    val selectedText = editText.text.toString().substring(start, end)
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("text", selectedText))
+                    Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
+                }
+                hideActionModeBar()
+                // Keep selection visible
+                showCustomActionModeBar()
+            }
+        }
+        actionBar.addView(copyBtn)
+
+        // Divider
+        actionBar.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(2, 36)
+            setBackgroundColor(Color.parseColor("#666666"))
+            setPadding(0, 0, 0, 0)
+        })
+
+        // Paste button
+        val pasteBtn = TextView(this).apply {
+            text = "Paste"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 8, 16, 8)
+            setOnClickListener {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val pasteData = clip.getItemAt(0).text.toString()
+                    val start = editText.selectionStart
+                    val end = editText.selectionEnd
+                    if (start != end) {
+                        editText.text.delete(start, end)
+                    }
+                    editText.text.insert(editText.selectionStart, pasteData)
+                }
+                hideActionModeBar()
+            }
+        }
+        actionBar.addView(pasteBtn)
+
+        actionModeBar = actionBar
+
+        // Calculate position above the selection
+        val location = IntArray(2)
+        editText.getLocationOnScreen(location)
+        
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        params.y = location[1] - 100 // Position above edit text
+        
+        try {
+            windowManager.addView(actionModeBar, params)
+            
+            // Auto hide after 5 seconds
+            actionModeBar?.postDelayed({
+                hideActionModeBar()
+            }, 5000)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun hideActionModeBar() {
+        actionModeBar?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+            actionModeBar = null
+        }
+    }
+
     private fun openEditorForNote(note: NoteItem) {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -842,6 +1002,7 @@ class FloatingBubbleService : Service() {
             setTextColor(Color.parseColor("#333333"))
             setPadding(8, 0, 16, 0)
             setOnClickListener {
+                hideActionModeBar()
                 showNoteList()
             }
         }
@@ -862,7 +1023,10 @@ class FloatingBubbleService : Service() {
             textSize = 28f
             setTextColor(Color.parseColor("#C0392B"))
             setPadding(16, 0, 8, 0)
-            setOnClickListener { collapseToBubble() }
+            setOnClickListener { 
+                hideActionModeBar()
+                collapseToBubble() 
+            }
         }
         topBar.addView(minimizeBtn)
         container.addView(topBar)
@@ -906,7 +1070,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // ✅ COMPLETE EDIT TEXT WITH NATIVE SELECTION POPUP
+        // ✅ EDIT TEXT WITH LONG PRESS DETECTION
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -915,85 +1079,66 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // Smooth scrolling properties
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
             
-            // Input type for good editing experience
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ CRITICAL FOR NATIVE SELECTION POPUP (Copy/Paste/Cut/Select All)
             setTextIsSelectable(true)
             isLongClickable = true
-            
-            // ✅ IMPORTANT: Remove custom callbacks to let Android handle the popup
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
-            
-            // ✅ Enable text selection handles
             isCursorVisible = true
-            
-            // Focusable properties
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Enable selection
-            setRawInputType(inputType)
-            
-            // Better touch handling
-            setOnTouchListener { v, event ->
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        v.requestFocus()
-                        v.parent.requestDisallowInterceptTouchEvent(false)
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        if (hasSelection()) {
-                            v.parent.requestDisallowInterceptTouchEvent(true)
-                        } else {
-                            v.parent.requestDisallowInterceptTouchEvent(false)
-                        }
-                    }
-                    else -> {
-                        v.parent.requestDisallowInterceptTouchEvent(false)
+            // ✅ LONG PRESS LISTENER for custom action bar
+            setOnLongClickListener {
+                // Show custom action mode bar on long press
+                if (editText.selectionStart == editText.selectionEnd) {
+                    // If no text selected, select word at cursor position
+                    val text = editText.text.toString()
+                    var start = editText.selectionStart
+                    var end = editText.selectionEnd
+                    
+                    // Find word boundaries
+                    while (start > 0 && text[start - 1].isLetterOrDigit()) start--
+                    while (end < text.length && text[end].isLetterOrDigit()) end++
+                    
+                    if (start < end) {
+                        editText.setSelection(start, end)
                     }
                 }
-                false
+                
+                // Show custom action bar
+                showCustomActionModeBar()
+                true
             }
             
-            // Focus and keyboard
-            setOnFocusChangeListener { _, hasFocus ->
-                if (hasFocus) {
-                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-                }
-            }
-            
-            setOnClickListener {
-                requestFocus()
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-            }
-            
-            // Performance
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            
-            // Auto-save
+            // ✅ On selection change listener
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    // When selection changes, update action bar
+                    if (editText.selectionStart != editText.selectionEnd) {
+                        showCustomActionModeBar()
+                    } else {
+                        hideActionModeBar()
+                    }
+                    
+                    // Auto-save
                     saveRunnable?.let { saveHandler.removeCallbacks(it) }
                     val runnable = Runnable {
                         val index = notesList.indexOfFirst { it.id == note.id }
                         if (index != -1) {
                             val updatedNote = notesList[index].copy(
-                                content = text.toString(),
+                                content = editText.text.toString(),
                                 title = titleInput.text.toString(),
                                 lastEdited = System.currentTimeMillis()
                             )
@@ -1004,9 +1149,43 @@ class FloatingBubbleService : Service() {
                     saveRunnable = runnable
                     saveHandler.postDelayed(runnable, 600)
                 }
-                
-                override fun afterTextChanged(s: Editable?) {}
             })
+            
+            setOnTouchListener { v, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        v.requestFocus()
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                        // Hide action bar when touching elsewhere
+                        hideActionModeBar()
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        // Show action bar if text is selected
+                        if (editText.selectionStart != editText.selectionEnd) {
+                            showCustomActionModeBar()
+                        }
+                    }
+                }
+                false
+            }
+            
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) {
+                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                } else {
+                    hideActionModeBar()
+                }
+            }
+            
+            setOnClickListener {
+                requestFocus()
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                hideActionModeBar()
+            }
+            
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
         }
         scrollView.addView(editText)
         container.addView(scrollView)
@@ -1043,6 +1222,7 @@ class FloatingBubbleService : Service() {
                 saveNotesToPrefs()
                 notesAdapter.updateList(notesList)
                 updateBubbleCount()
+                hideActionModeBar()
                 showNoteList()
                 Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
             }
@@ -1115,10 +1295,6 @@ class FloatingBubbleService : Service() {
         }, 300)
     }
 
-    private fun EditText.hasSelection(): Boolean {
-        return selectionStart != selectionEnd
-    }
-
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
@@ -1132,11 +1308,13 @@ class FloatingBubbleService : Service() {
             notesAdapter.updateList(notesList)
             updateBubbleCount()
             Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+            hideActionModeBar()
             showNoteList()
         }
     }
 
     private fun showNoteList() {
+        hideActionModeBar()
         val container = createFullNotePad()
         noteView?.let { windowManager.removeView(it) }
         noteView = container
@@ -1291,6 +1469,7 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        hideActionModeBar()
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
         velocityTracker?.recycle()
