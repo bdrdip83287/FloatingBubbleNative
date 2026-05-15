@@ -6,7 +6,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -904,7 +903,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // ✅ FIXED: EditText with FULL native selection support
+        // ✅ EDIT TEXT WITH FULL ACTION MODE SUPPORT
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -925,27 +924,23 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ CRITICAL: Native selection popup fix
-            // এই তিনটি লাইন নিশ্চিত করে যে Android native popup আসবে
+            // ✅ IMPORTANT: Enable text selection and action mode
             setTextIsSelectable(true)
             isLongClickable = true
-            setCustomSelectionActionModeCallback(null)
-            setCustomInsertionActionModeCallback(null)
-            
-            // ✅ For Android 11+ (API 30+), these are required for native popup
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                setCustomSelectionActionModeCallback(null)
-                setCustomInsertionActionModeCallback(null)
-            }
-            
             isClickable = true
             isCursorVisible = true
+            
+            // ✅ CRITICAL FOR ACTION MODE POPUP: Don't override callbacks
+            // Let Android system handle the action mode
+            // Remove any custom callbacks that might block the popup
+            customInsertionActionModeCallback = null
+            customSelectionActionModeCallback = null
             
             // Focusable properties
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // Better touch handling for selection
+            // Better touch handling
             setOnTouchListener { v, event ->
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
