@@ -14,16 +14,10 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.*
 import android.provider.Settings
-import android.text.Editable
-import android.text.InputType
-import android.text.TextWatcher
-import android.text.method.ArrowKeyMovementMethod
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import androidx.core.view.doOnLayout
@@ -64,9 +58,6 @@ class FloatingBubbleService : Service() {
     private var bubbleView: View? = null
     private var noteView: View? = null
     private var isExpanded = false
-    private lateinit var editText: EditText
-    private lateinit var titleInput: EditText
-    private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
@@ -89,8 +80,8 @@ class FloatingBubbleService : Service() {
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
-    private val saveHandler = Handler(Looper.getMainLooper())
-    private var saveRunnable: Runnable? = null
+
+    private val REQUEST_CODE_EDIT_NOTE = 1001
 
     data class NoteItem(
         val id: Long,
@@ -596,33 +587,22 @@ class FloatingBubbleService : Service() {
         if (noteView != null) return
         
         try {
-            val container = createFullNotePad()
+            val container = createNoteListUI()
             noteView = container
             
-            // ✅ STEP 2 & 3: Updated flags and softInputMode
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = notepadPosX
             params.y = notepadPosY
             
-            // ✅ STEP 3: Add softInputMode
-            params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
-                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-            
             windowManager.addView(noteView, params)
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                noteView?.rootView?.windowInsetsController?.show(
-                    WindowInsets.Type.ime()
-                )
-            }
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createAndShowNotePad")
@@ -692,7 +672,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun createFullNotePad(): View {
+    private fun createNoteListUI(): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
@@ -700,6 +680,7 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
         }
 
+        // Top bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -739,6 +720,7 @@ class FloatingBubbleService : Service() {
         topBar.addView(minimizeBtn)
         container.addView(topBar)
 
+        // Note count text
         val noteCountText = TextView(this).apply {
             text = "Note List (${notesList.size})"
             textSize = 14f
@@ -747,6 +729,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(noteCountText)
 
+        // RecyclerView
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -762,7 +745,16 @@ class FloatingBubbleService : Service() {
         
         notesAdapter = NoteAdapter(notesList,
             onItemClick = { note ->
-                openEditorForNote(note)
+                // ✅ Open NoteEditorActivity (Activity, not overlay)
+                collapseToBubble() // First collapse the bubble
+                
+                val intent = Intent(this@FloatingBubbleService, NoteEditorActivity::class.java).apply {
+                    putExtra("note_id", note.id)
+                    putExtra("note_title", note.title)
+                    putExtra("note_content", note.content)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
             },
             onDeleteClick = { note ->
                 notesList.remove(note)
@@ -775,6 +767,7 @@ class FloatingBubbleService : Service() {
         recyclerView.adapter = notesAdapter
         container.addView(recyclerView)
 
+        // Add note button
         val addButton = Button(this).apply {
             text = "+ New Note"
             setBackgroundColor(Color.parseColor("#F9E79F"))
@@ -793,6 +786,7 @@ class FloatingBubbleService : Service() {
         }
         container.addView(addButton)
 
+        // Resize handle
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 18f
@@ -818,335 +812,17 @@ class FloatingBubbleService : Service() {
         saveNotesToPrefs()
         notesAdapter.updateList(notesList)
         updateBubbleCount()
-        openEditorForNote(newNote)
-    }
-
-    private fun openEditorForNote(note: NoteItem) {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            setPadding(16, 16, 16, 16)
-        }
-
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            setOnTouchListener(TitleBarDragListener())
-            setPadding(8, 12, 8, 12)
-            setBackgroundColor(Color.parseColor("#F9E79F"))
-        }
-
-        val backBtn = TextView(this).apply {
-            text = "←"
-            textSize = 24f
-            setTextColor(Color.parseColor("#333333"))
-            setPadding(8, 0, 16, 0)
-            setOnClickListener {
-                showNoteList()
-            }
-        }
-        topBar.addView(backBtn)
-
-        val editorTitle = TextView(this).apply {
-            text = "Edit Note"
-            textSize = 16f
-            setTextColor(Color.parseColor("#333333"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            gravity = Gravity.CENTER
-        }
-        topBar.addView(editorTitle)
-
-        val minimizeBtn = TextView(this).apply {
-            text = "−"
-            textSize = 28f
-            setTextColor(Color.parseColor("#C0392B"))
-            setPadding(16, 0, 8, 0)
-            setOnClickListener { collapseToBubble() }
-        }
-        topBar.addView(minimizeBtn)
-        container.addView(topBar)
-
-        titleInput = EditText(this).apply {
-            setText(note.title)
-            hint = "Title"
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(8, 16, 8, 8)
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            setTextIsSelectable(true)
-        }
-        container.addView(titleInput)
-
-        val divider = View(this).apply {
-            setBackgroundColor(Color.parseColor("#DDDDDD"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 2
-            )
-        }
-        container.addView(divider)
-
-        scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_ALWAYS
-            setPadding(0, 0, 0, 0)
-            
-            isFocusable = false
-            isFocusableInTouchMode = false
-        }
         
-        // ✅ FIXED EditText - Removed problematic callbacks and long click
-        editText = EditText(this).apply {
-            setText(note.content)
-            hint = "Write your note here..."
-            textSize = 16f
-            gravity = Gravity.TOP or Gravity.START
-            setPadding(18, 18, 18, 18)
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
-            
-            setHorizontallyScrolling(false)
-            maxLines = Int.MAX_VALUE
-            minHeight = 400
-            
-            inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
-            
-            imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or
-                EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            
-            setTextIsSelectable(true)
-            isLongClickable = true
-            isFocusable = true
-            isFocusableInTouchMode = true
-            isClickable = true
-            isCursorVisible = true
-            
-            movementMethod = ArrowKeyMovementMethod.getInstance()
-            
-            // ✅ STEP 4: Add customInsertionActionModeCallback instead
-            customInsertionActionModeCallback = object : android.view.ActionMode.Callback {
-                override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean = true
-                override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean = false
-                override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?): Boolean = false
-                override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
-            }
-            
-            // ✅ STEP 1: REMOVED setCustomSelectionActionModeCallback completely
-            // ✅ STEP 5: REMOVED setOnLongClickListener completely
-            
-            setOnFocusChangeListener { _, hasFocus ->
-                if (hasFocus) {
-                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-                }
-            }
-            
-            setOnClickListener {
-                requestFocus()
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-            }
-            
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            
-            setSelection(text?.length ?: 0)
-            
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
-                    val runnable = Runnable {
-                        val index = notesList.indexOfFirst { it.id == note.id }
-                        if (index != -1) {
-                            val updatedNote = notesList[index].copy(
-                                content = text.toString(),
-                                title = titleInput.text.toString(),
-                                lastEdited = System.currentTimeMillis()
-                            )
-                            notesList[index] = updatedNote
-                            saveNotesToPrefs()
-                        }
-                    }
-                    saveRunnable = runnable
-                    saveHandler.postDelayed(runnable, 600)
-                }
-                
-                override fun afterTextChanged(s: Editable?) {}
-            })
-        }
-        scrollView.addView(editText)
-        container.addView(scrollView)
-
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 16
-            }
-        }
-
-        val saveBtn = Button(this).apply {
-            text = "Save"
-            setBackgroundColor(Color.parseColor("#4CAF50"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
-            setOnClickListener {
-                saveCurrentNote(note.id)
-            }
-        }
-        buttonRow.addView(saveBtn)
-
-        val deleteBtn = Button(this).apply {
-            text = "Delete"
-            setBackgroundColor(Color.parseColor("#E74C3C"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setOnClickListener {
-                notesList.removeAll { it.id == note.id }
-                saveNotesToPrefs()
-                notesAdapter.updateList(notesList)
-                updateBubbleCount()
-                showNoteList()
-                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
-            }
-        }
-        buttonRow.addView(deleteBtn)
-        container.addView(buttonRow)
-
-        val shareBtn = Button(this).apply {
-            text = "Share"
-            setBackgroundColor(Color.parseColor("#2196F3"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 8
-            }
-            setOnClickListener {
-                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(android.content.Intent.EXTRA_TEXT, "${titleInput.text}\n\n${editText.text}")
-                }
-                val chooser = android.content.Intent.createChooser(shareIntent, "Share Note")
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(chooser)
-            }
-        }
-        container.addView(shareBtn)
-
-        val resizeHandleView = TextView(this).apply {
-            text = "◢"
-            textSize = 18f
-            setTextColor(Color.parseColor("#999999"))
-            gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
-            lp.topMargin = 8
-            layoutParams = lp
-            setOnTouchListener(ResizeTouchListener())
-        }
-        container.addView(resizeHandleView)
-
-        noteView?.let { windowManager.removeView(it) }
-        noteView = container
+        // ✅ Open NoteEditorActivity for new note
+        collapseToBubble()
         
-        // ✅ STEP 2 & 3: Updated flags and softInputMode
-        val params = WindowManager.LayoutParams(
-            currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = notepadPosX
-        params.y = notepadPosY
-        
-        // ✅ STEP 3: Add softInputMode
-        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
-                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        
-        windowManager.addView(noteView, params)
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            noteView?.rootView?.windowInsetsController?.show(
-                WindowInsets.Type.ime()
-            )
+        val intent = Intent(this, NoteEditorActivity::class.java).apply {
+            putExtra("note_id", newNote.id)
+            putExtra("note_title", newNote.title)
+            putExtra("note_content", newNote.content)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        
-        scrollView.postDelayed({
-            editText.isFocusable = true
-            editText.isFocusableInTouchMode = true
-            editText.requestFocus()
-            
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
-        }, 300)
-    }
-
-    private fun saveCurrentNote(noteId: Long) {
-        val index = notesList.indexOfFirst { it.id == noteId }
-        if (index != -1) {
-            val updatedNote = notesList[index].copy(
-                title = titleInput.text.toString().ifEmpty { "Untitled Note" },
-                content = editText.text.toString(),
-                lastEdited = System.currentTimeMillis()
-            )
-            notesList[index] = updatedNote
-            saveNotesToPrefs()
-            notesAdapter.updateList(notesList)
-            updateBubbleCount()
-            Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
-            showNoteList()
-        }
-    }
-
-    private fun showNoteList() {
-        val container = createFullNotePad()
-        noteView?.let { windowManager.removeView(it) }
-        noteView = container
-        
-        // ✅ STEP 2 & 3: Updated flags and softInputMode
-        val params = WindowManager.LayoutParams(
-            currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = notepadPosX
-        params.y = notepadPosY
-        
-        // ✅ STEP 3: Add softInputMode
-        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
-                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        
-        windowManager.addView(noteView, params)
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            noteView?.rootView?.windowInsetsController?.show(
-                WindowInsets.Type.ime()
-            )
-        }
+        startActivity(intent)
     }
 
     private fun updateBubbleCount() {
@@ -1284,7 +960,6 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
         velocityTracker?.recycle()
         bubbleView?.let { windowManager.removeView(it) }
