@@ -599,7 +599,6 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
-            // ✅ Updated flags with FLAG_LAYOUT_IN_SCREEN
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -615,7 +614,6 @@ class FloatingBubbleService : Service() {
             
             windowManager.addView(noteView, params)
             
-            // ✅ Show IME for better keyboard handling
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 noteView?.rootView?.windowInsetsController?.show(
                     WindowInsets.Type.ime()
@@ -698,7 +696,6 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
         }
 
-        // Top bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -738,7 +735,6 @@ class FloatingBubbleService : Service() {
         topBar.addView(minimizeBtn)
         container.addView(topBar)
 
-        // Note count text
         val noteCountText = TextView(this).apply {
             text = "Note List (${notesList.size})"
             textSize = 14f
@@ -747,7 +743,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(noteCountText)
 
-        // RecyclerView
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -776,7 +771,6 @@ class FloatingBubbleService : Service() {
         recyclerView.adapter = notesAdapter
         container.addView(recyclerView)
 
-        // Add note button
         val addButton = Button(this).apply {
             text = "+ New Note"
             setBackgroundColor(Color.parseColor("#F9E79F"))
@@ -795,7 +789,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(addButton)
 
-        // Resize handle
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 18f
@@ -831,7 +824,6 @@ class FloatingBubbleService : Service() {
             setPadding(16, 16, 16, 16)
         }
 
-        // Editor top bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -874,7 +866,6 @@ class FloatingBubbleService : Service() {
         topBar.addView(minimizeBtn)
         container.addView(topBar)
 
-        // Title input
         titleInput = EditText(this).apply {
             setText(note.title)
             hint = "Title"
@@ -889,7 +880,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(titleInput)
 
-        // Divider
         val divider = View(this).apply {
             setBackgroundColor(Color.parseColor("#DDDDDD"))
             layoutParams = LinearLayout.LayoutParams(
@@ -898,7 +888,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(divider)
 
-        // ScrollView for content
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -913,7 +902,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // ✅ PERFECT EDIT TEXT - No custom touch listener interfering
+        // ✅ FIXED EditText - Removed problematic text_select_handle_middle
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -922,22 +911,18 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // Smooth scrolling properties
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
             
-            // ✅ Input type with proper IME options
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             
-            // ✅ Updated IME options - replaced IME_FLAG_NO_EXTRACT_UI
             imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or
                 EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ Native text selection support
             setTextIsSelectable(true)
             isLongClickable = true
             isFocusable = true
@@ -945,10 +930,8 @@ class FloatingBubbleService : Service() {
             isClickable = true
             isCursorVisible = true
             
-            // ✅ Movement method for cursor
             movementMethod = ArrowKeyMovementMethod.getInstance()
             
-            // ✅ Custom selection action mode callback (allows native toolbar)
             setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
                 override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
                     return true
@@ -965,25 +948,13 @@ class FloatingBubbleService : Service() {
                 override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
             })
             
-            // ✅ Set text selection handles
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    setTextSelectHandle(resources.getDrawable(android.R.drawable.text_select_handle_middle, theme))
-                }
-            } catch (e: Exception) {
-                // Ignore - use default handles
-            }
+            // ✅ REMOVED: setTextSelectHandle - removed because it causes build error
             
-            // ✅ REMOVED: Custom touch listener that was blocking native selection
-            // No setOnTouchListener here - let Android handle it naturally
-            
-            // ✅ OnLongClickListener to ensure long press works
             setOnLongClickListener {
                 performLongClick()
                 false
             }
             
-            // ✅ Focus and keyboard
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) {
                     val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -997,13 +968,10 @@ class FloatingBubbleService : Service() {
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
-            // Performance
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
-            // Set initial selection at end
             setSelection(text?.length ?: 0)
             
-            // Auto-save
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
@@ -1031,7 +999,6 @@ class FloatingBubbleService : Service() {
         scrollView.addView(editText)
         container.addView(scrollView)
 
-        // Button row
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -1070,7 +1037,6 @@ class FloatingBubbleService : Service() {
         buttonRow.addView(deleteBtn)
         container.addView(buttonRow)
 
-        // Share button
         val shareBtn = Button(this).apply {
             text = "Share"
             setBackgroundColor(Color.parseColor("#2196F3"))
@@ -1093,7 +1059,6 @@ class FloatingBubbleService : Service() {
         }
         container.addView(shareBtn)
 
-        // Resize handle
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 18f
@@ -1106,11 +1071,9 @@ class FloatingBubbleService : Service() {
         }
         container.addView(resizeHandleView)
 
-        // Replace current view
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
-        // ✅ Updated flags with FLAG_LAYOUT_IN_SCREEN
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -1126,14 +1089,12 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // ✅ Show IME for better keyboard handling
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             noteView?.rootView?.windowInsetsController?.show(
                 WindowInsets.Type.ime()
             )
         }
         
-        // Focus and show keyboard
         scrollView.postDelayed({
             editText.isFocusable = true
             editText.isFocusableInTouchMode = true
@@ -1166,7 +1127,6 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
-        // ✅ Updated flags with FLAG_LAYOUT_IN_SCREEN
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -1182,7 +1142,6 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // ✅ Show IME for better keyboard handling
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             noteView?.rootView?.windowInsetsController?.show(
                 WindowInsets.Type.ime()
