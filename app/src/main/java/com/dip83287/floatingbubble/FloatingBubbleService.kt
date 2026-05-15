@@ -6,6 +6,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -16,6 +17,8 @@ import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
+import android.text.Selection
+import android.text.Spannable
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -38,7 +41,7 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val BUBBLE_ICON = "📝"
-    private val BUBBLE_SIZE = 90
+    private val BUBBLE_SIZE = 80
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
@@ -903,7 +906,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // ✅ EDIT TEXT WITH FULL ACTION MODE SUPPORT
+        // ✅ COMPLETE EDIT TEXT WITH NATIVE SELECTION POPUP
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -924,21 +927,23 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ IMPORTANT: Enable text selection and action mode
+            // ✅ CRITICAL FOR NATIVE SELECTION POPUP (Copy/Paste/Cut/Select All)
             setTextIsSelectable(true)
             isLongClickable = true
-            isClickable = true
-            isCursorVisible = true
             
-            // ✅ CRITICAL FOR ACTION MODE POPUP: Don't override callbacks
-            // Let Android system handle the action mode
-            // Remove any custom callbacks that might block the popup
+            // ✅ IMPORTANT: Remove custom callbacks to let Android handle the popup
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
+            
+            // ✅ Enable text selection handles
+            isCursorVisible = true
             
             // Focusable properties
             isFocusable = true
             isFocusableInTouchMode = true
+            
+            // ✅ Enable selection
+            setRawInputType(inputType)
             
             // Better touch handling
             setOnTouchListener { v, event ->
@@ -1099,7 +1104,7 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // Force keyboard to show
+        // Force keyboard to show with proper flags
         scrollView.postDelayed({
             editText.isFocusable = true
             editText.isFocusableInTouchMode = true
