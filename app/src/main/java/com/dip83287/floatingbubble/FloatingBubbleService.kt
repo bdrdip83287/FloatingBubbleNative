@@ -89,20 +89,12 @@ class FloatingBubbleService : Service() {
 
     // Custom Selection Action Bar
     private lateinit var selectionActionBar: LinearLayout
-    private lateinit var cutBtn: TextView
-    private lateinit var copyBtn: TextView
-    private lateinit var pasteBtn: TextView
-    private lateinit var selectAllBtn: TextView
-    private lateinit var translateBtn: TextView
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
-
-    private val selectionCheckHandler = Handler(Looper.getMainLooper())
-    private var selectionCheckRunnable: Runnable? = null
 
     data class NoteItem(
         val id: Long,
@@ -827,22 +819,21 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ Create Custom Selection Action Bar
+    // ✅ Create Custom Selection Action Bar (Fixed Context issue)
     private fun createSelectionActionBar(): LinearLayout {
-        return LinearLayout(this).apply {
+        return LinearLayout(this).apply {  // ← 'this' is Context from Service
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.parseColor("#333333"))
             setPadding(12, 8, 12, 8)
             gravity = Gravity.CENTER
             
-            val params = LinearLayout.LayoutParams(
+            layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            layoutParams = params
             
             // ✅ Cut Button
-            cutBtn = TextView(this).apply {
+            val cutBtn = TextView(this@FloatingBubbleService).apply {
                 text = "Cut"
                 textSize = 14f
                 setTextColor(Color.WHITE)
@@ -864,7 +855,7 @@ class FloatingBubbleService : Service() {
             addView(cutBtn)
             
             // ✅ Copy Button
-            copyBtn = TextView(this).apply {
+            val copyBtn = TextView(this@FloatingBubbleService).apply {
                 text = "Copy"
                 textSize = 14f
                 setTextColor(Color.WHITE)
@@ -884,7 +875,7 @@ class FloatingBubbleService : Service() {
             addView(copyBtn)
             
             // ✅ Paste Button
-            pasteBtn = TextView(this).apply {
+            val pasteBtn = TextView(this@FloatingBubbleService).apply {
                 text = "Paste"
                 textSize = 14f
                 setTextColor(Color.WHITE)
@@ -904,7 +895,7 @@ class FloatingBubbleService : Service() {
             addView(pasteBtn)
             
             // ✅ Select All Button
-            selectAllBtn = TextView(this).apply {
+            val selectAllBtn = TextView(this@FloatingBubbleService).apply {
                 text = "Select all"
                 textSize = 14f
                 setTextColor(Color.WHITE)
@@ -917,7 +908,7 @@ class FloatingBubbleService : Service() {
             addView(selectAllBtn)
             
             // ✅ Translate Button
-            translateBtn = TextView(this).apply {
+            val translateBtn = TextView(this@FloatingBubbleService).apply {
                 text = "Translate"
                 textSize = 14f
                 setTextColor(Color.WHITE)
@@ -927,7 +918,6 @@ class FloatingBubbleService : Service() {
                     val end = editText.selectionEnd
                     if (start != end) {
                         val selectedText = editText.text.toString().substring(start, end)
-                        // Open translate intent
                         val intent = Intent(Intent.ACTION_VIEW).apply {
                             data = android.net.Uri.parse("https://translate.google.com/?text=${android.net.Uri.encode(selectedText)}")
                         }
@@ -955,7 +945,7 @@ class FloatingBubbleService : Service() {
     }
     
     private fun checkSelectionAndShowBar() {
-        if (editText.hasSelection() && editText.selectionStart != editText.selectionEnd) {
+        if (::editText.isInitialized && editText.hasSelection() && editText.selectionStart != editText.selectionEnd) {
             showSelectionActionBar()
         } else {
             hideSelectionActionBar()
@@ -1075,13 +1065,6 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ Selection listener to show/hide custom action bar
-            setOnSelectionChangedListener(object : Runnable {
-                override fun run() {
-                    checkSelectionAndShowBar()
-                }
-            })
-            
             isClickable = true
             isCursorVisible = true
             isFocusable = true
@@ -1106,6 +1089,17 @@ class FloatingBubbleService : Service() {
                 }
                 false
             }
+            
+            // Selection change listener to show/hide action bar
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    checkSelectionAndShowBar()
+                }
+                override fun afterTextChanged(s: Editable?) {
+                    checkSelectionAndShowBar()
+                }
+            })
             
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) {
@@ -1252,19 +1246,6 @@ class FloatingBubbleService : Service() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
         }, 300)
-    }
-
-    // Extension function for selection change listener
-    private fun EditText.setOnSelectionChangedListener(runnable: Runnable) {
-        addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                runnable.run()
-            }
-            override fun afterTextChanged(s: Editable?) {
-                runnable.run()
-            }
-        })
     }
 
     private fun EditText.hasSelection(): Boolean {
