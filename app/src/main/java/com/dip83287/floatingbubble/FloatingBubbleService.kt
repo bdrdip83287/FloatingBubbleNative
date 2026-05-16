@@ -1134,9 +1134,10 @@ class FloatingBubbleService : Service() {
     
     // Show action bar again after scroll (with 2 second delay)
     private fun scheduleActionBarShow() {
+        // Cancel existing runnable
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         
-        scrollHideRunnable = Runnable {
+        val runnable = Runnable {
             if (isActionBarTemporarilyHidden && editText.hasSelection()) {
                 val (start, end) = getSelection()
                 if (start != end) {
@@ -1151,7 +1152,8 @@ class FloatingBubbleService : Service() {
                 }
             }
         }
-        scrollHideHandler?.postDelayed(scrollHideRunnable, 2000) // 2 seconds delay
+        scrollHideRunnable = runnable
+        scrollHideHandler?.postDelayed(runnable, 2000) // 2 seconds delay
     }
     
     private fun getSelection(): Pair<Int, Int> {
