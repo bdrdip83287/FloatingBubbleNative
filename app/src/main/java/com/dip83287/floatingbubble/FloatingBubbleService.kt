@@ -1118,8 +1118,11 @@ private var isActionBarHiddenByScroll = false
     } catch (e: Exception) { }
     isActionBarVisible = false
     
-    // ✅ Cancel any pending hide runnable
-    actionBarHideRunnable?.let { actionBarHideHandler?.removeCallbacks(it) }
+    // ✅ Fixed: Smart cast issue resolved
+    val runnable = actionBarHideRunnable
+    if (runnable != null && actionBarHideHandler != null) {
+        actionBarHideHandler?.removeCallbacks(runnable)
+    }
 }
     
     private fun getSelection(): Pair<Int, Int> {
@@ -1364,8 +1367,11 @@ private var isActionBarHiddenByScroll = false
             }
             actionBarHideHandler?.postDelayed(actionBarHideRunnable, 2000)
         } else if (isActionBarHiddenByScroll) {
-            // Cancel hide runnable if exists
-            actionBarHideRunnable?.let { actionBarHideHandler?.removeCallbacks(it) }
+            // ✅ Fixed: Smart cast issue resolved
+            val existingRunnable = actionBarHideRunnable
+            if (existingRunnable != null && actionBarHideHandler != null) {
+                actionBarHideHandler?.removeCallbacks(existingRunnable)
+            }
             
             // Show action bar again after 2 seconds of no scrolling
             actionBarHideHandler?.postDelayed({
