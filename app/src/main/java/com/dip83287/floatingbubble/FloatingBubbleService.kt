@@ -1057,20 +1057,35 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // ✅ Updated Share Button - Share and minimize notepad to bubble
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
             setTextColor(Color.WHITE)
             setPadding(14, 8, 14, 8)
             setOnClickListener {
+                // First hide action bar and selection handles
+                hideFloatingActionBar()
+                hideSelectionHandles()
+                
+                // Create share intent
                 val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(android.content.Intent.EXTRA_TEXT, selectedText)
                 }
                 val chooser = android.content.Intent.createChooser(shareIntent, "Share via")
                 chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                
+                // Start share activity
                 startActivity(chooser)
-                hideFloatingActionBar()
+                
+                // After share, minimize the notepad to bubble
+                // Use postDelayed to ensure share dialog appears first
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (isExpanded) {
+                        collapseToBubble()
+                    }
+                }, 300)
             }
         }
         actionBarView.addView(shareBtn)
