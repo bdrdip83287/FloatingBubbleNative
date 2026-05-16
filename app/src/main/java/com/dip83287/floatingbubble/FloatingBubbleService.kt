@@ -21,9 +21,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.Layout
 import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -39,8 +37,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -99,7 +95,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Selection handles - Water drop style
+    // Selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -704,41 +700,37 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Water drop style selection handle
-    private fun createWaterDropHandle(color: String): View {
-        return View(this).apply {
+    // ✅ Create Selection Handles
+    private fun createSelectionHandles(): Pair<View, View> {
+        val leftHandle = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_edit)
+            setColorFilter(Color.parseColor("#2196F3"))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(8, 8, 8, 8)
             val shape = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor(color))
-                setStroke(2, Color.WHITE)
-                setSize(32, 32)
+                setColor(Color.parseColor("#FFFFFF"))
+                setStroke(3, Color.parseColor("#2196F3"))
             }
             background = shape
-            
-            // Add a small circle inside for water drop effect
-            val innerCircle = View(context).apply {
-                val innerShape = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#FFFFFF"))
-                    setSize(12, 12)
-                }
-                background = innerShape
-                layoutParams = FrameLayout.LayoutParams(12, 12)
-                (layoutParams as FrameLayout.LayoutParams).gravity = Gravity.CENTER
-            }
-            (this as FrameLayout).addView(innerCircle)
-            
-            layoutParams = FrameLayout.LayoutParams(36, 36)
+            layoutParams = ViewGroup.LayoutParams(40, 40)
+            setOnTouchListener(HandleTouchListener(isLeft = true))
         }
-    }
-    
-    // ✅ Create Selection Handles - Water drop style
-    private fun createSelectionHandles(): Pair<View, View> {
-        val leftHandle = createWaterDropHandle("#2196F3")
-        val rightHandle = createWaterDropHandle("#2196F3")
         
-        leftHandle.setOnTouchListener(HandleTouchListener(isLeft = true))
-        rightHandle.setOnTouchListener(HandleTouchListener(isLeft = false))
+        val rightHandle = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_edit)
+            setColorFilter(Color.parseColor("#2196F3"))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(8, 8, 8, 8)
+            val shape = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#FFFFFF"))
+                setStroke(3, Color.parseColor("#2196F3"))
+            }
+            background = shape
+            layoutParams = ViewGroup.LayoutParams(40, 40)
+            setOnTouchListener(HandleTouchListener(isLeft = false))
+        }
         
         return Pair(leftHandle, rightHandle)
     }
@@ -840,7 +832,7 @@ class FloatingBubbleService : Service() {
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = startX.toInt() - 18
+                params.x = startX.toInt() - 20
                 params.y = startY.toInt() - 20
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
@@ -851,8 +843,8 @@ class FloatingBubbleService : Service() {
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = endX.toInt() - 18
-                params.y = endY.toInt() - 35
+                params.x = endX.toInt() - 20
+                params.y = endY.toInt() - 30
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (e: Exception) { }
@@ -886,7 +878,7 @@ class FloatingBubbleService : Service() {
         
         if (leftHandleView?.parent == null) {
             val leftParams = WindowManager.LayoutParams(
-                36, 36,
+                40, 40,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -894,7 +886,7 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
-            leftParams.x = startX.toInt() - 18
+            leftParams.x = startX.toInt() - 20
             leftParams.y = startY.toInt() - 20
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
@@ -903,7 +895,7 @@ class FloatingBubbleService : Service() {
         
         if (rightHandleView?.parent == null) {
             val rightParams = WindowManager.LayoutParams(
-                36, 36,
+                40, 40,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -911,8 +903,8 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
-            rightParams.x = endX.toInt() - 18
-            rightParams.y = endY.toInt() - 35
+            rightParams.x = endX.toInt() - 20
+            rightParams.y = endY.toInt() - 30
             try {
                 actionBarWindowManager?.addView(rightHandleView, rightParams)
             } catch (e: Exception) { }
@@ -932,7 +924,7 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // ✅ Show Action Bar Above Selection (far away)
+    // ✅ Show Action Bar Above Selection
     private fun showFloatingActionBarAbove(selectedText: String) {
         if (!isExpanded) return
         
@@ -953,7 +945,7 @@ class FloatingBubbleService : Service() {
             elevation = 8f
         }
         
-        // Google Chrome Button
+        // Chrome Button
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -969,7 +961,7 @@ class FloatingBubbleService : Service() {
         actionBarView.addView(chromeBtn)
         actionBarView.addView(createDivider())
         
-        // Cut Button
+        // Cut
         val cutBtn = TextView(this).apply {
             text = "Cut"
             textSize = 13f
@@ -984,14 +976,13 @@ class FloatingBubbleService : Service() {
                     editText.text.delete(start, end)
                     hideFloatingActionBar()
                     hideSelectionHandles()
-                    Toast.makeText(this@FloatingBubbleService, "Cut", Toast.LENGTH_SHORT).show()
                 }
             }
         }
         actionBarView.addView(cutBtn)
         actionBarView.addView(createDivider())
         
-        // Copy Button
+        // Copy
         val copyBtn = TextView(this).apply {
             text = "Copy"
             textSize = 13f
@@ -1002,13 +993,12 @@ class FloatingBubbleService : Service() {
                 val clip = android.content.ClipData.newPlainText("text", selectedText)
                 clipboard.setPrimaryClip(clip)
                 hideFloatingActionBar()
-                Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
             }
         }
         actionBarView.addView(copyBtn)
         actionBarView.addView(createDivider())
         
-        // Paste Button
+        // Paste
         val pasteBtn = TextView(this).apply {
             text = "Paste"
             textSize = 13f
@@ -1022,14 +1012,13 @@ class FloatingBubbleService : Service() {
                     val (start, end) = getSelection()
                     editText.text.replace(start, end, pastedText)
                     hideFloatingActionBar()
-                    Toast.makeText(this@FloatingBubbleService, "Pasted", Toast.LENGTH_SHORT).show()
                 }
             }
         }
         actionBarView.addView(pasteBtn)
         actionBarView.addView(createDivider())
         
-        // Select All Button
+        // Select All
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -1045,7 +1034,7 @@ class FloatingBubbleService : Service() {
         actionBarView.addView(selectAllBtn)
         actionBarView.addView(createDivider())
         
-        // Share Button
+        // Share
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1066,7 +1055,7 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
-        // Get selection coordinates - position above selection (far away)
+        // Position above selection
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
@@ -1088,7 +1077,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt()
-            params.y = y.toInt() - 80  // Far above the selection
+            params.y = y.toInt() - 80
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
@@ -1344,7 +1333,6 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // ✅ EditText with more compact line height
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1353,7 +1341,6 @@ class FloatingBubbleService : Service() {
             setPadding(18, 14, 18, 14)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // ✅ More compact line height for Bengali & English
             setLineSpacing(0f, 1.2f)
             
             setHorizontallyScrolling(false)
@@ -1376,13 +1363,11 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Long press - select word at cursor
             setOnLongClickListener {
                 selectWordAtCursor()
                 true
             }
             
-            // ✅ Touch handling - only hide on tap, not on drag
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1410,12 +1395,9 @@ class FloatingBubbleService : Service() {
                             val dx = abs(event.x - lastTouchX)
                             val dy = abs(event.y - lastTouchY)
                             
-                            // Double tap detection
                             if (currentTime - lastTouchTime < 300 && dx < 20 && dy < 20 && !isDragging) {
-                                // Double tap - select word at cursor
                                 selectWordAtCursor()
                             } 
-                            // Single tap without dragging - clear selection
                             else if (!isDragging && editText.hasSelection()) {
                                 editText.setSelection(editText.selectionEnd)
                                 hideSelectionHandles()
@@ -1429,7 +1411,6 @@ class FloatingBubbleService : Service() {
                 }
             })
             
-            // Track selection changes
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
