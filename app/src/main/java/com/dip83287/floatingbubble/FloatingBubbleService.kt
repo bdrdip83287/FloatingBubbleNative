@@ -83,6 +83,10 @@ class FloatingBubbleService : Service() {
     private var isResizing = false
     private var resizeStartX = 0
     private var resizeStartY = 0
+    // Action bar auto-hide on scroll
+private var actionBarHideHandler: Handler? = null
+private var actionBarHideRunnable: Runnable? = null
+private var isActionBarHiddenByScroll = false
     private var resizeStartWidth = 0
     private var resizeStartHeight = 0
     private var resizeTouchTime = 0L
@@ -935,9 +939,12 @@ class FloatingBubbleService : Service() {
 
     // Create Custom Selection Action Bar - Positioned above selected text
     private fun showFloatingActionBar(selectedText: String) {
-        if (!isExpanded) return
-        
-        hideFloatingActionBar()
+    if (!isExpanded) return
+    
+    // ✅ Don't show if hidden by scroll
+    if (isActionBarHiddenByScroll) return
+    
+    hideFloatingActionBar()
         
         val actionBarView = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1085,8 +1092,8 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
-            params.x = x.toInt() - 50
-            params.y = (y - 80).toInt()
+            params.x = x.toInt() - 100
+            params.y = (y - 100).toInt()
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
@@ -1103,14 +1110,17 @@ class FloatingBubbleService : Service() {
     }
     
     private fun hideFloatingActionBar() {
-        try {
-            floatingActionBar?.let {
-                actionBarWindowManager?.removeView(it)
-                floatingActionBar = null
-            }
-        } catch (e: Exception) { }
-        isActionBarVisible = false
-    }
+    try {
+        floatingActionBar?.let {
+            actionBarWindowManager?.removeView(it)
+            floatingActionBar = null
+        }
+    } catch (e: Exception) { }
+    isActionBarVisible = false
+    
+    // ✅ Cancel any pending hide runnable
+    actionBarHideRunnable?.let { actionBarHideHandler?.removeCallbacks(it) }
+}
     
     private fun getSelection(): Pair<Int, Int> {
         return Pair(editText.selectionStart, editText.selectionEnd)
@@ -1330,17 +1340,46 @@ class FloatingBubbleService : Service() {
         contentContainer.addView(divider)
 
         scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_ALWAYS
-            setPadding(0, 0, 0, 0)
-            isFocusable = false
-            isFocusableInTouchMode = false
+    layoutParams = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT,
+        0,
+        1f
+    )
+    isVerticalScrollBarEnabled = true
+    overScrollMode = View.OVER_SCROLL_ALWAYS
+    setPadding(0, 0, 0, 0)
+    isFocusable = false
+    isFocusableInTouchMode = false
+    
+    // ✅ Add scroll listener for action bar auto-hide
+    viewTreeObserver.addOnScrollChangedListener {
+        if (isActionBarVisible && !isActionBarHiddenByScroll) {
+            // Hide action bar when scrolling
+            actionBarHideHandler = Handler(Looper.getMainLooper())
+            actionBarHideRunnable = Runnable {
+                if (isActionBarVisible) {
+                    hideFloatingActionBar()
+                    isActionBarHiddenByScroll = true
+                }
+            }
+            actionBarHideHandler?.postDelayed(actionBarHideRunnable, 2000)
+        } else if (isActionBarHiddenByScroll) {
+            // Cancel hide runnable if exists
+            actionBarHideRunnable?.let { actionBarHideHandler?.removeCallbacks(it) }
+            
+            // Show action bar again after 2 seconds of no scrolling
+            actionBarHideHandler?.postDelayed({
+                if (editText.hasSelection() && isActionBarHiddenByScroll) {
+                    val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
+                    if (selected.isNotEmpty()) {
+                        showFloatingActionBar(selected)
+                        isActionBarHiddenByScroll = false
+                    }
+                }
+            }, 2000)
         }
+    }
+}
         
         // EditText with compact line height
         editText = EditText(this).apply {
@@ -1405,17 +1444,22 @@ class FloatingBubbleService : Service() {
                             v.parent.requestDisallowInterceptTouchEvent(false)
                         }
                         MotionEvent.ACTION_UP -> {
-                            if (editText.hasSelection()) {
-                                val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
-                                if (selected.isNotEmpty()) {
-                                    showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                }
-                            } else {
-                                hideSelectionHandles()
-                                hideFloatingActionBar()
-                            }
-                        }
+    // ✅ Reset scroll hide flag when user touches
+    if (isActionBarHiddenByScroll) {
+        isActionBarHiddenByScroll = false
+    }
+    
+    if (editText.hasSelection()) {
+        val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
+        if (selected.isNotEmpty()) {
+            showFloatingActionBar(selected)
+            showSelectionHandles()
+        }
+    } else {
+        hideSelectionHandles()
+        hideFloatingActionBar()
+    }
+}
                     }
                     return false
                 }
