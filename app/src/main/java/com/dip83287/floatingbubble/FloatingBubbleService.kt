@@ -12,12 +12,14 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.PixelFormat
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Selection
+import android.text.Spannable
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -88,7 +90,8 @@ class FloatingBubbleService : Service() {
     private var velocityY = 0f
 
     // Custom Selection Action Bar
-    private lateinit var selectionActionBar: LinearLayout
+    private var customActionBar: LinearLayout? = null
+    private var isActionBarVisible = false
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
@@ -685,6 +688,163 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ✅ Create Custom Selection Action Bar
+    private fun createCustomActionBar(): LinearLayout {
+        val actionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#333333"))
+            setPadding(12, 8, 12, 8)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            
+            // Rounded corners
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                elevation = 8f
+            }
+            val shape = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 30f
+                setColor(Color.parseColor("#333333"))
+            }
+            background = shape
+        }
+        
+        // Cut Button
+        val cutBtn = TextView(this).apply {
+            text = "✂ Cut"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 10, 16, 10)
+            setOnClickListener {
+                val (start, end) = getSelection()
+                if (start != end) {
+                    val selectedText = editText.text.substring(start, end)
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("text", selectedText)
+                    clipboard.setPrimaryClip(clip)
+                    editText.text.delete(start, end)
+                    hideCustomActionBar()
+                    Toast.makeText(this@FloatingBubbleService, "Cut", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        actionBar.addView(cutBtn)
+        
+        // Copy Button
+        val copyBtn = TextView(this).apply {
+            text = "📋 Copy"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 10, 16, 10)
+            setOnClickListener {
+                val (start, end) = getSelection()
+                if (start != end) {
+                    val selectedText = editText.text.substring(start, end)
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("text", selectedText)
+                    clipboard.setPrimaryClip(clip)
+                    hideCustomActionBar()
+                    Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        actionBar.addView(copyBtn)
+        
+        // Paste Button
+        val pasteBtn = TextView(this).apply {
+            text = "📄 Paste"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 10, 16, 10)
+            setOnClickListener {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val pastedText = clip.getItemAt(0).text.toString()
+                    val (start, end) = getSelection()
+                    editText.text.replace(start, end, pastedText)
+                    hideCustomActionBar()
+                    Toast.makeText(this@FloatingBubbleService, "Pasted", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        actionBar.addView(pasteBtn)
+        
+        // Select All Button
+        val selectAllBtn = TextView(this).apply {
+            text = "✓ Select all"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(16, 10, 16, 10)
+            setOnClickListener {
+                editText.selectAll()
+                showCustomActionBar()
+                Toast.makeText(this@FloatingBubbleService, "All selected", Toast.LENGTH_SHORT).show()
+            }
+        }
+        actionBar.addView(selectAllBtn)
+        
+        return actionBar
+    }
+    
+    private fun getSelection(): Pair<Int, Int> {
+        return Pair(editText.selectionStart, editText.selectionEnd)
+    }
+    
+    private fun showCustomActionBar() {
+        if (customActionBar == null) {
+            customActionBar = createCustomActionBar()
+        }
+        
+        val actionBar = customActionBar ?: return
+        
+        // Check if already added
+        if (actionBar.parent != null) {
+            (actionBar.parent as? ViewGroup)?.removeView(actionBar)
+        }
+        
+        // Get EditText position
+        val location = IntArray(2)
+        editText.getLocationInWindow(location)
+        
+        val params = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            leftMargin = location[0] + 20
+            topMargin = location[1] - 50
+        }
+        
+        (noteView as? ViewGroup)?.addView(actionBar, params)
+        isActionBarVisible = true
+    }
+    
+    private fun hideCustomActionBar() {
+        customActionBar?.let { actionBar ->
+            (actionBar.parent as? ViewGroup)?.removeView(actionBar)
+        }
+        isActionBarVisible = false
+    }
+    
+    private fun updateActionBarPosition() {
+        if (!isActionBarVisible) return
+        
+        val actionBar = customActionBar ?: return
+        val location = IntArray(2)
+        editText.getLocationInWindow(location)
+        
+        val params = actionBar.layoutParams as? FrameLayout.LayoutParams
+        if (params != null) {
+            params.leftMargin = location[0] + 20
+            params.topMargin = location[1] - 50
+            actionBar.layoutParams = params
+        }
+    }
+
     private fun createFullNotePad(): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -819,143 +979,17 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ Create Custom Selection Action Bar (Fixed Context issue)
-    private fun createSelectionActionBar(): LinearLayout {
-        return LinearLayout(this).apply {  // ← 'this' is Context from Service
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Color.parseColor("#333333"))
-            setPadding(12, 8, 12, 8)
-            gravity = Gravity.CENTER
-            
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            
-            // ✅ Cut Button
-            val cutBtn = TextView(this@FloatingBubbleService).apply {
-                text = "Cut"
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setPadding(16, 8, 16, 8)
-                setOnClickListener {
-                    val start = editText.selectionStart
-                    val end = editText.selectionEnd
-                    if (start != end) {
-                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val selectedText = editText.text.toString().substring(start, end)
-                        val clip = android.content.ClipData.newPlainText("text", selectedText)
-                        clipboard.setPrimaryClip(clip)
-                        editText.text.delete(start, end)
-                        hideSelectionActionBar()
-                        Toast.makeText(this@FloatingBubbleService, "Cut", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            addView(cutBtn)
-            
-            // ✅ Copy Button
-            val copyBtn = TextView(this@FloatingBubbleService).apply {
-                text = "Copy"
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setPadding(16, 8, 16, 8)
-                setOnClickListener {
-                    val start = editText.selectionStart
-                    val end = editText.selectionEnd
-                    if (start != end) {
-                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val selectedText = editText.text.toString().substring(start, end)
-                        val clip = android.content.ClipData.newPlainText("text", selectedText)
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            addView(copyBtn)
-            
-            // ✅ Paste Button
-            val pasteBtn = TextView(this@FloatingBubbleService).apply {
-                text = "Paste"
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setPadding(16, 8, 16, 8)
-                setOnClickListener {
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = clipboard.primaryClip
-                    if (clip != null && clip.itemCount > 0) {
-                        val pasteText = clip.getItemAt(0).text.toString()
-                        val start = editText.selectionStart
-                        val end = editText.selectionEnd
-                        editText.text.replace(start, end, pasteText)
-                        Toast.makeText(this@FloatingBubbleService, "Pasted", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            addView(pasteBtn)
-            
-            // ✅ Select All Button
-            val selectAllBtn = TextView(this@FloatingBubbleService).apply {
-                text = "Select all"
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setPadding(16, 8, 16, 8)
-                setOnClickListener {
-                    editText.selectAll()
-                    Toast.makeText(this@FloatingBubbleService, "All selected", Toast.LENGTH_SHORT).show()
-                }
-            }
-            addView(selectAllBtn)
-            
-            // ✅ Translate Button
-            val translateBtn = TextView(this@FloatingBubbleService).apply {
-                text = "Translate"
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setPadding(16, 8, 16, 8)
-                setOnClickListener {
-                    val start = editText.selectionStart
-                    val end = editText.selectionEnd
-                    if (start != end) {
-                        val selectedText = editText.text.toString().substring(start, end)
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            data = android.net.Uri.parse("https://translate.google.com/?text=${android.net.Uri.encode(selectedText)}")
-                        }
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        startActivity(intent)
-                    } else {
-                        Toast.makeText(this@FloatingBubbleService, "Select text to translate", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            addView(translateBtn)
-        }
-    }
-    
-    private fun showSelectionActionBar() {
-        if (::selectionActionBar.isInitialized) {
-            selectionActionBar.visibility = View.VISIBLE
-        }
-    }
-    
-    private fun hideSelectionActionBar() {
-        if (::selectionActionBar.isInitialized) {
-            selectionActionBar.visibility = View.GONE
-        }
-    }
-    
-    private fun checkSelectionAndShowBar() {
-        if (::editText.isInitialized && editText.hasSelection() && editText.selectionStart != editText.selectionEnd) {
-            showSelectionActionBar()
-        } else {
-            hideSelectionActionBar()
-        }
-    }
-
     private fun openEditorForNote(note: NoteItem) {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val container = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
+        }
+        
+        val contentContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setPadding(16, 16, 16, 16)
         }
 
@@ -977,6 +1011,7 @@ class FloatingBubbleService : Service() {
             setTextColor(Color.parseColor("#333333"))
             setPadding(8, 0, 16, 0)
             setOnClickListener {
+                hideCustomActionBar()
                 showNoteList()
             }
         }
@@ -1000,7 +1035,7 @@ class FloatingBubbleService : Service() {
             setOnClickListener { collapseToBubble() }
         }
         topBar.addView(minimizeBtn)
-        container.addView(topBar)
+        contentContainer.addView(topBar)
 
         // Title input
         titleInput = EditText(this).apply {
@@ -1015,7 +1050,7 @@ class FloatingBubbleService : Service() {
             imeOptions = EditorInfo.IME_ACTION_DONE
             setTextIsSelectable(true)
         }
-        container.addView(titleInput)
+        contentContainer.addView(titleInput)
 
         // Divider
         val divider = View(this).apply {
@@ -1024,12 +1059,7 @@ class FloatingBubbleService : Service() {
                 LinearLayout.LayoutParams.MATCH_PARENT, 2
             )
         }
-        container.addView(divider)
-
-        // ✅ Create Custom Selection Action Bar
-        selectionActionBar = createSelectionActionBar()
-        selectionActionBar.visibility = View.GONE
-        container.addView(selectionActionBar)
+        contentContainer.addView(divider)
 
         // ScrollView for content
         scrollView = ScrollView(this).apply {
@@ -1046,7 +1076,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // EditText
+        // EditText with selection tracking
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1065,22 +1095,29 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
+            setTextIsSelectable(true)
+            isLongClickable = true
+            customInsertionActionModeCallback = null
+            customSelectionActionModeCallback = null
+            
             isClickable = true
             isCursorVisible = true
             isFocusable = true
             isFocusableInTouchMode = true
             
+            // Track selection changes to show/hide custom action bar
             setOnTouchListener { v, event ->
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         v.requestFocus()
                         v.parent.requestDisallowInterceptTouchEvent(false)
                     }
-                    MotionEvent.ACTION_MOVE -> {
+                    MotionEvent.ACTION_UP -> {
+                        // Check if text is selected
                         if (hasSelection()) {
-                            v.parent.requestDisallowInterceptTouchEvent(true)
+                            showCustomActionBar()
                         } else {
-                            v.parent.requestDisallowInterceptTouchEvent(false)
+                            hideCustomActionBar()
                         }
                     }
                     else -> {
@@ -1090,33 +1127,21 @@ class FloatingBubbleService : Service() {
                 false
             }
             
-            // Selection change listener to show/hide action bar
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    checkSelectionAndShowBar()
-                }
-                override fun afterTextChanged(s: Editable?) {
-                    checkSelectionAndShowBar()
-                }
-            })
-            
-            setOnFocusChangeListener { _, hasFocus ->
-                if (hasFocus) {
-                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-                }
-            }
-            
             setOnClickListener {
                 requestFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             }
             
+            // Track selection changes
+            setOnFocusChangeListener { _, hasFocus ->
+                if (!hasFocus) {
+                    hideCustomActionBar()
+                }
+            }
+            
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             
-            // Auto-save
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
@@ -1142,7 +1167,7 @@ class FloatingBubbleService : Service() {
             })
         }
         scrollView.addView(editText)
-        container.addView(scrollView)
+        contentContainer.addView(scrollView)
 
         // Button row
         val buttonRow = LinearLayout(this).apply {
@@ -1176,12 +1201,13 @@ class FloatingBubbleService : Service() {
                 saveNotesToPrefs()
                 notesAdapter.updateList(notesList)
                 updateBubbleCount()
+                hideCustomActionBar()
                 showNoteList()
                 Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
             }
         }
         buttonRow.addView(deleteBtn)
-        container.addView(buttonRow)
+        contentContainer.addView(buttonRow)
 
         // Share button
         val shareBtn = Button(this).apply {
@@ -1204,7 +1230,7 @@ class FloatingBubbleService : Service() {
                 startActivity(chooser)
             }
         }
-        container.addView(shareBtn)
+        contentContainer.addView(shareBtn)
 
         // Resize handle
         val resizeHandleView = TextView(this).apply {
@@ -1217,8 +1243,10 @@ class FloatingBubbleService : Service() {
             layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
         }
-        container.addView(resizeHandleView)
-
+        contentContainer.addView(resizeHandleView)
+        
+        container.addView(contentContainer)
+        
         // Replace current view
         noteView?.let { windowManager.removeView(it) }
         noteView = container
@@ -1237,7 +1265,7 @@ class FloatingBubbleService : Service() {
         
         windowManager.addView(noteView, params)
         
-        // Force keyboard
+        // Force keyboard to show
         scrollView.postDelayed({
             editText.isFocusable = true
             editText.isFocusableInTouchMode = true
@@ -1265,11 +1293,13 @@ class FloatingBubbleService : Service() {
             notesAdapter.updateList(notesList)
             updateBubbleCount()
             Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+            hideCustomActionBar()
             showNoteList()
         }
     }
 
     private fun showNoteList() {
+        hideCustomActionBar()
         val container = createFullNotePad()
         noteView?.let { windowManager.removeView(it) }
         noteView = container
@@ -1430,6 +1460,7 @@ class FloatingBubbleService : Service() {
         bubbleView?.let { windowManager.removeView(it) }
         noteView?.let { windowManager.removeView(it) }
         deleteZoneView?.let { windowManager.removeView(it) }
+        hideCustomActionBar()
     }
 
     override fun onBind(intent: Intent?) = null
