@@ -19,8 +19,6 @@ import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
-import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -701,7 +699,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Create Selection Handles (Left and Right)
     private fun showSelectionHandles() {
         hideSelectionHandles()
         
@@ -865,7 +862,9 @@ class FloatingBubbleService : Service() {
             
             val line = layout.getLineForOffset(offset)
             val x = layout.getPrimaryHorizontal(offset).toInt()
-            val y = layout.getLineBounds(line, Rect()).top
+            val lineBounds = Rect()
+            layout.getLineBounds(line, lineBounds)
+            val y = lineBounds.top
             
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
@@ -889,7 +888,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Create Custom Selection Action Bar - Floating Window
+    // Create Custom Selection Action Bar - Floating Window
     private fun showFloatingActionBar(selectedText: String) {
         hideFloatingActionBar()
         
@@ -995,7 +994,7 @@ class FloatingBubbleService : Service() {
         }
         actionBarView.addView(selectAllBtn)
         
-        // ✅ Share Button
+        // Share Button
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 14f
@@ -1056,7 +1055,7 @@ class FloatingBubbleService : Service() {
         return Pair(editText.selectionStart, editText.selectionEnd)
     }
     
-    // ✅ Smart selection - select word at cursor on long press
+    // Smart selection - select word at cursor on long press
     private fun selectWordAtCursor() {
         val text = editText.text.toString()
         val cursorPos = editText.selectionStart
@@ -1338,13 +1337,13 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Long press - select word at cursor
+            // Long press - select word at cursor
             setOnLongClickListener {
                 selectWordAtCursor()
                 true
             }
             
-            // ✅ Double tap - select all text
+            // Double tap - select all text
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
