@@ -48,7 +48,7 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 110
-    private val DELETE_ZONE_SIZE = 110
+    private val DELETE_ZONE_SIZE = 120
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
     private val NOTEPAD_TITLE = "Floating Notes"
@@ -239,7 +239,7 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = 80
+            params.y = 150
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
