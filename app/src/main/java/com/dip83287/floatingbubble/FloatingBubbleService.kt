@@ -94,18 +94,15 @@ class FloatingBubbleService : Service() {
     private var velocityTracker: VelocityTracker? = null
     private var velocityY = 0f
 
-    // Custom Selection Action Bar
     private var floatingActionBar: View? = null
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Selection handles - Water drop style
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
 
-    // Action bar hide/show on scroll
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
     private var isActionBarTemporarilyHidden = false
@@ -246,6 +243,7 @@ class FloatingBubbleService : Service() {
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
+            EmergencyLog.log("Delete zone created")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createDeleteZone")
         }
@@ -254,17 +252,20 @@ class FloatingBubbleService : Service() {
     private fun showDeleteZone() {
         if (deleteZoneView?.visibility != View.VISIBLE) {
             deleteZoneView?.visibility = View.VISIBLE
+            EmergencyLog.log("Delete zone shown")
         }
     }
 
     private fun hideDeleteZone() {
         if (deleteZoneView?.visibility != View.GONE) {
             deleteZoneView?.visibility = View.GONE
+            EmergencyLog.log("Delete zone hidden")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            EmergencyLog.logError("Overlay permission not granted")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -328,6 +329,7 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
+            EmergencyLog.log("Bubble created")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
         }
@@ -381,17 +383,16 @@ class FloatingBubbleService : Service() {
                         val deleteZoneY = screenHeight - DELETE_ZONE_SIZE - 80
 
                         if (params.y + BUBBLE_SIZE > deleteZoneY) {
-
                             if (!isInDeleteZone) {
                                 isInDeleteZone = true
                                 showDeleteZone()
+                                EmergencyLog.log("Entered delete zone")
                             }
-
                         } else {
-
                             if (isInDeleteZone) {
                                 isInDeleteZone = false
                                 hideDeleteZone()
+                                EmergencyLog.log("Left delete zone")
                             }
                         }
 
@@ -405,6 +406,7 @@ class FloatingBubbleService : Service() {
                         hideDeleteZone()
 
                         if (isInDeleteZone) {
+                            EmergencyLog.log("Bubble deleted via delete zone")
                             deleteBubble()
                             return true
                         }
@@ -711,7 +713,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // Create Selection Handles - Water drop style
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 36
         
@@ -740,7 +741,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // Handle Touch Listener for dragging selection
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -941,11 +941,8 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // Show Action Bar - 50px above selected text
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
-        
-        // Don't show if temporarily hidden due to scroll
         if (isActionBarTemporarilyHidden) return
         
         hideFloatingActionBar()
@@ -1057,30 +1054,23 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // ✅ Updated Share Button - Share and minimize notepad to bubble
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
             setTextColor(Color.WHITE)
             setPadding(14, 8, 14, 8)
             setOnClickListener {
-                // First hide action bar and selection handles
                 hideFloatingActionBar()
                 hideSelectionHandles()
                 
-                // Create share intent
                 val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(android.content.Intent.EXTRA_TEXT, selectedText)
                 }
                 val chooser = android.content.Intent.createChooser(shareIntent, "Share via")
                 chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                
-                // Start share activity
                 startActivity(chooser)
                 
-                // After share, minimize the notepad to bubble
-                // Use postDelayed to ensure share dialog appears first
                 Handler(Looper.getMainLooper()).postDelayed({
                     if (isExpanded) {
                         collapseToBubble()
@@ -1113,7 +1103,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt() - 50
-            params.y = (y - 120).toInt() // 70px gap (50px + extra 20px for better visibility)
+            params.y = (y - 120).toInt()
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
@@ -1139,7 +1129,6 @@ class FloatingBubbleService : Service() {
         isActionBarVisible = false
     }
     
-    // Temporarily hide action bar during scrolling
     private fun temporarilyHideActionBar() {
         if (isActionBarVisible && !isActionBarTemporarilyHidden) {
             isActionBarTemporarilyHidden = true
@@ -1147,9 +1136,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Show action bar again after scroll (with 2 second delay)
     private fun scheduleActionBarShow() {
-        // Cancel existing runnable
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         
         val runnable = Runnable {
@@ -1168,7 +1155,7 @@ class FloatingBubbleService : Service() {
             }
         }
         scrollHideRunnable = runnable
-        scrollHideHandler?.postDelayed(runnable, 2000) // 2 seconds delay
+        scrollHideHandler?.postDelayed(runnable, 2000)
     }
     
     private fun getSelection(): Pair<Int, Int> {
@@ -1400,7 +1387,6 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // Add scroll listener to hide/show action bar
             viewTreeObserver.addOnScrollChangedListener {
                 if (editText.hasSelection()) {
                     temporarilyHideActionBar()
@@ -1409,7 +1395,6 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // EditText with compact line height
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1418,7 +1403,6 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            // Compact line height for better readability
             setLineSpacing(0f, 1.15f)
             
             setHorizontallyScrolling(false)
