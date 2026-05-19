@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.dip83287.floatingbubble.utils.EmergencyLog
 
@@ -25,40 +24,49 @@ class MainActivity : AppCompatActivity() {
     private fun checkOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (Settings.canDrawOverlays(this)) {
-                // Permission already granted
                 EmergencyLog.log("Overlay permission already granted")
                 startBubbleService()
                 moveTaskToBack(true)
             } else {
-                // Request permission - সরাসরি সেটিংস পেজে নিয়ে যাবে
-                EmergencyLog.log("Requesting overlay permission - opening settings")
-                openOverlaySettings()
+                EmergencyLog.log("Requesting overlay permission")
+                requestOverlayPermission()
             }
         } else {
-            // Below Android 6.0, auto granted
             startBubbleService()
             moveTaskToBack(true)
         }
     }
 
-    private fun openOverlaySettings() {
+    private fun requestOverlayPermission() {
         try {
-            // সরাসরি অ্যাপের overlay permission সেটিংস পেজে নিয়ে যাবে
+            // সবচেয়ে নির্ভরযোগ্য পদ্ধতি
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
             )
             startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
             
-            // ব্যাখ্যা সহ Toast দেখান
-            Toast.makeText(this, "Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
+            // ব্যাখ্যা সহ Toast
+            Toast.makeText(this, "🔘 Find 'Floating Notes' and turn ON 'Display over other apps'", Toast.LENGTH_LONG).show()
+            
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "openOverlaySettings")
-            // যদি উপরের Intent কাজ না করে, তাহলে সরাসরি Settings এ নিয়ে যাবে
+            EmergencyLog.logException(e, "requestOverlayPermission")
+            
+            // Fallback: সরাসরি Settings এ নিয়ে যান
             try {
-                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION), OVERLAY_PERMISSION_REQUEST)
+                Toast.makeText(this, "Search for 'Floating Notes' and enable permission", Toast.LENGTH_LONG).show()
             } catch (e2: Exception) {
-                Toast.makeText(this, "Please grant overlay permission manually from Settings", Toast.LENGTH_LONG).show()
+                // Last resort: App info page
+                try {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    intent.data = Uri.parse("package:$packageName")
+                    startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+                    Toast.makeText(this, "Go to Permissions > Display over other apps", Toast.LENGTH_LONG).show()
+                } catch (e3: Exception) {
+                    EmergencyLog.logError("Failed to open any settings page")
+                    Toast.makeText(this, "Please manually enable overlay permission from Settings", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -74,40 +82,27 @@ class MainActivity : AppCompatActivity() {
             EmergencyLog.log("FloatingBubbleService started")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "startBubbleService")
-            Toast.makeText(this, "Error starting service: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (Settings.canDrawOverlays(this)) {
-                    Toast.makeText(this, "✅ Permission granted! Starting bubble...", Toast.LENGTH_SHORT).show()
-                    EmergencyLog.log("Overlay permission granted by user")
-                    startBubbleService()
-                } else {
-                    Toast.makeText(this, "❌ Permission denied. Please enable from Settings.", Toast.LENGTH_LONG).show()
-                    EmergencyLog.logError("Overlay permission denied by user")
-                    // Permission না দিলে আবার সেটিংসে পাঠানোর অপশন
-                    showRetryDialog()
+            // একটু delay দিয়ে permission check করুন
+            android.os.Handler(Looper.getMainLooper()).postDelayed({
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (Settings.canDrawOverlays(this)) {
+                        Toast.makeText(this, "✅ Permission granted! Starting bubble...", Toast.LENGTH_SHORT).show()
+                        EmergencyLog.log("Overlay permission granted")
+                        startBubbleService()
+                    } else {
+                        Toast.makeText(this, "❌ Permission not granted. Please enable 'Display over other apps'", Toast.LENGTH_LONG).show()
+                        EmergencyLog.logError("Overlay permission still denied")
+                    }
                 }
-            }
-            moveTaskToBack(true)
+                moveTaskToBack(true)
+            }, 500)
         }
-    }
-    
-    private fun showRetryDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Permission Required")
-            .setMessage("This app needs 'Display over other apps' permission to show floating notes.")
-            .setPositiveButton("Open Settings") { _, _ ->
-                openOverlaySettings()
-            }
-            .setNegativeButton("Exit") { _, _ ->
-                finish()
-            }
-            .setCancelable(false)
-            .show()
     }
 }
