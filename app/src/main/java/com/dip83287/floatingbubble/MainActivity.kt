@@ -4,36 +4,37 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.dip83287.floatingbubble.utils.EmergencyLog
+import com.dip83287.floatingbubble.utils.SimpleLog
 
 class MainActivity : AppCompatActivity() {
 
-    companion object {
-        private const val OVERLAY_PERMISSION_REQUEST = 1001
-    }
+    private lateinit var log: SimpleLog
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        EmergencyLog.logLifecycle("MainActivity", "onCreate")
         
-        // Check permission
+        log = SimpleLog.getInstance(this)
+        log.i("MainActivity", "onCreate called")
+        
+        checkAndRequestOverlayPermission()
+    }
+
+    private fun checkAndRequestOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (Settings.canDrawOverlays(this)) {
-                EmergencyLog.log("Overlay permission already granted")
+                log.i("MainActivity", "Overlay permission already granted")
                 startBubbleService()
-                finish()
+                moveTaskToBack(true)
             } else {
-                EmergencyLog.log("Requesting overlay permission")
+                log.i("MainActivity", "Requesting overlay permission")
                 requestOverlayPermission()
             }
         } else {
             startBubbleService()
-            finish()
+            moveTaskToBack(true)
         }
     }
 
@@ -43,15 +44,11 @@ class MainActivity : AppCompatActivity() {
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
             )
-            startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+            startActivityForResult(intent, 1001)
             Toast.makeText(this, "Please enable 'Display over other apps' for Floating Notes", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "requestOverlayPermission")
-            try {
-                startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION), OVERLAY_PERMISSION_REQUEST)
-            } catch (e2: Exception) {
-                Toast.makeText(this, "Please manually enable overlay permission from Settings", Toast.LENGTH_LONG).show()
-            }
+            log.e("MainActivity", "Failed to open permission settings", e)
+            Toast.makeText(this, "Please manually enable overlay permission from Settings", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -63,30 +60,26 @@ class MainActivity : AppCompatActivity() {
             } else {
                 startService(intent)
             }
-            EmergencyLog.log("FloatingBubbleService started")
+            log.i("MainActivity", "FloatingBubbleService started")
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "startBubbleService")
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            log.e("MainActivity", "Failed to start service", e)
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == OVERLAY_PERMISSION_REQUEST) {
-            // Delay to let settings close properly
-            Handler(Looper.getMainLooper()).postDelayed({
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    if (Settings.canDrawOverlays(this)) {
-                        Toast.makeText(this, "✅ Permission granted! Starting bubble...", Toast.LENGTH_SHORT).show()
-                        EmergencyLog.log("Overlay permission granted")
-                        startBubbleService()
-                    } else {
-                        Toast.makeText(this, "❌ Permission not granted. Please enable from Settings.", Toast.LENGTH_LONG).show()
-                        EmergencyLog.logError("Overlay permission denied")
-                    }
+        if (requestCode == 1001) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Settings.canDrawOverlays(this)) {
+                    Toast.makeText(this, "✅ Permission granted! Starting bubble...", Toast.LENGTH_SHORT).show()
+                    log.i("MainActivity", "Overlay permission granted")
+                    startBubbleService()
+                } else {
+                    Toast.makeText(this, "❌ Permission not granted. Please enable from Settings.", Toast.LENGTH_LONG).show()
+                    log.w("MainActivity", "Overlay permission denied")
                 }
-                finish()
-            }, 500)
+            }
+            moveTaskToBack(true)
         }
     }
 }
