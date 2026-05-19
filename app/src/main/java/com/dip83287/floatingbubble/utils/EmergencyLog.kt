@@ -8,48 +8,74 @@ import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 
 object EmergencyLog {
-
     private const val TAG = "FloatingBubble"
     private const val MAX_LOG_SIZE = 2 * 1024 * 1024 // 2MB
-
+    private const val LOG_FOLDER = "FloatingBubbleLogs"
+    private const val LOG_FILE = "runtime_log.txt"
+    
+    private lateinit var logDir: File
     private lateinit var logFile: File
     private var isInitialized = false
-
+    
     fun init(context: Context) {
         if (isInitialized) return
-
+        
         try {
-            val dir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                "FloatingBubbleLogs"
-            )
-            if (!dir.exists()) {
-                dir.mkdirs()
+            // Android 11+ এর জন্য app-specific directory ব্যবহার করুন
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                logDir = File(context.getExternalFilesDir(null), LOG_FOLDER)
+            } else {
+                logDir = File(Environment.getExternalStorageDirectory(), LOG_FOLDER)
             }
-
-            logFile = File(dir, "runtime_log.txt")
+            
+            if (!logDir.exists()) {
+                logDir.mkdirs()
+            }
+            
+            logFile = File(logDir, LOG_FILE)
             if (!logFile.exists()) {
                 logFile.createNewFile()
             }
-
+            
             rotateIfTooLarge()
             isInitialized = true
-
+            
             log("========== LOGGER STARTED ==========")
             log("Android Version: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
             log("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
-
+            log("Log path: ${logFile.absolutePath}")
+            
             setupGlobalCrashHandler()
-
         } catch (e: Exception) {
             Log.e(TAG, "LOGGER INIT FAILED", e)
         }
     }
-
+    
+    fun getLogPath(): String {
+        return if (isInitialized) logFile.absolutePath else "Logger not initialized"
+    }
+    
+    fun getLogContent(): String {
+        return try {
+            if (isInitialized && logFile.exists()) logFile.readText()
+            else "Log file not found"
+        } catch (e: Exception) { e.stackTraceToString() }
+    }
+    
+    fun clearLog() {
+        try {
+            if (isInitialized && logFile.exists()) {
+                logFile.writeText("")
+                log("Log file cleared")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Clear log failed", e)
+        }
+    }
+    
     private fun setupGlobalCrashHandler() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -57,13 +83,11 @@ object EmergencyLog {
                 val sw = StringWriter()
                 throwable.printStackTrace(PrintWriter(sw))
                 val fullError = """
-                    
                     ========== APP CRASH ==========
                     Thread: ${thread.name}
                     Time: ${time()}
                     ${sw}
                     ================================
-                    
                 """.trimIndent()
                 append(fullError)
                 Log.e(TAG, "CRASH DETECTED: ${throwable.message}", throwable)
@@ -71,7 +95,7 @@ object EmergencyLog {
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }
-
+    
     fun log(message: String) {
         try {
             val finalMessage = "[${time()}] [INFO] [${Thread.currentThread().name}] $message"
@@ -79,7 +103,7 @@ object EmergencyLog {
             append(finalMessage)
         } catch (_: Exception) { }
     }
-
+    
     fun logError(message: String, throwable: Throwable? = null) {
         try {
             val errorMsg = if (throwable != null) {
@@ -94,31 +118,24 @@ object EmergencyLog {
             append(finalMessage)
         } catch (_: Exception) { }
     }
-
+    
     fun logException(throwable: Throwable, context: String = "") {
         try {
             val sw = StringWriter()
             throwable.printStackTrace(PrintWriter(sw))
             val finalMessage = """
-                
                 [${time()}] [EXCEPTION] $context
                 ${sw}
-                
             """.trimIndent()
             Log.e(TAG, finalMessage, throwable)
             append(finalMessage)
         } catch (_: Exception) { }
     }
-
+    
     fun logLifecycle(component: String, event: String) {
         log("[LIFECYCLE] $component -> $event")
     }
-
-    fun logFlow(flowName: String, step: String, extra: String = "") {
-        val msg = if (extra.isEmpty()) "[FLOW] $flowName -> $step" else "[FLOW] $flowName -> $step | $extra"
-        log(msg)
-    }
-
+    
     private fun append(text: String) {
         try {
             rotateIfTooLarge()
@@ -127,45 +144,20 @@ object EmergencyLog {
             Log.e(TAG, "FILE WRITE FAILED", e)
         }
     }
-
+    
     private fun rotateIfTooLarge() {
         try {
-            if (::logFile.isInitialized && logFile.exists() && logFile.length() > MAX_LOG_SIZE) {
+            if (isInitialized && logFile.exists() && logFile.length() > MAX_LOG_SIZE) {
                 val backup = File(logFile.parent, "runtime_log_old.txt")
                 if (backup.exists()) backup.delete()
                 logFile.renameTo(backup)
-                logFile = File(logFile.parent, "runtime_log.txt")
+                logFile = File(logFile.parent, LOG_FILE)
                 logFile.createNewFile()
             }
         } catch (_: Exception) { }
     }
-
+    
     private fun time(): String {
         return SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
-    }
-
-    fun getLogContent(): String {
-        return try {
-            if (::logFile.isInitialized && logFile.exists()) logFile.readText()
-            else "Log file not found"
-        } catch (e: Exception) { e.stackTraceToString() }
-    }
-
-    fun getLogPath(): String {
-        return try {
-            if (::logFile.isInitialized) logFile.absolutePath
-            else "Logger not initialized"
-        } catch (e: Exception) { e.stackTraceToString() }
-    }
-
-    fun clearLog() {
-        try {
-            if (::logFile.isInitialized && logFile.exists()) {
-                logFile.writeText("")
-                log("Log file cleared")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Clear log failed", e)
-        }
     }
 }
