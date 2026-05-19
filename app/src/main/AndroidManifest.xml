@@ -29,6 +29,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".OverlayPermissionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.FloatingBubbleNative" />
+
         <service
             android:name=".FloatingBubbleService"
             android:enabled="true"

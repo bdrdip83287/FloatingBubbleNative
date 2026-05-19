@@ -269,6 +269,11 @@ class FloatingBubbleService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            EmergencyLog.logError("Overlay permission not granted")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         if (bubbleView == null) {
             Handler(Looper.getMainLooper()).post { createBubble() }
