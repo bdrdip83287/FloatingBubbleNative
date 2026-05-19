@@ -48,7 +48,7 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 110
-    private val DELETE_ZONE_SIZE = 120
+    private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
     private val NOTEPAD_TITLE = "Floating Notes"
@@ -133,8 +133,28 @@ class FloatingBubbleService : Service() {
             startForeground(1001, createNotification())
             createDeleteZone()
             scrollHideHandler = Handler(Looper.getMainLooper())
+            EmergencyLog.log("FloatingBubbleService onCreate - Foreground service started")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
+        }
+    }
+
+    // ✅ Professional Overlay Layout Params
+    private fun createBubbleLayoutParams(): WindowManager.LayoutParams {
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 100
+            y = 300
         }
     }
 
@@ -239,7 +259,7 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = 150
+            params.y = 80
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
@@ -252,27 +272,23 @@ class FloatingBubbleService : Service() {
     private fun showDeleteZone() {
         if (deleteZoneView?.visibility != View.VISIBLE) {
             deleteZoneView?.visibility = View.VISIBLE
-            EmergencyLog.log("Delete zone shown")
         }
     }
 
     private fun hideDeleteZone() {
         if (deleteZoneView?.visibility != View.GONE) {
             deleteZoneView?.visibility = View.GONE
-            EmergencyLog.log("Delete zone hidden")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            EmergencyLog.logError("Overlay permission not granted")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            EmergencyLog.logError("Overlay permission not granted")
-            stopSelf()
-            return START_NOT_STICKY
+        // ✅ Permission check with proper logging
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                EmergencyLog.logError("Overlay permission not granted - stopping service")
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
         if (bubbleView == null) {
@@ -315,14 +331,10 @@ class FloatingBubbleService : Service() {
 
             bubbleView = bubbleLayout
 
-            val params = WindowManager.LayoutParams(
-                BUBBLE_SIZE, BUBBLE_SIZE,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT
-            )
-            params.gravity = Gravity.TOP or Gravity.START
+            // ✅ Use professional overlay params
+            val params = createBubbleLayoutParams()
+            params.width = BUBBLE_SIZE
+            params.height = BUBBLE_SIZE
 
             val displayMetrics = resources.displayMetrics
             val defaultX = prefs.getInt(KEY_BUBBLE_X, displayMetrics.widthPixels - BUBBLE_SIZE + HIDDEN_WIDTH)
@@ -334,7 +346,7 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
-            EmergencyLog.log("Bubble created")
+            EmergencyLog.log("Bubble created with professional overlay params")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
         }
@@ -391,13 +403,11 @@ class FloatingBubbleService : Service() {
                             if (!isInDeleteZone) {
                                 isInDeleteZone = true
                                 showDeleteZone()
-                                EmergencyLog.log("Entered delete zone")
                             }
                         } else {
                             if (isInDeleteZone) {
                                 isInDeleteZone = false
                                 hideDeleteZone()
-                                EmergencyLog.log("Left delete zone")
                             }
                         }
 
@@ -411,7 +421,6 @@ class FloatingBubbleService : Service() {
                         hideDeleteZone()
 
                         if (isInDeleteZone) {
-                            EmergencyLog.log("Bubble deleted via delete zone")
                             deleteBubble()
                             return true
                         }
