@@ -4,8 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -20,16 +18,18 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         EmergencyLog.logLifecycle("MainActivity", "onCreate")
-        
-        // Check permission
+        checkAndRequestPermission()
+    }
+
+    private fun checkAndRequestPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (Settings.canDrawOverlays(this)) {
                 EmergencyLog.log("Overlay permission already granted")
                 startBubbleService()
                 finish()
             } else {
-                EmergencyLog.log("Requesting overlay permission")
-                requestOverlayPermission()
+                EmergencyLog.log("Requesting overlay permission - opening settings")
+                openOverlaySettings()
             }
         } else {
             startBubbleService()
@@ -37,8 +37,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestOverlayPermission() {
+    private fun openOverlaySettings() {
         try {
+            // সরাসরি অ্যাপের overlay permission সেটিংস পেজে যাবে
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
@@ -46,9 +47,11 @@ class MainActivity : AppCompatActivity() {
             startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
             Toast.makeText(this, "Please enable 'Display over other apps' for Floating Notes", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "requestOverlayPermission")
+            EmergencyLog.logException(e, "openOverlaySettings")
+            // Fallback: সরাসরি Settings এ নিয়ে যাবে
             try {
                 startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION), OVERLAY_PERMISSION_REQUEST)
+                Toast.makeText(this, "Find 'Floating Notes' and enable overlay permission", Toast.LENGTH_LONG).show()
             } catch (e2: Exception) {
                 Toast.makeText(this, "Please manually enable overlay permission from Settings", Toast.LENGTH_LONG).show()
             }
@@ -73,8 +76,8 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
-            // Delay to let settings close properly
-            Handler(Looper.getMainLooper()).postDelayed({
+            // একটু delay দিন settings close হওয়ার জন্য
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     if (Settings.canDrawOverlays(this)) {
                         Toast.makeText(this, "✅ Permission granted! Starting bubble...", Toast.LENGTH_SHORT).show()
