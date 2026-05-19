@@ -8,13 +8,13 @@ import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 
 object EmergencyLog {
 
     private const val TAG = "FloatingBubble"
     private const val MAX_LOG_SIZE = 2 * 1024 * 1024 // 2MB
+    private const val LOG_FOLDER = "FloatingBubbleLogs"
 
     private lateinit var logFile: File
     private var isInitialized = false
@@ -23,15 +23,19 @@ object EmergencyLog {
         if (isInitialized) return
 
         try {
-            val dir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                "FloatingBubbleLogs"
-            )
-            if (!dir.exists()) {
-                dir.mkdirs()
+            val logDir: File = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+ - Use app-specific external storage
+                File(context.getExternalFilesDir(null), LOG_FOLDER)
+            } else {
+                // Android 9 and below - Use public Documents directory
+                File(Environment.getExternalStorageDirectory(), LOG_FOLDER)
             }
 
-            logFile = File(dir, "runtime_log.txt")
+            if (!logDir.exists()) {
+                logDir.mkdirs()
+            }
+
+            logFile = File(logDir, "runtime_log.txt")
             if (!logFile.exists()) {
                 logFile.createNewFile()
             }
@@ -42,6 +46,7 @@ object EmergencyLog {
             log("========== LOGGER STARTED ==========")
             log("Android Version: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
             log("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+            log("Log path: ${logFile.absolutePath}")
 
             setupGlobalCrashHandler()
 
