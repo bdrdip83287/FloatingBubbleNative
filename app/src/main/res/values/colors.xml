@@ -6,4 +6,5 @@
     <color name="text_secondary">#666666</color>
     <color name="fab_bg">#F9E79F</color>
     <color name="bubble_bg">#F9E79F</color>
+    <color name="ic_launcher_background">#FFF8DC</color>
 </resources>

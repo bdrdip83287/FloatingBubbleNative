@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.FloatingBubble" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.FloatingBubbleNative" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
         <item name="colorPrimary">#F9E79F</item>
-        <item name="colorPrimaryVariant">#F1C40F</item>
-        <item name="colorOnPrimary">#333333</item>
-        <item name="android:windowBackground">@color/background</item>
+        <item name="colorPrimaryDark">#F1C40F</item>
+        <item name="colorAccent">#4CAF50</item>
     </style>
 </resources>
