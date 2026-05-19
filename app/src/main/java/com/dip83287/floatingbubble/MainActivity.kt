@@ -30,9 +30,9 @@ class MainActivity : AppCompatActivity() {
                 startBubbleService()
                 moveTaskToBack(true)
             } else {
-                // Request permission
-                EmergencyLog.log("Requesting overlay permission")
-                showPermissionDialog()
+                // Request permission - সরাসরি সেটিংস পেজে নিয়ে যাবে
+                EmergencyLog.log("Requesting overlay permission - opening settings")
+                openOverlaySettings()
             }
         } else {
             // Below Android 6.0, auto granted
@@ -41,23 +41,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showPermissionDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Overlay Permission Required")
-            .setMessage("This app needs 'Display over other apps' permission to show floating notes on your screen.")
-            .setPositiveButton("Grant Permission") { _, _ ->
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+    private fun openOverlaySettings() {
+        try {
+            // সরাসরি অ্যাপের overlay permission সেটিংস পেজে নিয়ে যাবে
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+            
+            // ব্যাখ্যা সহ Toast দেখান
+            Toast.makeText(this, "Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "openOverlaySettings")
+            // যদি উপরের Intent কাজ না করে, তাহলে সরাসরি Settings এ নিয়ে যাবে
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+            } catch (e2: Exception) {
+                Toast.makeText(this, "Please grant overlay permission manually from Settings", Toast.LENGTH_LONG).show()
             }
-            .setNegativeButton("Cancel") { _, _ ->
-                Toast.makeText(this, "Cannot run without permission", Toast.LENGTH_SHORT).show()
-                finish()
-            }
-            .setCancelable(false)
-            .show()
+        }
     }
 
     private fun startBubbleService() {
@@ -80,15 +83,31 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (Settings.canDrawOverlays(this)) {
-                    Toast.makeText(this, "✅ Permission granted!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "✅ Permission granted! Starting bubble...", Toast.LENGTH_SHORT).show()
                     EmergencyLog.log("Overlay permission granted by user")
                     startBubbleService()
                 } else {
-                    Toast.makeText(this, "❌ Permission denied", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "❌ Permission denied. Please enable from Settings.", Toast.LENGTH_LONG).show()
                     EmergencyLog.logError("Overlay permission denied by user")
+                    // Permission না দিলে আবার সেটিংসে পাঠানোর অপশন
+                    showRetryDialog()
                 }
             }
             moveTaskToBack(true)
         }
+    }
+    
+    private fun showRetryDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Permission Required")
+            .setMessage("This app needs 'Display over other apps' permission to show floating notes.")
+            .setPositiveButton("Open Settings") { _, _ ->
+                openOverlaySettings()
+            }
+            .setNegativeButton("Exit") { _, _ ->
+                finish()
+            }
+            .setCancelable(false)
+            .show()
     }
 }
