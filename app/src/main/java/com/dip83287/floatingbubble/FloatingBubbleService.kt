@@ -108,9 +108,9 @@ class FloatingBubbleService : Service() {
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
-            log.i("FloatingBubbleService", "Delete zone created")
+            EmergencyLog.log("Delete zone created")
         } catch (e: Exception) {
-            log.e("FloatingBubbleService", "Failed to create delete zone", e)
+            EmergencyLog.logException(e, "createDeleteZone")
         }
     }
 
