@@ -58,7 +58,6 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_HEIGHT = 850
 
     private val STORAGE_NOTES_LIST = "notes_list"
-    private val PREF_FIRST_BUBBLE_POSITION_SET = "first_bubble_position_set"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -114,6 +113,9 @@ class FloatingBubbleService : Service() {
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
+
+    // ✅ Track if this is first time service is created
+    private var isFirstTimeServiceStart = true
 
     data class NoteItem(
         val id: Long,
@@ -192,6 +194,14 @@ class FloatingBubbleService : Service() {
         currentNotepadHeight = prefs.getInt(KEY_NOTEPAD_HEIGHT, NOTEPAD_MIN_HEIGHT)
         notepadPosX = prefs.getInt(KEY_NOTEPAD_X, 0)
         notepadPosY = prefs.getInt(KEY_NOTEPAD_Y, 0)
+        
+        // ✅ Check if bubble position exists in preferences
+        val hasBubblePosition = prefs.contains(KEY_BUBBLE_X) && prefs.contains(KEY_BUBBLE_Y)
+        if (!hasBubblePosition) {
+            isFirstTimeServiceStart = true
+        } else {
+            isFirstTimeServiceStart = false
+        }
     }
 
     private fun saveBubblePosition(x: Int, y: Int) {
@@ -323,23 +333,24 @@ class FloatingBubbleService : Service() {
             val displayMetrics = resources.displayMetrics
             val screenWidth = displayMetrics.widthPixels
             
-            // ✅ প্রথমবার বাবল position সেট করুন (ডান পাশে, 150px নিচে)
-            val isFirstPositionSet = prefs.getBoolean(PREF_FIRST_BUBBLE_POSITION_SET, false)
-            
+            // ✅ Determine bubble position
             val defaultX: Int
             val defaultY: Int
             
-            if (!isFirstPositionSet) {
-                // প্রথমবার: ডান পাশে, উপরে থেকে 150px নিচে
-                defaultX = screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
+            if (isFirstTimeServiceStart) {
+                // ✅ First time: Show bubble on right side, 150px from top
+                defaultX = screenWidth - BUBBLE_SIZE - EDGE_SNAP
                 defaultY = 150
-                // সেভ করে দিন যাতে পরের বার এই কন্ডিশনে না আসে
-                prefs.edit().putBoolean(PREF_FIRST_BUBBLE_POSITION_SET, true).apply()
-                EmergencyLog.log("First bubble position set: x=$defaultX, y=$defaultY")
+                EmergencyLog.log("First time service - bubble at right side, y=$defaultY")
+                // Mark that first time is done (so next time it will use saved position)
+                isFirstTimeServiceStart = false
             } else {
-                // পরবর্তী সময়: সংরক্ষিত পজিশন ব্যবহার করুন
-                defaultX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
-                defaultY = prefs.getInt(KEY_BUBBLE_Y, 150)
+                // ✅ Subsequent starts: Use saved position from preferences
+                val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE - EDGE_SNAP)
+                val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
+                defaultX = savedX
+                defaultY = savedY
+                EmergencyLog.log("Subsequent start - using saved position: x=$defaultX, y=$defaultY")
             }
             
             params.x = defaultX
@@ -349,7 +360,7 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
-            EmergencyLog.log("Bubble created at x=$defaultX, y=$defaultY")
+            EmergencyLog.log("Bubble created")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
         }
@@ -377,7 +388,6 @@ class FloatingBubbleService : Service() {
                 when (event.action) {
 
                     MotionEvent.ACTION_DOWN -> {
-                        // ✅ টাচ শুরু হলেই Delete Zone দেখান
                         showDeleteZone()
                         
                         flingAnimator?.cancel()
