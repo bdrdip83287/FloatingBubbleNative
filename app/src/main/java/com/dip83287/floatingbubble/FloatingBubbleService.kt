@@ -20,7 +20,10 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
+import android.text.Selection
+import android.text.Spannable
 import android.text.TextWatcher
+import android.text.style.BackgroundColorSpan
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -114,6 +117,7 @@ class FloatingBubbleService : Service() {
     private var isLongPressed = false
     private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
+    private var currentSelectedText: String = ""  // ✅ Added this variable
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
@@ -699,7 +703,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // Create Selection Handles
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 36
         
@@ -928,7 +931,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // ✅ Show action bar 15px above selected text
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         
@@ -950,7 +952,6 @@ class FloatingBubbleService : Service() {
             background = shape
         }
         
-        // Chrome Button
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -967,7 +968,6 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // Cut Button
         val cutBtn = TextView(this).apply {
             text = "Cut"
             textSize = 13f
@@ -990,7 +990,6 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // Copy Button
         val copyBtn = TextView(this).apply {
             text = "Copy"
             textSize = 13f
@@ -1008,7 +1007,6 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // Paste Button
         val pasteBtn = TextView(this).apply {
             text = "Paste"
             textSize = 13f
@@ -1030,7 +1028,6 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // Select All Button
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -1048,7 +1045,6 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // ✅ Share Button with file-based sharing
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1069,7 +1065,6 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
-        // Position action bar 15px above selected text
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
@@ -1091,7 +1086,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt() - 50
-            params.y = (y - 60).toInt() // 15px up from text (60px for better visibility)
+            params.y = (y - 60).toInt()
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
@@ -1103,12 +1098,10 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Share function
     private fun shareText(text: String) {
         try {
             EmergencyLog.log("shareText called, text length: ${text.length}")
             
-            // For any text size, use file sharing for reliability
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "shared_note_$timeStamp.txt"
             val cacheFile = File(cacheDir, fileName)
@@ -1132,7 +1125,6 @@ class FloatingBubbleService : Service() {
             startActivity(Intent.createChooser(shareIntent, "Share Note"))
             EmergencyLog.log("Share intent started")
             
-            // Delete temp file after 30 seconds
             Handler(Looper.getMainLooper()).postDelayed({
                 try {
                     if (cacheFile.exists()) cacheFile.delete()
@@ -1145,7 +1137,6 @@ class FloatingBubbleService : Service() {
             EmergencyLog.logException(e, "shareText")
             Toast.makeText(this, "Share failed: ${e.message}", Toast.LENGTH_LONG).show()
             
-            // Fallback
             try {
                 val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
@@ -1453,13 +1444,13 @@ class FloatingBubbleService : Service() {
                             longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
                             
                             // Start new long press detection
-                            longPressRunnable = Runnable {
+                            val newRunnable = Runnable {
                                 isLongPressed = true
-                                // Long press detected - select word at cursor
                                 EmergencyLog.log("Long press detected")
                                 selectWordAtCursor()
                             }
-                            longPressHandler?.postDelayed(longPressRunnable, 500)
+                            longPressRunnable = newRunnable
+                            longPressHandler?.postDelayed(newRunnable, 500)
                             
                             v.parent.requestDisallowInterceptTouchEvent(false)
                             return false
@@ -1476,7 +1467,6 @@ class FloatingBubbleService : Service() {
                             // Check for double tap
                             if (upTime - lastTouchTime < 300 && deltaX < 50 && deltaY < 50) {
                                 EmergencyLog.log("Double tap detected")
-                                // Double tap - select word at cursor
                                 selectWordAtCursor()
                                 lastTouchTime = 0
                             } else {
