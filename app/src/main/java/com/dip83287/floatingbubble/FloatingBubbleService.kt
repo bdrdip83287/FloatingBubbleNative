@@ -20,10 +20,7 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
-import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -99,33 +96,30 @@ class FloatingBubbleService : Service() {
     private var velocityTracker: VelocityTracker? = null
     private var velocityY = 0f
 
+    // Custom Selection Action Bar
     private var floatingActionBar: View? = null
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
+    // Selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
 
-    private var scrollHideHandler: Handler? = null
-    private var scrollHideRunnable: Runnable? = null
-    private var isActionBarTemporarilyHidden = false
-    private var currentSelectedText = ""
+    // Gesture detection
+    private var lastTouchTime = 0L
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var isLongPressed = false
+    private var longPressHandler: Handler? = null
+    private var longPressRunnable: Runnable? = null
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
-
-    // Text selection tracking
-    private var lastTouchTime = 0L
-    private var lastTouchX = 0f
-    private var lastTouchY = 0f
-    private var isDraggingToSelect = false
-    private var dragStartX = 0f
-    private var dragStartY = 0f
 
     data class NoteItem(
         val id: Long,
@@ -145,7 +139,7 @@ class FloatingBubbleService : Service() {
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
-            scrollHideHandler = Handler(Looper.getMainLooper())
+            longPressHandler = Handler(Looper.getMainLooper())
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
         }
@@ -705,6 +699,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // Create Selection Handles
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 36
         
@@ -933,12 +928,13 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // ✅ Show action bar with selected text
+    // ✅ Show action bar 15px above selected text
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
-        if (isActionBarTemporarilyHidden) return
         
         hideFloatingActionBar()
+        
+        EmergencyLog.log("showFloatingActionBar called with text: ${selectedText.take(50)}")
         
         val actionBarView = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -954,6 +950,7 @@ class FloatingBubbleService : Service() {
             background = shape
         }
         
+        // Chrome Button
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -970,6 +967,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Cut Button
         val cutBtn = TextView(this).apply {
             text = "Cut"
             textSize = 13f
@@ -992,6 +990,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Copy Button
         val copyBtn = TextView(this).apply {
             text = "Copy"
             textSize = 13f
@@ -1009,6 +1008,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Paste Button
         val pasteBtn = TextView(this).apply {
             text = "Paste"
             textSize = 13f
@@ -1030,6 +1030,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Select All Button
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -1047,7 +1048,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // ✅ SHARE BUTTON - ফাইল ভিত্তিক শেয়ার
+        // ✅ Share Button with file-based sharing
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1056,7 +1057,7 @@ class FloatingBubbleService : Service() {
             setOnClickListener {
                 hideFloatingActionBar()
                 hideSelectionHandles()
-                shareLargeText(selectedText)
+                shareText(selectedText)
                 Handler(Looper.getMainLooper()).postDelayed({
                     if (isExpanded) {
                         collapseToBubble()
@@ -1068,6 +1069,7 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
+        // Position action bar 15px above selected text
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
@@ -1089,34 +1091,36 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt() - 50
-            params.y = (y - 120).toInt()
+            params.y = (y - 60).toInt() // 15px up from text (60px for better visibility)
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
                 isActionBarVisible = true
-            } catch (e: Exception) { }
+                EmergencyLog.log("Action bar shown at position: x=${params.x}, y=${params.y}")
+            } catch (e: Exception) {
+                EmergencyLog.logException(e, "showFloatingActionBar")
+            }
         }
     }
     
-    // ✅ Share function with file-based sharing for all text sizes
-    private fun shareLargeText(text: String) {
+    // ✅ Share function
+    private fun shareText(text: String) {
         try {
-            EmergencyLog.log("shareLargeText called, text length: ${text.length}")
+            EmergencyLog.log("shareText called, text length: ${text.length}")
             
-            // Always use file-based sharing for reliability
+            // For any text size, use file sharing for reliability
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "shared_note_$timeStamp.txt"
             val cacheFile = File(cacheDir, fileName)
             
             cacheFile.writeText(text)
-            EmergencyLog.log("File saved: ${cacheFile.absolutePath}, size: ${cacheFile.length()}")
+            EmergencyLog.log("File saved: ${cacheFile.absolutePath}")
             
             val fileUri = FileProvider.getUriForFile(
                 this,
                 "${packageName}.fileprovider",
                 cacheFile
             )
-            EmergencyLog.log("File URI: $fileUri")
             
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
@@ -1125,9 +1129,7 @@ class FloatingBubbleService : Service() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             
-            val chooser = Intent.createChooser(shareIntent, "Share Note via...")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(chooser)
+            startActivity(Intent.createChooser(shareIntent, "Share Note"))
             EmergencyLog.log("Share intent started")
             
             // Delete temp file after 30 seconds
@@ -1140,19 +1142,18 @@ class FloatingBubbleService : Service() {
             }, 30000)
             
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "shareLargeText")
+            EmergencyLog.logException(e, "shareText")
             Toast.makeText(this, "Share failed: ${e.message}", Toast.LENGTH_LONG).show()
             
-            // Fallback: try direct text share
+            // Fallback
             try {
                 val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, text.take(50000))
+                    putExtra(Intent.EXTRA_TEXT, text)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 startActivity(Intent.createChooser(fallbackIntent, "Share Note"))
             } catch (e2: Exception) {
-                EmergencyLog.logException(e2, "shareFallback")
                 Toast.makeText(this, "Cannot share text", Toast.LENGTH_SHORT).show()
             }
         }
@@ -1173,35 +1174,6 @@ class FloatingBubbleService : Service() {
             }
         } catch (e: Exception) { }
         isActionBarVisible = false
-    }
-    
-    private fun temporarilyHideActionBar() {
-        if (isActionBarVisible && !isActionBarTemporarilyHidden) {
-            isActionBarTemporarilyHidden = true
-            hideFloatingActionBar()
-        }
-    }
-    
-    private fun scheduleActionBarShow() {
-        scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
-        
-        val runnable = Runnable {
-            if (isActionBarTemporarilyHidden && editText.hasSelection()) {
-                val (start, end) = getSelection()
-                if (start != end) {
-                    val selected = editText.text.substring(start, end)
-                    if (selected.isNotEmpty()) {
-                        currentSelectedText = selected
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selected)
-                    }
-                } else {
-                    isActionBarTemporarilyHidden = false
-                }
-            }
-        }
-        scrollHideRunnable = runnable
-        scrollHideHandler?.postDelayed(runnable, 2000)
     }
     
     private fun getSelection(): Pair<Int, Int> {
@@ -1432,13 +1404,6 @@ class FloatingBubbleService : Service() {
             setPadding(0, 0, 0, 0)
             isFocusable = false
             isFocusableInTouchMode = false
-            
-            viewTreeObserver.addOnScrollChangedListener {
-                if (editText.hasSelection()) {
-                    temporarilyHideActionBar()
-                    scheduleActionBarShow()
-                }
-            }
         }
         
         // ✅ Enhanced EditText with proper selection handling
@@ -1471,76 +1436,68 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Long press to select word and show action bar
-            setOnLongClickListener {
-                selectWordAtCursor()
-                true
-            }
-            
-            // ✅ Touch listener for selection and drag-to-select
+            // ✅ Gesture handling
             setOnTouchListener(object : View.OnTouchListener {
-                private var lastTouchTime = 0L
-                private var lastTouchX = 0f
-                private var lastTouchY = 0f
+                private var downTime = 0L
+                private var downX = 0f
+                private var downY = 0f
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
-                            val currentTime = System.currentTimeMillis()
-                            val x = event.x
-                            val y = event.y
+                            downTime = System.currentTimeMillis()
+                            downX = event.x
+                            downY = event.y
                             
-                            // ✅ Double tap detection
-                            if (currentTime - lastTouchTime < 300 && 
-                                Math.abs(x - lastTouchX) < 50 && 
-                                Math.abs(y - lastTouchY) < 50) {
-                                // Double tap - select word at cursor
-                                EmergencyLog.log("Double tap detected")
+                            // Cancel any existing long press
+                            longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+                            
+                            // Start new long press detection
+                            longPressRunnable = Runnable {
+                                isLongPressed = true
+                                // Long press detected - select word at cursor
+                                EmergencyLog.log("Long press detected")
                                 selectWordAtCursor()
                             }
-                            
-                            lastTouchTime = currentTime
-                            lastTouchX = x
-                            lastTouchY = y
-                            
-                            // Start drag selection tracking
-                            isDraggingToSelect = true
-                            dragStartX = x
-                            dragStartY = y
+                            longPressHandler?.postDelayed(longPressRunnable, 500)
                             
                             v.parent.requestDisallowInterceptTouchEvent(false)
                             return false
                         }
                         
-                        MotionEvent.ACTION_MOVE -> {
-                            if (isDraggingToSelect && editText.hasSelection()) {
-                                // Dragging to extend selection
-                                v.parent.requestDisallowInterceptTouchEvent(true)
-                            }
-                            return false
-                        }
-                        
                         MotionEvent.ACTION_UP -> {
-                            if (isDraggingToSelect) {
-                                isDraggingToSelect = false
-                                // Check if selection exists after drag
-                                if (editText.hasSelection()) {
-                                    val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
-                                    if (selected.isNotEmpty()) {
-                                        currentSelectedText = selected
-                                        isActionBarTemporarilyHidden = false
-                                        showFloatingActionBar(selected)
-                                        showSelectionHandles()
-                                    }
-                                }
+                            val upTime = System.currentTimeMillis()
+                            val deltaX = abs(event.x - downX)
+                            val deltaY = abs(event.y - downY)
+                            
+                            // Cancel long press if not triggered
+                            longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+                            
+                            // Check for double tap
+                            if (upTime - lastTouchTime < 300 && deltaX < 50 && deltaY < 50) {
+                                EmergencyLog.log("Double tap detected")
+                                // Double tap - select word at cursor
+                                selectWordAtCursor()
+                                lastTouchTime = 0
                             } else {
+                                lastTouchTime = upTime
+                                
                                 // Single tap - clear selection if exists
-                                if (editText.hasSelection()) {
+                                if (!isLongPressed && editText.hasSelection()) {
+                                    EmergencyLog.log("Single tap - clearing selection")
                                     editText.setSelection(editText.selectionEnd)
                                     hideSelectionHandles()
                                     hideFloatingActionBar()
                                 }
                             }
+                            
+                            isLongPressed = false
+                            return false
+                        }
+                        
+                        MotionEvent.ACTION_CANCEL -> {
+                            longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+                            isLongPressed = false
                             return false
                         }
                     }
@@ -1548,21 +1505,22 @@ class FloatingBubbleService : Service() {
                 }
             })
             
-            // ✅ Text change listener for selection updates
+            // ✅ Selection change listener
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!hasSelection()) {
-                        hideSelectionHandles()
-                        hideFloatingActionBar()
-                    } else {
+                    if (hasSelection()) {
                         val selected = s?.substring(selectionStart, selectionEnd) ?: ""
                         if (selected.isNotEmpty()) {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            EmergencyLog.log("Selection changed: '$selected'")
                         }
+                    } else {
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
                     }
                     
                     saveRunnable?.let { saveHandler.removeCallbacks(it) }
@@ -1705,7 +1663,6 @@ class FloatingBubbleService : Service() {
                 editText.setSelection(start, end)
                 val selected = text.substring(start, end)
                 currentSelectedText = selected
-                isActionBarTemporarilyHidden = false
                 showFloatingActionBar(selected)
                 showSelectionHandles()
                 EmergencyLog.log("Word selected: '$selected'")
@@ -1907,7 +1864,7 @@ class FloatingBubbleService : Service() {
         deleteZoneView?.let { windowManager.removeView(it) }
         hideSelectionHandles()
         hideFloatingActionBar()
-        scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
+        longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
     }
 
     override fun onBind(intent: Intent?) = null
