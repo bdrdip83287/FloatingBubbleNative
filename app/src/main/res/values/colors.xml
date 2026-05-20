@@ -6,8 +6,7 @@
     <color name="text_secondary">#666666</color>
     <color name="fab_bg">#F9E79F</color>
     <color name="bubble_bg">#F9E79F</color>
-    <color name="delete_zone_bg">#FF0000</color>
-    <color name="delete_zone_text">#FFFFFF</color>
-</resources>
     <color name="delete_zone_red">#FF0000</color>
     <color name="delete_zone_cross">#FFFFFF</color>
+    <color name="ic_launcher_background">#FFF8DC</color>
+</resources>
