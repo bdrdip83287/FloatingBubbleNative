@@ -32,6 +32,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.doOnLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -41,6 +42,9 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
 class FloatingBubbleService : Service() {
 
@@ -58,8 +62,6 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_HEIGHT = 850
 
     private val STORAGE_NOTES_LIST = "notes_list"
-
-    // ✅ নতুন: বাবল প্রথমবার তৈরি হলে ডিফল্ট অবস্থান ট্র্যাক করার জন্য
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
     private lateinit var prefs: SharedPreferences
@@ -280,22 +282,18 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
-    // ✅ আপডেটেড: বাবল অবস্থান নির্ধারণ - প্রথমবার বা ডিলিটের পর ডান পাশে 150px নিচে
     private fun getInitialBubblePosition(displayMetrics: android.util.DisplayMetrics): Pair<Int, Int> {
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
         
-        // চেক করুন এটি প্রথমবার বাবল তৈরি হচ্ছে কিনা
         val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
         
         return if (isFirstTime) {
-            // প্রথমবার বা ডিলিটের পর: ডান পাশে, 150px নিচে
-            val defaultX = screenWidth - BUBBLE_SIZE - 20  // ডান পাশে (20px margin)
-            val defaultY = 150  // উপরে থেকে 150px নিচে
+            val defaultX = screenWidth - BUBBLE_SIZE - 20
+            val defaultY = 150
             EmergencyLog.log("First time bubble - position: x=$defaultX, y=$defaultY")
             Pair(defaultX, defaultY)
         } else {
-            // আগের সেভ করা অবস্থান
             val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
             val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
             EmergencyLog.log("Restored bubble position: x=$savedX, y=$savedY")
@@ -303,7 +301,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ বাবল তৈরি হওয়ার পর first-time flag অফ করে দিন
     private fun markBubbleCreated() {
         if (prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)) {
             prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, false).apply()
@@ -311,7 +308,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ বাবল ডিলিট করার সময় flag রিসেট করুন
     private fun resetFirstTimeFlag() {
         prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, true).apply()
         EmergencyLog.log("First time bubble flag reset (bubble deleted)")
@@ -368,10 +364,7 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
-            
-            // প্রথমবার তৈরি হলে flag অফ করুন
             markBubbleCreated()
-            
             EmergencyLog.log("Bubble created at position: x=${params.x}, y=${params.y}")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
@@ -401,31 +394,22 @@ class FloatingBubbleService : Service() {
 
                     MotionEvent.ACTION_DOWN -> {
                         showDeleteZone()
-                        
                         flingAnimator?.cancel()
-
                         initialX = params.x
                         initialY = params.y
-
                         touchX = event.rawX
                         touchY = event.rawY
-
                         isInDeleteZone = false
-
                         return true
                     }
 
                     MotionEvent.ACTION_MOVE -> {
-
                         val dx = event.rawX - touchX
                         val dy = event.rawY - touchY
-
                         params.x = initialX + dx.toInt()
                         params.y = initialY + dy.toInt()
-
                         val screenHeight = displayMetrics.heightPixels
                         val deleteZoneY = screenHeight - DELETE_ZONE_SIZE - 80
-
                         if (params.y + BUBBLE_SIZE > deleteZoneY) {
                             if (!isInDeleteZone) {
                                 isInDeleteZone = true
@@ -438,40 +422,29 @@ class FloatingBubbleService : Service() {
                                 EmergencyLog.log("Left delete zone")
                             }
                         }
-
                         windowManager.updateViewLayout(bubbleView!!, params)
-
                         return true
                     }
 
                     MotionEvent.ACTION_UP -> {
                         hideDeleteZone()
-
                         if (isInDeleteZone) {
                             EmergencyLog.log("Bubble deleted via delete zone")
-                            // ✅ বাবল ডিলিট হলে first-time flag রিসেট করুন
                             resetFirstTimeFlag()
                             deleteBubble()
                             return true
                         }
-
                         val deltaX = abs(event.rawX - touchX)
                         val deltaY = abs(event.rawY - touchY)
-
                         if (deltaX < 10 && deltaY < 10) {
                             expandToNotePad()
                             return true
                         }
-
                         velocityTracker?.computeCurrentVelocity(1000)
-
                         velocityY = velocityTracker?.yVelocity ?: 0f
-
                         velocityTracker?.recycle()
                         velocityTracker = null
-
                         applyStableDockPhysics(params, displayMetrics)
-
                         return true
                     }
 
@@ -481,7 +454,6 @@ class FloatingBubbleService : Service() {
                         velocityTracker = null
                     }
                 }
-
                 return false
             }
         })
@@ -531,34 +503,20 @@ class FloatingBubbleService : Service() {
             interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
-
                 val t = animator.animatedValue as Float
-
-                params.x = (
-                    startX + ((targetX - startX) * t)
-                ).toInt()
-
-                params.y = (
-                    startY + ((finalY - startY) * t)
-                ).toInt()
-
+                params.x = (startX + ((targetX - startX) * t)).toInt()
+                params.y = (startY + ((finalY - startY) * t)).toInt()
                 windowManager.updateViewLayout(bubbleView!!, params)
             }
 
             addListener(object : Animator.AnimatorListener {
-
                 override fun onAnimationStart(animation: Animator) {}
                 override fun onAnimationRepeat(animation: Animator) {}
                 override fun onAnimationCancel(animation: Animator) {}
                 override fun onAnimationEnd(animation: Animator) {
-
                     params.x = targetX.toInt()
                     windowManager.updateViewLayout(bubbleView!!, params)
                     applyTinySpringEffect(params, targetX.toInt())
-                    
-                    // ✅ অবস্থান সেভ করুন
-                    saveBubblePosition(params.x, params.y)
-                    EmergencyLog.log("Bubble position saved: x=${params.x}, y=${params.y}")
                 }
             })
 
@@ -583,9 +541,7 @@ class FloatingBubbleService : Service() {
             interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
-
                 val t = animator.animatedValue as Float
-
                 val currentX = if (t < 0.7f) {
                     val localT = t / 0.7f
                     startX + ((stretchX - startX) * localT)
@@ -593,13 +549,11 @@ class FloatingBubbleService : Service() {
                     val localT = (t - 0.7f) / 0.3f
                     stretchX + ((targetX - stretchX) * localT)
                 }
-
                 params.x = currentX.toInt()
                 windowManager.updateViewLayout(bubbleView!!, params)
             }
 
             addListener(object : Animator.AnimatorListener {
-
                 override fun onAnimationStart(animation: Animator) {}
                 override fun onAnimationRepeat(animation: Animator) {}
                 override fun onAnimationCancel(animation: Animator) {}
@@ -654,10 +608,8 @@ class FloatingBubbleService : Service() {
                         try {
                             bubbleView?.let { windowManager.removeView(it) }
                         } catch (_: Exception) { }
-
                         bubbleView = null
                         isExpanded = true
-
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
                     }
@@ -746,10 +698,8 @@ class FloatingBubbleService : Service() {
                         try {
                             noteView?.let { windowManager.removeView(it) }
                         } catch (_: Exception) { }
-
                         noteView = null
                         isExpanded = false
-
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
                     }
@@ -1101,6 +1051,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // ✅ আপডেটেড Share Button - বড় টেক্সটের জন্য ফাইল ভিত্তিক শেয়ার
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1110,19 +1061,14 @@ class FloatingBubbleService : Service() {
                 hideFloatingActionBar()
                 hideSelectionHandles()
                 
-                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(android.content.Intent.EXTRA_TEXT, selectedText)
-                }
-                val chooser = android.content.Intent.createChooser(shareIntent, "Share via")
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(chooser)
+                // বড় টেক্সট শেয়ার করার জন্য ফাংশন কল করুন
+                shareLargeText(selectedText)
                 
                 Handler(Looper.getMainLooper()).postDelayed({
                     if (isExpanded) {
                         collapseToBubble()
                     }
-                }, 300)
+                }, 500)
             }
         }
         actionBarView.addView(shareBtn)
@@ -1156,6 +1102,88 @@ class FloatingBubbleService : Service() {
                 actionBarWindowManager?.addView(floatingActionBar, params)
                 isActionBarVisible = true
             } catch (e: Exception) { }
+        }
+    }
+    
+    // ✅ নতুন: বড় টেক্সট শেয়ার করার জন্য ফাংশন
+    private fun shareLargeText(text: String) {
+        try {
+            var textToShare = text
+            var useFileSharing = false
+            
+            // টেক্সট বড় কিনা চেক করুন (500KB এর বেশি)
+            if (textToShare.length > 500000) {
+                useFileSharing = true
+                EmergencyLog.log("Large text detected (${textToShare.length} chars), using file sharing")
+            }
+            
+            if (useFileSharing) {
+                // টেক্সট টেম্পোরারি ফাইলে সেভ করুন
+                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val fileName = "shared_note_$timeStamp.txt"
+                val cacheFile = File(cacheDir, fileName)
+                
+                cacheFile.writeText(textToShare)
+                EmergencyLog.log("Text saved to file: ${cacheFile.absolutePath}")
+                
+                // FileProvider এর মাধ্যমে URI পান
+                val fileUri = FileProvider.getUriForFile(
+                    this,
+                    "${packageName}.fileprovider",
+                    cacheFile
+                )
+                
+                // শেয়ার Intent তৈরি করুন
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, fileUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                
+                val chooser = Intent.createChooser(shareIntent, "Share Note")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(chooser)
+                EmergencyLog.log("File sharing intent started")
+                
+                // ফাইল ডিলিট করার জন্য শিডিউল করুন
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try {
+                        if (cacheFile.exists()) {
+                            cacheFile.delete()
+                            EmergencyLog.log("Temp file deleted")
+                        }
+                    } catch (e: Exception) {
+                        EmergencyLog.logException(e, "deleteTempFile")
+                    }
+                }, 60000) // 1 মিনিট পর ডিলিট
+                
+            } else {
+                // ছোট টেক্সটের জন্য সাধারণ শেয়ার
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, textToShare)
+                }
+                val chooser = Intent.createChooser(shareIntent, "Share Note")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(chooser)
+                EmergencyLog.log("Direct text sharing intent started (${textToShare.length} chars)")
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "shareLargeText")
+            // Fallback: সাধারণ শেয়ার চেষ্টা করুন
+            try {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                }
+                val chooser = Intent.createChooser(shareIntent, "Share Note")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(chooser)
+                EmergencyLog.log("Fallback sharing intent started")
+            } catch (e2: Exception) {
+                EmergencyLog.logException(e2, "shareLargeText_fallback")
+                Toast.makeText(this, "Failed to share text", Toast.LENGTH_SHORT).show()
+            }
         }
     }
     
@@ -1451,7 +1479,6 @@ class FloatingBubbleService : Service() {
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
             setLineSpacing(0f, 1.15f)
-            
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
