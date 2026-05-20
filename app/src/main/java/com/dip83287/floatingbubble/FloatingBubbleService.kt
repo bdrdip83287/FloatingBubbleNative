@@ -19,11 +19,7 @@ import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
-import android.text.Layout
-import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -108,8 +104,6 @@ class FloatingBubbleService : Service() {
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
 
-    private var scrollHideHandler: Handler? = null
-    private var scrollHideRunnable: Runnable? = null
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
@@ -137,7 +131,6 @@ class FloatingBubbleService : Service() {
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
-            scrollHideHandler = Handler(Looper.getMainLooper())
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
         }
@@ -248,7 +241,6 @@ class FloatingBubbleService : Service() {
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
-            EmergencyLog.log("Delete zone created")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createDeleteZone")
         }
@@ -257,20 +249,17 @@ class FloatingBubbleService : Service() {
     private fun showDeleteZone() {
         if (deleteZoneView?.visibility != View.VISIBLE) {
             deleteZoneView?.visibility = View.VISIBLE
-            EmergencyLog.log("Delete zone shown")
         }
     }
 
     private fun hideDeleteZone() {
         if (deleteZoneView?.visibility != View.GONE) {
             deleteZoneView?.visibility = View.GONE
-            EmergencyLog.log("Delete zone hidden")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            EmergencyLog.logError("Overlay permission not granted")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -284,19 +273,15 @@ class FloatingBubbleService : Service() {
 
     private fun getInitialBubblePosition(displayMetrics: android.util.DisplayMetrics): Pair<Int, Int> {
         val screenWidth = displayMetrics.widthPixels
-        val screenHeight = displayMetrics.heightPixels
-        
         val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
         
         return if (isFirstTime) {
             val defaultX = screenWidth - BUBBLE_SIZE - 20
             val defaultY = 150
-            EmergencyLog.log("First time bubble - position: x=$defaultX, y=$defaultY")
             Pair(defaultX, defaultY)
         } else {
             val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
             val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
-            EmergencyLog.log("Restored bubble position: x=$savedX, y=$savedY")
             Pair(savedX, savedY)
         }
     }
@@ -304,13 +289,11 @@ class FloatingBubbleService : Service() {
     private fun markBubbleCreated() {
         if (prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)) {
             prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, false).apply()
-            EmergencyLog.log("First time bubble flag cleared")
         }
     }
     
     private fun resetFirstTimeFlag() {
         prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, true).apply()
-        EmergencyLog.log("First time bubble flag reset (bubble deleted)")
     }
 
     private fun createBubble() {
@@ -365,7 +348,6 @@ class FloatingBubbleService : Service() {
 
             windowManager.addView(bubbleView, params)
             markBubbleCreated()
-            EmergencyLog.log("Bubble created at position: x=${params.x}, y=${params.y}")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
         }
@@ -414,12 +396,10 @@ class FloatingBubbleService : Service() {
                             if (!isInDeleteZone) {
                                 isInDeleteZone = true
                                 showDeleteZone()
-                                EmergencyLog.log("Entered delete zone")
                             }
                         } else {
                             if (isInDeleteZone) {
                                 isInDeleteZone = false
-                                EmergencyLog.log("Left delete zone")
                             }
                         }
                         windowManager.updateViewLayout(bubbleView!!, params)
@@ -429,7 +409,6 @@ class FloatingBubbleService : Service() {
                     MotionEvent.ACTION_UP -> {
                         hideDeleteZone()
                         if (isInDeleteZone) {
-                            EmergencyLog.log("Bubble deleted via delete zone")
                             resetFirstTimeFlag()
                             deleteBubble()
                             return true
@@ -940,7 +919,6 @@ class FloatingBubbleService : Service() {
 
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
-        if (isActionBarTemporarilyHidden) return
         
         hideFloatingActionBar()
         
@@ -948,7 +926,7 @@ class FloatingBubbleService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#333333"))
-            setPadding(8, 6, 8, 6)
+            setPadding(12, 8, 12, 8)
             
             val shape = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -971,7 +949,6 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(chromeBtn)
-        
         actionBarView.addView(createDivider())
         
         val cutBtn = TextView(this).apply {
@@ -993,7 +970,6 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(cutBtn)
-        
         actionBarView.addView(createDivider())
         
         val copyBtn = TextView(this).apply {
@@ -1010,7 +986,6 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(copyBtn)
-        
         actionBarView.addView(createDivider())
         
         val pasteBtn = TextView(this).apply {
@@ -1031,7 +1006,6 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(pasteBtn)
-        
         actionBarView.addView(createDivider())
         
         val selectAllBtn = TextView(this).apply {
@@ -1048,10 +1022,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(selectAllBtn)
-        
         actionBarView.addView(createDivider())
         
-        // ✅ আপডেটেড Share Button - বড় টেক্সটের জন্য ফাইল ভিত্তিক শেয়ার
+        // ✅ Share Button - বড় টেক্সটের জন্য ফাইল ভিত্তিক শেয়ার
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1060,15 +1033,7 @@ class FloatingBubbleService : Service() {
             setOnClickListener {
                 hideFloatingActionBar()
                 hideSelectionHandles()
-                
-                // বড় টেক্সট শেয়ার করার জন্য ফাংশন কল করুন
-                shareLargeText(selectedText)
-                
-                Handler(Looper.getMainLooper()).postDelayed({
-                    if (isExpanded) {
-                        collapseToBubble()
-                    }
-                }, 500)
+                shareWithFileProvider(selectedText)
             }
         }
         actionBarView.addView(shareBtn)
@@ -1096,7 +1061,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt() - 50
-            params.y = (y - 120).toInt()
+            params.y = (y - 80).toInt()
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
@@ -1105,85 +1070,50 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ নতুন: বড় টেক্সট শেয়ার করার জন্য ফাংশন
-    private fun shareLargeText(text: String) {
+    // ✅ আলাদা ফাংশন - ফাইল ভিত্তিক শেয়ার
+    private fun shareWithFileProvider(text: String) {
         try {
-            var textToShare = text
-            var useFileSharing = false
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val fileName = "shared_note_$timeStamp.txt"
+            val cacheFile = File(cacheDir, fileName)
             
-            // টেক্সট বড় কিনা চেক করুন (500KB এর বেশি)
-            if (textToShare.length > 500000) {
-                useFileSharing = true
-                EmergencyLog.log("Large text detected (${textToShare.length} chars), using file sharing")
+            cacheFile.writeText(text)
+            EmergencyLog.log("File created: ${cacheFile.absolutePath}, size: ${cacheFile.length()}")
+            
+            val fileUri = FileProvider.getUriForFile(
+                this,
+                "${packageName}.fileprovider",
+                cacheFile
+            )
+            
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, fileUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             
-            if (useFileSharing) {
-                // টেক্সট টেম্পোরারি ফাইলে সেভ করুন
-                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                val fileName = "shared_note_$timeStamp.txt"
-                val cacheFile = File(cacheDir, fileName)
-                
-                cacheFile.writeText(textToShare)
-                EmergencyLog.log("Text saved to file: ${cacheFile.absolutePath}")
-                
-                // FileProvider এর মাধ্যমে URI পান
-                val fileUri = FileProvider.getUriForFile(
-                    this,
-                    "${packageName}.fileprovider",
-                    cacheFile
-                )
-                
-                // শেয়ার Intent তৈরি করুন
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_STREAM, fileUri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                
-                val chooser = Intent.createChooser(shareIntent, "Share Note")
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(chooser)
-                EmergencyLog.log("File sharing intent started")
-                
-                // ফাইল ডিলিট করার জন্য শিডিউল করুন
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try {
-                        if (cacheFile.exists()) {
-                            cacheFile.delete()
-                            EmergencyLog.log("Temp file deleted")
-                        }
-                    } catch (e: Exception) {
-                        EmergencyLog.logException(e, "deleteTempFile")
+            // Chooser তৈরি করুন
+            val chooser = Intent.createChooser(shareIntent, "Share Note via")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(chooser)
+            EmergencyLog.log("Share chooser displayed")
+            
+            // ফাইল ডিলিট করার জন্য শিডিউল করুন
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    if (cacheFile.exists()) {
+                        cacheFile.delete()
+                        EmergencyLog.log("Temp file deleted")
                     }
-                }, 60000) // 1 মিনিট পর ডিলিট
-                
-            } else {
-                // ছোট টেক্সটের জন্য সাধারণ শেয়ার
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, textToShare)
+                } catch (e: Exception) {
+                    EmergencyLog.logException(e, "deleteTempFile")
                 }
-                val chooser = Intent.createChooser(shareIntent, "Share Note")
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(chooser)
-                EmergencyLog.log("Direct text sharing intent started (${textToShare.length} chars)")
-            }
+            }, 30000)
+            
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "shareLargeText")
-            // Fallback: সাধারণ শেয়ার চেষ্টা করুন
-            try {
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, text)
-                }
-                val chooser = Intent.createChooser(shareIntent, "Share Note")
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(chooser)
-                EmergencyLog.log("Fallback sharing intent started")
-            } catch (e2: Exception) {
-                EmergencyLog.logException(e2, "shareLargeText_fallback")
-                Toast.makeText(this, "Failed to share text", Toast.LENGTH_SHORT).show()
-            }
+            EmergencyLog.logException(e, "shareWithFileProvider")
+            Toast.makeText(this, "Failed to share: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -1202,35 +1132,6 @@ class FloatingBubbleService : Service() {
             }
         } catch (e: Exception) { }
         isActionBarVisible = false
-    }
-    
-    private fun temporarilyHideActionBar() {
-        if (isActionBarVisible && !isActionBarTemporarilyHidden) {
-            isActionBarTemporarilyHidden = true
-            hideFloatingActionBar()
-        }
-    }
-    
-    private fun scheduleActionBarShow() {
-        scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
-        
-        val runnable = Runnable {
-            if (isActionBarTemporarilyHidden && editText.hasSelection()) {
-                val (start, end) = getSelection()
-                if (start != end) {
-                    val selected = editText.text.substring(start, end)
-                    if (selected.isNotEmpty()) {
-                        currentSelectedText = selected
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selected)
-                    }
-                } else {
-                    isActionBarTemporarilyHidden = false
-                }
-            }
-        }
-        scrollHideRunnable = runnable
-        scrollHideHandler?.postDelayed(runnable, 2000)
     }
     
     private fun getSelection(): Pair<Int, Int> {
@@ -1461,15 +1362,9 @@ class FloatingBubbleService : Service() {
             setPadding(0, 0, 0, 0)
             isFocusable = false
             isFocusableInTouchMode = false
-            
-            viewTreeObserver.addOnScrollChangedListener {
-                if (editText.hasSelection()) {
-                    temporarilyHideActionBar()
-                    scheduleActionBarShow()
-                }
-            }
         }
         
+        // ✅ SIMPLIFIED EDITTEXT - Smooth selection without issues
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1478,7 +1373,7 @@ class FloatingBubbleService : Service() {
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
-            setLineSpacing(0f, 1.15f)
+            setLineSpacing(0f, 1.2f)
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
@@ -1489,6 +1384,7 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
+            // ✅ Proper text selection
             setTextIsSelectable(true)
             isLongClickable = true
             customInsertionActionModeCallback = null
@@ -1499,67 +1395,55 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
+            // ✅ Simple touch handling
             setOnLongClickListener {
-                selectWordAtCursor()
+                val text = editText.text.toString()
+                val cursorPos = editText.selectionStart
+                if (cursorPos >= 0 && cursorPos <= text.length) {
+                    var start = cursorPos
+                    var end = cursorPos
+                    while (start > 0 && text[start - 1].isLetterOrDigit()) start--
+                    while (end < text.length && text[end].isLetterOrDigit()) end++
+                    if (start < end) {
+                        editText.setSelection(start, end)
+                        val selected = text.substring(start, end)
+                        if (selected.isNotEmpty()) {
+                            showFloatingActionBar(selected)
+                            showSelectionHandles()
+                        }
+                    }
+                }
                 true
             }
             
-            setOnTouchListener(object : View.OnTouchListener {
-                private var lastTouchTime = 0L
-                private var lastTouchX = 0f
-                private var lastTouchY = 0f
-                
-                override fun onTouch(v: View, event: MotionEvent): Boolean {
-                    when (event.action) {
-                        MotionEvent.ACTION_DOWN -> {
-                            val currentTime = System.currentTimeMillis()
-                            val x = event.x
-                            val y = event.y
-                            
-                            if (currentTime - lastTouchTime < 300 && 
-                                Math.abs(x - lastTouchX) < 50 && 
-                                Math.abs(y - lastTouchY) < 50) {
-                                selectWordAtCursor()
-                            }
-                            
-                            lastTouchTime = currentTime
-                            lastTouchX = x
-                            lastTouchY = y
-                            v.parent.requestDisallowInterceptTouchEvent(false)
-                        }
-                        MotionEvent.ACTION_UP -> {
-                            if (editText.hasSelection()) {
-                                val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
-                                    isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                }
-                            } else {
-                                hideSelectionHandles()
-                                hideFloatingActionBar()
-                            }
-                        }
-                    }
-                    return false
-                }
-            })
-            
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!hasSelection()) {
-                        hideSelectionHandles()
-                        hideFloatingActionBar()
-                    } else {
-                        val selected = s?.substring(selectionStart, selectionEnd) ?: ""
+            setOnTouchListener { v, event ->
+                if (event.action == MotionEvent.ACTION_UP) {
+                    if (editText.hasSelection()) {
+                        val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
                         if (selected.isNotEmpty()) {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
                         }
+                    }
+                }
+                false
+            }
+            
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (editText.hasSelection()) {
+                        val selected = s?.substring(editText.selectionStart, editText.selectionEnd) ?: ""
+                        if (selected.isNotEmpty()) {
+                            currentSelectedText = selected
+                            showFloatingActionBar(selected)
+                            showSelectionHandles()
+                        }
+                    } else {
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
                     }
                     
                     saveRunnable?.let { saveHandler.removeCallbacks(it) }
@@ -1637,13 +1521,8 @@ class FloatingBubbleService : Service() {
                 topMargin = 8
             }
             setOnClickListener {
-                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(android.content.Intent.EXTRA_TEXT, "${titleInput.text}\n\n${editText.text}")
-                }
-                val chooser = android.content.Intent.createChooser(shareIntent, "Share Note")
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(chooser)
+                val shareText = "${titleInput.text}\n\n${editText.text}"
+                shareWithFileProvider(shareText)
             }
         }
         contentContainer.addView(shareBtn)
@@ -1685,33 +1564,8 @@ class FloatingBubbleService : Service() {
             editText.requestFocus()
             
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
+            imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
         }, 300)
-    }
-    
-    private fun selectWordAtCursor() {
-        val text = editText.text.toString()
-        val cursorPos = editText.selectionStart
-        if (cursorPos >= 0 && cursorPos <= text.length) {
-            var start = cursorPos
-            var end = cursorPos
-            while (start > 0 && text[start - 1].isLetterOrDigit()) start--
-            while (end < text.length && text[end].isLetterOrDigit()) end++
-            
-            if (start < end) {
-                editText.setSelection(start, end)
-                val selected = text.substring(start, end)
-                currentSelectedText = selected
-                isActionBarTemporarilyHidden = false
-                showFloatingActionBar(selected)
-                showSelectionHandles()
-            } else if (text.isNotEmpty()) {
-                editText.selectAll()
-                currentSelectedText = text
-                showFloatingActionBar(text)
-                showSelectionHandles()
-            }
-        }
     }
 
     private fun EditText.hasSelection(): Boolean {
@@ -1902,7 +1756,6 @@ class FloatingBubbleService : Service() {
         deleteZoneView?.let { windowManager.removeView(it) }
         hideSelectionHandles()
         hideFloatingActionBar()
-        scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
     }
 
     override fun onBind(intent: Intent?) = null
