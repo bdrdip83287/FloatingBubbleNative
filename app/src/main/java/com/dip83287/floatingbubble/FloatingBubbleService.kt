@@ -50,7 +50,6 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_SIZE = 110
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
-    private val EDGE_SNAP = 10  // ✅ EDGE_SNAP এখানে ডিক্লেয়ার করা হয়েছে
 
     private val NOTEPAD_TITLE = "Floating Notes"
     private val NOTEPAD_MIN_WIDTH = 380
@@ -59,6 +58,9 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_HEIGHT = 850
 
     private val STORAGE_NOTES_LIST = "notes_list"
+
+    // ✅ নতুন: বাবল প্রথমবার তৈরি হলে ডিফল্ট অবস্থান ট্র্যাক করার জন্য
+    private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -114,9 +116,6 @@ class FloatingBubbleService : Service() {
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
-
-    // ✅ Track if this is first time service is created
-    private var isFirstTimeServiceStart = true
 
     data class NoteItem(
         val id: Long,
@@ -195,14 +194,6 @@ class FloatingBubbleService : Service() {
         currentNotepadHeight = prefs.getInt(KEY_NOTEPAD_HEIGHT, NOTEPAD_MIN_HEIGHT)
         notepadPosX = prefs.getInt(KEY_NOTEPAD_X, 0)
         notepadPosY = prefs.getInt(KEY_NOTEPAD_Y, 0)
-        
-        // ✅ Check if bubble position exists in preferences
-        val hasBubblePosition = prefs.contains(KEY_BUBBLE_X) && prefs.contains(KEY_BUBBLE_Y)
-        if (!hasBubblePosition) {
-            isFirstTimeServiceStart = true
-        } else {
-            isFirstTimeServiceStart = false
-        }
     }
 
     private fun saveBubblePosition(x: Int, y: Int) {
@@ -289,6 +280,43 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
+    // ✅ আপডেটেড: বাবল অবস্থান নির্ধারণ - প্রথমবার বা ডিলিটের পর ডান পাশে 150px নিচে
+    private fun getInitialBubblePosition(displayMetrics: android.util.DisplayMetrics): Pair<Int, Int> {
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+        
+        // চেক করুন এটি প্রথমবার বাবল তৈরি হচ্ছে কিনা
+        val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
+        
+        return if (isFirstTime) {
+            // প্রথমবার বা ডিলিটের পর: ডান পাশে, 150px নিচে
+            val defaultX = screenWidth - BUBBLE_SIZE - 20  // ডান পাশে (20px margin)
+            val defaultY = 150  // উপরে থেকে 150px নিচে
+            EmergencyLog.log("First time bubble - position: x=$defaultX, y=$defaultY")
+            Pair(defaultX, defaultY)
+        } else {
+            // আগের সেভ করা অবস্থান
+            val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
+            val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
+            EmergencyLog.log("Restored bubble position: x=$savedX, y=$savedY")
+            Pair(savedX, savedY)
+        }
+    }
+    
+    // ✅ বাবল তৈরি হওয়ার পর first-time flag অফ করে দিন
+    private fun markBubbleCreated() {
+        if (prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)) {
+            prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, false).apply()
+            EmergencyLog.log("First time bubble flag cleared")
+        }
+    }
+    
+    // ✅ বাবল ডিলিট করার সময় flag রিসেট করুন
+    private fun resetFirstTimeFlag() {
+        prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, true).apply()
+        EmergencyLog.log("First time bubble flag reset (bubble deleted)")
+    }
+
     private fun createBubble() {
         try {
             val bubbleLayout = LinearLayout(this).apply {
@@ -332,28 +360,7 @@ class FloatingBubbleService : Service() {
             params.gravity = Gravity.TOP or Gravity.START
 
             val displayMetrics = resources.displayMetrics
-            val screenWidth = displayMetrics.widthPixels
-            
-            // ✅ Determine bubble position
-            val defaultX: Int
-            val defaultY: Int
-            
-            if (isFirstTimeServiceStart) {
-                // ✅ First time: Show bubble on right side, 150px from top
-                defaultX = screenWidth - BUBBLE_SIZE - EDGE_SNAP
-                defaultY = 150
-                EmergencyLog.log("First time service - bubble at right side, y=$defaultY")
-                // Mark that first time is done (so next time it will use saved position)
-                isFirstTimeServiceStart = false
-            } else {
-                // ✅ Subsequent starts: Use saved position from preferences
-                val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE - EDGE_SNAP)
-                val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
-                defaultX = savedX
-                defaultY = savedY
-                EmergencyLog.log("Subsequent start - using saved position: x=$defaultX, y=$defaultY")
-            }
-            
+            val (defaultX, defaultY) = getInitialBubblePosition(displayMetrics)
             params.x = defaultX
             params.y = defaultY
 
@@ -361,7 +368,11 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
-            EmergencyLog.log("Bubble created")
+            
+            // প্রথমবার তৈরি হলে flag অফ করুন
+            markBubbleCreated()
+            
+            EmergencyLog.log("Bubble created at position: x=${params.x}, y=${params.y}")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
         }
@@ -418,6 +429,7 @@ class FloatingBubbleService : Service() {
                         if (params.y + BUBBLE_SIZE > deleteZoneY) {
                             if (!isInDeleteZone) {
                                 isInDeleteZone = true
+                                showDeleteZone()
                                 EmergencyLog.log("Entered delete zone")
                             }
                         } else {
@@ -437,6 +449,8 @@ class FloatingBubbleService : Service() {
 
                         if (isInDeleteZone) {
                             EmergencyLog.log("Bubble deleted via delete zone")
+                            // ✅ বাবল ডিলিট হলে first-time flag রিসেট করুন
+                            resetFirstTimeFlag()
                             deleteBubble()
                             return true
                         }
@@ -541,6 +555,10 @@ class FloatingBubbleService : Service() {
                     params.x = targetX.toInt()
                     windowManager.updateViewLayout(bubbleView!!, params)
                     applyTinySpringEffect(params, targetX.toInt())
+                    
+                    // ✅ অবস্থান সেভ করুন
+                    saveBubblePosition(params.x, params.y)
+                    EmergencyLog.log("Bubble position saved: x=${params.x}, y=${params.y}")
                 }
             })
 
@@ -586,7 +604,6 @@ class FloatingBubbleService : Service() {
                 override fun onAnimationRepeat(animation: Animator) {}
                 override fun onAnimationCancel(animation: Animator) {}
                 override fun onAnimationEnd(animation: Animator) {
-
                     params.x = targetX
                     windowManager.updateViewLayout(bubbleView!!, params)
                     saveBubblePosition(params.x, params.y)
