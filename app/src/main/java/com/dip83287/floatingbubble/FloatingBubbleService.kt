@@ -50,6 +50,7 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_SIZE = 110
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
+    private val EDGE_SNAP = 10  // ✅ EDGE_SNAP এখানে ডিক্লেয়ার করা হয়েছে
 
     private val NOTEPAD_TITLE = "Floating Notes"
     private val NOTEPAD_MIN_WIDTH = 380
