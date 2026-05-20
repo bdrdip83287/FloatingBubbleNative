@@ -58,6 +58,7 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_HEIGHT = 850
 
     private val STORAGE_NOTES_LIST = "notes_list"
+    private val PREF_FIRST_BUBBLE_POSITION_SET = "first_bubble_position_set"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -208,7 +209,6 @@ class FloatingBubbleService : Service() {
         notepadPosY = y
     }
 
-    // ✅ আপডেটেড Delete Zone - সবসময় visible থাকবে
     private fun createDeleteZone() {
         try {
             val zone = LinearLayout(this).apply {
@@ -241,7 +241,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             params.y = 150
-            zone.visibility = View.GONE  // Initially hidden
+            zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
             EmergencyLog.log("Delete zone created")
@@ -250,7 +250,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ আপডেটেড: টাচ করলেই delete zone দেখাবে
     private fun showDeleteZone() {
         if (deleteZoneView?.visibility != View.VISIBLE) {
             deleteZoneView?.visibility = View.VISIBLE
@@ -322,8 +321,27 @@ class FloatingBubbleService : Service() {
             params.gravity = Gravity.TOP or Gravity.START
 
             val displayMetrics = resources.displayMetrics
-            val defaultX = prefs.getInt(KEY_BUBBLE_X, displayMetrics.widthPixels - BUBBLE_SIZE + HIDDEN_WIDTH)
-            val defaultY = prefs.getInt(KEY_BUBBLE_Y, 150)
+            val screenWidth = displayMetrics.widthPixels
+            
+            // ✅ প্রথমবার বাবল position সেট করুন (ডান পাশে, 150px নিচে)
+            val isFirstPositionSet = prefs.getBoolean(PREF_FIRST_BUBBLE_POSITION_SET, false)
+            
+            val defaultX: Int
+            val defaultY: Int
+            
+            if (!isFirstPositionSet) {
+                // প্রথমবার: ডান পাশে, উপরে থেকে 150px নিচে
+                defaultX = screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
+                defaultY = 150
+                // সেভ করে দিন যাতে পরের বার এই কন্ডিশনে না আসে
+                prefs.edit().putBoolean(PREF_FIRST_BUBBLE_POSITION_SET, true).apply()
+                EmergencyLog.log("First bubble position set: x=$defaultX, y=$defaultY")
+            } else {
+                // পরবর্তী সময়: সংরক্ষিত পজিশন ব্যবহার করুন
+                defaultX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
+                defaultY = prefs.getInt(KEY_BUBBLE_Y, 150)
+            }
+            
             params.x = defaultX
             params.y = defaultY
 
@@ -331,13 +349,12 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
-            EmergencyLog.log("Bubble created")
+            EmergencyLog.log("Bubble created at x=$defaultX, y=$defaultY")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createBubble")
         }
     }
 
-    // ✅ আপডেটেড Touch Listener - Touch শুরু হলেই Delete Zone দেখাবে
     private fun setupBubbleTouchListener(
         params: WindowManager.LayoutParams,
         displayMetrics: android.util.DisplayMetrics
@@ -360,7 +377,7 @@ class FloatingBubbleService : Service() {
                 when (event.action) {
 
                     MotionEvent.ACTION_DOWN -> {
-                        // ✅ TOUCH শুরু হলেই Delete Zone দেখান
+                        // ✅ টাচ শুরু হলেই Delete Zone দেখান
                         showDeleteZone()
                         
                         flingAnimator?.cancel()
@@ -387,7 +404,6 @@ class FloatingBubbleService : Service() {
                         val screenHeight = displayMetrics.heightPixels
                         val deleteZoneY = screenHeight - DELETE_ZONE_SIZE - 80
 
-                        // Check if bubble is over delete zone
                         if (params.y + BUBBLE_SIZE > deleteZoneY) {
                             if (!isInDeleteZone) {
                                 isInDeleteZone = true
@@ -406,7 +422,6 @@ class FloatingBubbleService : Service() {
                     }
 
                     MotionEvent.ACTION_UP -> {
-                        // Hide delete zone after touch ends
                         hideDeleteZone()
 
                         if (isInDeleteZone) {
