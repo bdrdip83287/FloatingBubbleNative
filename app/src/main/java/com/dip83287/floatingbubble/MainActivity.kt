@@ -21,15 +21,18 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         EmergencyLog.logLifecycle("MainActivity", "onCreate")
         
+        checkOverlayPermission()
+    }
+
+    private fun checkOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (Settings.canDrawOverlays(this)) {
                 EmergencyLog.log("Overlay permission already granted")
                 startBubbleService()
                 finish()
             } else {
-                EmergencyLog.log("Opening app settings page")
-                // সরাসরি অ্যাপের detail settings পেজে নিয়ে যান
-                openAppSettings()
+                EmergencyLog.log("Requesting overlay permission")
+                requestOverlayPermission()
             }
         } else {
             startBubbleService()
@@ -37,23 +40,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openAppSettings() {
+    private fun requestOverlayPermission() {
         try {
-            // সরাসরি অ্যাপের settings পেজে নিয়ে যান (যেখানে toggle থাকে)
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-            intent.data = Uri.parse("package:$packageName")
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
-            Toast.makeText(this, "Go to 'Display over other apps' and enable permission", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Please enable 'Display over other apps' for Floating Notes", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "openAppSettings")
-            // Fallback
+            EmergencyLog.logException(e, "requestOverlayPermission")
             try {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+                startActivityForResult(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")), OVERLAY_PERMISSION_REQUEST)
             } catch (e2: Exception) {
                 Toast.makeText(this, "Please manually enable overlay permission from Settings", Toast.LENGTH_LONG).show()
             }
@@ -84,8 +83,8 @@ class MainActivity : AppCompatActivity() {
                         EmergencyLog.log("Overlay permission granted")
                         startBubbleService()
                     } else {
-                        Toast.makeText(this, "❌ Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
-                        EmergencyLog.logError("Overlay permission still denied")
+                        Toast.makeText(this, "❌ Permission not granted. Please enable manually.", Toast.LENGTH_LONG).show()
+                        EmergencyLog.logError("Overlay permission denied")
                     }
                 }
                 finish()
