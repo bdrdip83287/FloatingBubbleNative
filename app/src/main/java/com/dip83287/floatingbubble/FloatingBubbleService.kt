@@ -20,10 +20,7 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
-import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -39,8 +36,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -253,20 +248,17 @@ class FloatingBubbleService : Service() {
     private fun showDeleteZone() {
         if (deleteZoneView?.visibility != View.VISIBLE) {
             deleteZoneView?.visibility = View.VISIBLE
-            EmergencyLog.log("Delete zone shown")
         }
     }
 
     private fun hideDeleteZone() {
         if (deleteZoneView?.visibility != View.GONE) {
             deleteZoneView?.visibility = View.GONE
-            EmergencyLog.log("Delete zone hidden")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            EmergencyLog.logError("Overlay permission not granted")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -790,7 +782,7 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // ✅ Action Bar - 15px above selected text
+    // Action Bar - 15px above selected text
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -934,7 +926,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt() - 50
-            params.y = (y - 65).toInt() // 15px gap (was 120, now 65 for 15px above)
+            params.y = (y - 65).toInt()
             try { actionBarWindowManager?.addView(floatingActionBar, params); isActionBarVisible = true } catch (e: Exception) { }
         }
     }
@@ -1056,7 +1048,10 @@ class FloatingBubbleService : Service() {
             setBackgroundColor(Color.parseColor("#F9E79F"))
             setTextColor(Color.parseColor("#333333"))
             setAllCaps(false)
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 8; bottomMargin = 8 }
+            val lp = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            lp.topMargin = 8
+            lp.bottomMargin = 8
+            layoutParams = lp
             setOnClickListener { createNewNote() }
         }
         container.addView(addButton)
@@ -1066,7 +1061,9 @@ class FloatingBubbleService : Service() {
             textSize = 18f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 32).apply { topMargin = 4 }
+            val lp = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 32)
+            lp.topMargin = 4
+            layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
         }
         container.addView(resizeHandleView)
@@ -1169,7 +1166,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ Enhanced EditText with all requested features
+        // Enhanced EditText with all requested features
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1193,10 +1190,13 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Long press on empty area - action bar show (select all)
+            // Touch handling variables
+            var lastTapTime = 0L
+            var touchDownTime = 0L
+            
+            // Long press on empty area - select all + action bar show
             setOnLongClickListener {
                 if (text.toString().isEmpty()) {
-                    // Empty area long press - select all (nothing to select but show message)
                     Toast.makeText(context, "No text to select", Toast.LENGTH_SHORT).show()
                 } else {
                     selectAll()
@@ -1211,15 +1211,11 @@ class FloatingBubbleService : Service() {
                 true
             }
             
-            // ✅ Touch handling for single tap hide, double tap show, drag extend
-            private var lastTapTime = 0L
-            private var isDraggingToExtend = false
-            
             setOnTouchListener(object : View.OnTouchListener {
-                private var lastTouchTime = 0L
                 private var lastTouchX = 0f
                 private var lastTouchY = 0f
-                private var touchDownTime = 0L
+                private var isDraggingToExtend = false
+                private var lastSingleTapTime = 0L
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
@@ -1235,28 +1231,23 @@ class FloatingBubbleService : Service() {
                             val dx = abs(event.x - lastTouchX)
                             val dy = abs(event.y - lastTouchY)
                             if (dx > 20 || dy > 20) {
-                                // User is dragging to extend selection
                                 isDraggingToExtend = true
                                 if (editText.hasSelection()) {
-                                    // Keep action bar visible while dragging
                                     v.parent.requestDisallowInterceptTouchEvent(true)
                                 }
                             }
                             return false
                         }
                         MotionEvent.ACTION_UP -> {
-                            val tapDuration = System.currentTimeMillis() - touchDownTime
-                            val isDoubleTap = (System.currentTimeMillis() - lastTapTime) < 300
-                            lastTapTime = System.currentTimeMillis()
+                            val isDoubleTap = (System.currentTimeMillis() - lastSingleTapTime) < 300
+                            lastSingleTapTime = System.currentTimeMillis()
                             
                             if (!isDraggingToExtend) {
                                 if (isDoubleTap) {
-                                    // ✅ Double tap on text - single word select and action bar show
+                                    // Double tap - select word or all
                                     if (editText.hasSelection()) {
-                                        // Already has selection, clear and select word
                                         selectWordAtCursor()
                                     } else {
-                                        // Double tap on empty area - action bar show (select all)
                                         if (text.toString().isNotEmpty()) {
                                             selectAll()
                                             val allText = text.toString()
@@ -1271,9 +1262,8 @@ class FloatingBubbleService : Service() {
                                         }
                                     }
                                 } else {
-                                    // ✅ Single tap - hide action bar and clear selection
+                                    // Single tap - hide action bar and clear selection
                                     if (editText.hasSelection()) {
-                                        // Clear selection
                                         val endPos = editText.selectionEnd
                                         editText.setSelection(endPos)
                                     }
@@ -1281,7 +1271,7 @@ class FloatingBubbleService : Service() {
                                     hideFloatingActionBar()
                                 }
                             } else {
-                                // Dragging ended, update selection
+                                // Dragging ended
                                 if (editText.hasSelection()) {
                                     val (start, end) = getSelection()
                                     if (start != end) {
@@ -1341,14 +1331,17 @@ class FloatingBubbleService : Service() {
 
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 16 }
+            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            (layoutParams as LinearLayout.LayoutParams).topMargin = 16
         }
 
         val saveBtn = Button(this).apply {
             text = "Save"
             setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
+            val lp = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            lp.marginEnd = 8
+            layoutParams = lp
             setOnClickListener { saveCurrentNote(note.id) }
         }
         buttonRow.addView(saveBtn)
@@ -1376,7 +1369,8 @@ class FloatingBubbleService : Service() {
             text = "Share"
             setBackgroundColor(Color.parseColor("#2196F3"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 8 }
+            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            (layoutParams as LinearLayout.LayoutParams).topMargin = 8
             setOnClickListener {
                 val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                     type = "text/plain"
@@ -1394,7 +1388,9 @@ class FloatingBubbleService : Service() {
             textSize = 18f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 32).apply { topMargin = 8 }
+            val lp = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 32)
+            lp.topMargin = 8
+            layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
         }
         contentContainer.addView(resizeHandleView)
