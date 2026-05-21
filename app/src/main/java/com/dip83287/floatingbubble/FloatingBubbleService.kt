@@ -34,7 +34,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -89,21 +88,18 @@ class FloatingBubbleService : Service() {
     private var velocityTracker: VelocityTracker? = null
     private var velocityY = 0f
 
-    // Action Bar
     private var floatingActionBar: View? = null
     private var actionBarWindowManager: WindowManager? = null
     private var isActionBarShowing = false
     private var isActionBarHiddenDueToScroll = false
     private var currentSelectedWord = ""
     
-    // Selection Handles (Water drop style)
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
     private var isUserDraggingSelection = false
     
-    // Scroll handling
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
 
@@ -113,15 +109,13 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
     
-    // Track selection state
     private var lastSelectionStart = -1
     private var lastSelectionEnd = -1
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
     private var lastTouchY = 0f
-    private var isLongPressing = false
-    private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
+    private var longPressHandler: Handler? = null
 
     data class NoteItem(
         val id: Long,
@@ -660,7 +654,6 @@ class FloatingBubbleService : Service() {
                     if (isLeft) isDraggingLeftHandle = true
                     else isDraggingRightHandle = true
                     isUserDraggingSelection = true
-                    // Don't hide action bar while dragging
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -830,7 +823,6 @@ class FloatingBubbleService : Service() {
             background = shape
         }
         
-        // Chrome button - Google search
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -846,7 +838,6 @@ class FloatingBubbleService : Service() {
         actionBarView.addView(chromeBtn)
         actionBarView.addView(createDivider())
         
-        // Cut button
         val cutBtn = TextView(this).apply {
             text = "Cut"
             textSize = 13f
@@ -869,7 +860,6 @@ class FloatingBubbleService : Service() {
         actionBarView.addView(cutBtn)
         actionBarView.addView(createDivider())
         
-        // Copy button
         val copyBtn = TextView(this).apply {
             text = "Copy"
             textSize = 13f
@@ -886,7 +876,6 @@ class FloatingBubbleService : Service() {
         actionBarView.addView(copyBtn)
         actionBarView.addView(createDivider())
         
-        // Paste button
         val pasteBtn = TextView(this).apply {
             text = "Paste"
             textSize = 13f
@@ -908,7 +897,6 @@ class FloatingBubbleService : Service() {
         actionBarView.addView(pasteBtn)
         actionBarView.addView(createDivider())
         
-        // Select All button
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -925,7 +913,6 @@ class FloatingBubbleService : Service() {
         actionBarView.addView(selectAllBtn)
         actionBarView.addView(createDivider())
         
-        // Share button
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -950,7 +937,6 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
-        // Position action bar 15px above selected text
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         val layout = editText.layout
@@ -969,7 +955,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt() - 50
-            params.y = (y - 65).toInt() // 15px above selection (50px offset + 15px gap)
+            params.y = (y - 65).toInt()
             try { actionBarWindowManager?.addView(floatingActionBar, params) } catch (_: Exception) { }
         }
         isActionBarShowing = true
@@ -1189,7 +1175,6 @@ class FloatingBubbleService : Service() {
             setPadding(0, 0, 0, 0)
             isFocusable = false
             isFocusableInTouchMode = false
-            // Handle scroll events to hide action bar
             viewTreeObserver.addOnScrollChangedListener {
                 if (editText.hasSelection()) {
                     temporarilyHideActionBarOnScroll()
@@ -1198,7 +1183,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ==================== ENHANCED EDITTEXT WITH PROPER SELECTION BEHAVIOR ====================
+        // ==================== ENHANCED EDITTEXT ====================
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1222,13 +1207,12 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // LONG PRESS: Select word at cursor and show action bar
+            // LONG PRESS: Select word at cursor
             setOnLongClickListener {
                 selectWordAtCursor()
                 true
             }
             
-            // Combined touch handler for single tap, double tap, and selection tracking
             var doubleTapDetected = false
             
             setOnTouchListener(object : View.OnTouchListener {
@@ -1239,21 +1223,18 @@ class FloatingBubbleService : Service() {
                             val x = event.x
                             val y = event.y
                             
-                            // Check for double tap (within 300ms and within 50px)
+                            // Check for double tap
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
                                 doubleTapDetected = true
-                                // Double tap: select word at cursor
                                 selectWordAtCursor()
                             } else {
                                 doubleTapDetected = false
-                                // Start long press detection for empty area
-                                longPressRunnable = Runnable {
+                                // Start long press detection
+                                val runnable = Runnable {
                                     if (!doubleTapDetected && !hasSelection()) {
-                                        // Long press on empty area - show action bar only if there's text
                                         if (text.isNotEmpty() && selectionStart == selectionEnd) {
-                                            // Show action bar with current word or select a word
                                             val word = getWordAtPosition(x, y)
                                             if (word.isNotEmpty()) {
                                                 selectWordManually(word)
@@ -1261,7 +1242,8 @@ class FloatingBubbleService : Service() {
                                         }
                                     }
                                 }
-                                longPressHandler?.postDelayed(longPressRunnable, 500)
+                                longPressRunnable = runnable
+                                longPressHandler?.postDelayed(runnable, 500)
                             }
                             
                             lastTouchTime = currentTime
@@ -1273,10 +1255,10 @@ class FloatingBubbleService : Service() {
                         }
                         
                         MotionEvent.ACTION_UP -> {
-                            // Cancel long press if finger lifted
+                            // Cancel long press
                             longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
                             
-                            // After selection ends, show action bar if text is selected
+                            // After selection ends, show action bar
                             if (hasSelection()) {
                                 val selected = text.substring(selectionStart, selectionEnd)
                                 if (selected.isNotEmpty()) {
@@ -1286,7 +1268,6 @@ class FloatingBubbleService : Service() {
                                     showSelectionHandles()
                                 }
                             } else {
-                                // No selection - hide action bar
                                 hideActionBar()
                                 hideSelectionHandles()
                             }
@@ -1296,7 +1277,6 @@ class FloatingBubbleService : Service() {
                 }
             })
             
-            // Track selection changes
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
