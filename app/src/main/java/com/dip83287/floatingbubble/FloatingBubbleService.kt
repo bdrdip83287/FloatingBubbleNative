@@ -1469,7 +1469,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ FIXED EditText with proper long press word selection
+        // ✅ FIXED EditText with proper long press word selection (no smart cast issue)
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1525,12 +1525,13 @@ class FloatingBubbleService : Service() {
                             } else {
                                 // Start long press detection
                                 isLongPressed = false
-                                longPressRunnable = Runnable {
+                                val runnable = Runnable {
                                     isLongPressed = true
                                     // Long press detected - select word at touch position
                                     selectWordAtPosition(this@apply, x, y)
                                 }
-                                longPressHandler.postDelayed(longPressRunnable, 300)
+                                longPressRunnable = runnable
+                                longPressHandler.postDelayed(runnable, 300)
                             }
                             
                             lastTouchTime = currentTime
@@ -1570,8 +1571,11 @@ class FloatingBubbleService : Service() {
                 }
                 
                 private fun cancelLongPress() {
-                    longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                    longPressRunnable = null
+                    val runnable = longPressRunnable
+                    if (runnable != null) {
+                        longPressHandler.removeCallbacks(runnable)
+                        longPressRunnable = null
+                    }
                 }
             })
             
