@@ -14,6 +14,12 @@ import android.graphics.PixelFormat
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -100,7 +106,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Tear drop selection handles
+    // Programmatic tear drop selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -746,21 +752,67 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ TEAR DROP Selection Handles - Custom drawable
+    // ✅ Programmatic Tear Drop Selection Handles
+    private fun createTearDropDrawable(isLeft: Boolean): Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#2196F3")
+                style = Paint.Style.FILL
+            }
+            private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+            }
+            private val path = Path()
+            
+            override fun draw(canvas: Canvas) {
+                val width = bounds.width().toFloat()
+                val height = bounds.height().toFloat()
+                
+                path.reset()
+                
+                if (isLeft) {
+                    // Left handle tear drop (pointing left)
+                    path.moveTo(width, height * 0.15f)
+                    path.cubicTo(width * 0.6f, height * 0.15f, width * 0.3f, height * 0.4f, width * 0.1f, height * 0.5f)
+                    path.cubicTo(width * 0.3f, height * 0.6f, width * 0.6f, height * 0.85f, width, height * 0.85f)
+                    path.cubicTo(width, height * 0.7f, width * 0.8f, height * 0.5f, width * 0.8f, height * 0.5f)
+                    path.cubicTo(width * 0.8f, height * 0.5f, width, height * 0.3f, width, height * 0.15f)
+                } else {
+                    // Right handle tear drop (pointing right)
+                    path.moveTo(0f, height * 0.15f)
+                    path.cubicTo(width * 0.4f, height * 0.15f, width * 0.7f, height * 0.4f, width * 0.9f, height * 0.5f)
+                    path.cubicTo(width * 0.7f, height * 0.6f, width * 0.4f, height * 0.85f, 0f, height * 0.85f)
+                    path.cubicTo(0f, height * 0.7f, width * 0.2f, height * 0.5f, width * 0.2f, height * 0.5f)
+                    path.cubicTo(width * 0.2f, height * 0.5f, 0f, height * 0.3f, 0f, height * 0.15f)
+                }
+                
+                path.close()
+                canvas.drawPath(path, paint)
+                canvas.drawPath(path, borderPaint)
+            }
+            
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+        }
+    }
+    
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 48
         
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(ContextCompat.getDrawable(this@FloatingBubbleService, R.drawable.tear_drop_handle))
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setImageDrawable(createTearDropDrawable(true))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(8, 8, 8, 8)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(ContextCompat.getDrawable(this@FloatingBubbleService, R.drawable.tear_drop_handle))
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            // Flip the tear drop for right handle to face outward
-            rotation = 180f
+            setImageDrawable(createTearDropDrawable(false))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(8, 8, 8, 8)
             setOnTouchListener(HandleTouchListener(isLeft = false))
         }
         
@@ -796,7 +848,6 @@ class FloatingBubbleService : Service() {
                     }
                     lastUpdateTime = currentTime
                     
-                    val dx = event.rawX - initialTouchX
                     val layout = editText.layout
                     
                     if (layout != null) {
