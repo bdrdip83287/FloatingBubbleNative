@@ -1426,7 +1426,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ IMPROVED LONG PRESS: Gets word from touch coordinates, not cursor position
+        // ✅ FIXED: Long press selects the word under long press location, regardless of cursor position
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1456,120 +1456,89 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ KEY FIX: Get the word at touch position using coordinate mapping
+            // ✅ CRITICAL FIX: Get word at specific screen coordinates, not cursor position
             setOnLongClickListener {
-                // Get the touch coordinates from the motion event (if available)
-                // We use the last touch position from the onTouch event
-                true // Return true to indicate we handled the long press
+                // We need to find which word the user long-pressed on
+                // To do this properly, we need to get the coordinates from the touch event
+                // The touch coordinates are passed through the OnTouchListener
+                true // Return true to indicate we handled it, actual selection happens in OnTouchListener
             }
             
-            // Touch listener to capture coordinates and handle word selection
-            var lastTouchX = 0f
-            var lastTouchY = 0f
-            var isLongPressHandled = false
-            
-            setOnTouchListener { v, event ->
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        lastTouchX = event.x
-                        lastTouchY = event.y
-                        isLongPressHandled = false
-                        
-                        val currentTime = System.currentTimeMillis()
-                        // Check for double tap
-                        if (currentTime - (tag as? Long ?: 0) < 300) {
-                            // Double tap - select word at touch position
-                            selectWordAtCoordinates(lastTouchX, lastTouchY)
+            // ✅ Main touch handler for long press word selection
+            setOnTouchListener(object : View.OnTouchListener {
+                private var lastTouchTime = 0L
+                private var lastTouchX = 0f
+                private var lastTouchY = 0f
+                private var isLongPressed = false
+                private val longPressHandler = Handler(Looper.getMainLooper())
+                private var longPressRunnable: Runnable? = null
+                
+                override fun onTouch(v: View, event: MotionEvent): Boolean {
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            val currentTime = System.currentTimeMillis()
+                            val x = event.x
+                            val y = event.y
+                            
+                            // Check for double tap
+                            if (currentTime - lastTouchTime < 300 && 
+                                Math.abs(x - lastTouchX) < 50 && 
+                                Math.abs(y - lastTouchY) < 50) {
+                                // Double tap - select word at touch position
+                                cancelLongPress()
+                                selectWordAtPosition(x, y)
+                            } else {
+                                // Start long press detection
+                                isLongPressed = false
+                                longPressRunnable = Runnable {
+                                    isLongPressed = true
+                                    // Long press detected - select word at touch position
+                                    selectWordAtPosition(x, y)
+                                }
+                                longPressHandler.postDelayed(longPressRunnable, 300)
+                            }
+                            
+                            lastTouchTime = currentTime
+                            lastTouchX = x
+                            lastTouchY = y
+                            v.parent.requestDisallowInterceptTouchEvent(false)
                         }
-                        tag = currentTime
                         
-                        v.parent.requestDisallowInterceptTouchEvent(false)
-                        false // Let EditText handle touch normally
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        if (!isLongPressHandled && editText.hasSelection()) {
-                            val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
-                            if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                isActionBarTemporarilyHidden = false
-                                showFloatingActionBar(selected)
-                                showSelectionHandles()
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            cancelLongPress()
+                            
+                            // If selection exists, show action bar
+                            if (editText.hasSelection()) {
+                                val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
+                                if (selected.isNotEmpty()) {
+                                    currentSelectedText = selected
+                                    isActionBarTemporarilyHidden = false
+                                    showFloatingActionBar(selected)
+                                    showSelectionHandles()
+                                }
+                            } else {
+                                hideSelectionHandles()
+                                hideFloatingActionBar()
                             }
                         }
-                        false
+                        
+                        MotionEvent.ACTION_MOVE -> {
+                            // If moving, cancel long press
+                            val dx = Math.abs(event.x - lastTouchX)
+                            val dy = Math.abs(event.y - lastTouchY)
+                            if (dx > 10 || dy > 10) {
+                                cancelLongPress()
+                            }
+                        }
                     }
-                    else -> false
+                    return false
                 }
-            }
-            
-            // Handle long press using GestureDetector
-            val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-                override fun onLongPress(e: MotionEvent) {
-                    val x = e.x
-                    val y = e.y
-                    isLongPressHandled = true
-                    selectWordAtCoordinates(x, y)
+                
+                private fun cancelLongPress() {
+                    longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                    longPressRunnable = null
                 }
             })
-            
-            setOnTouchListener { v, event ->
-                gestureDetector.onTouchEvent(event)
-                // Let the previous listener also process
-                val oldListener = onTouchListeners.firstOrNull()
-                if (oldListener != null) {
-                    oldListener.onTouch(v, event)
-                } else {
-                    false
-                }
-            }
-            
-            // Function to select word at given coordinates
-            val selectWordAtCoordinates = { x: Float, y: Float ->
-                try {
-                    val layout = layout
-                    if (layout != null) {
-                        // Convert touch coordinates to character offset
-                        val line = layout.getLineForVertical((y + scrollY).toInt())
-                        val offset = layout.getOffsetForHorizontal(line, x)
-                        
-                        val textContent = text.toString()
-                        if (offset >= 0 && offset <= textContent.length) {
-                            // Find word boundaries
-                            var wordStart = offset
-                            var wordEnd = offset
-                            
-                            while (wordStart > 0 && wordStart <= textContent.length && 
-                                   textContent[wordStart - 1].isLetterOrDigit()) {
-                                wordStart--
-                            }
-                            while (wordEnd < textContent.length && 
-                                   textContent[wordEnd].isLetterOrDigit()) {
-                                wordEnd++
-                            }
-                            
-                            if (wordStart < wordEnd) {
-                                // Clear previous selection and select new word
-                                setSelection(wordStart, wordEnd)
-                                val selectedWord = textContent.substring(wordStart, wordEnd)
-                                currentSelectedText = selectedWord
-                                isActionBarTemporarilyHidden = false
-                                showFloatingActionBar(selectedWord)
-                                showSelectionHandles()
-                                EmergencyLog.log("Long press selected word: '$selectedWord' at offset $offset")
-                            }
-                        }
-                    }
-                } catch (ex: Exception) {
-                    EmergencyLog.logException(ex, "selectWordAtCoordinates")
-                }
-            }
-            
-            // Store multiple listeners
-            val onTouchListeners = mutableListOf<View.OnTouchListener>()
-            addOnTouchListener { v, event ->
-                gestureDetector.onTouchEvent(event)
-                false
-            }
             
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -1714,9 +1683,47 @@ class FloatingBubbleService : Service() {
         }, 300)
     }
     
-    // Helper function to add touch listener
-    private fun EditText.addOnTouchListener(listener: View.OnTouchListener) {
-        setOnTouchListener(listener)
+    // Helper function to select word at specific screen coordinates
+    private fun selectWordAtPosition(x: Float, y: Float) {
+        try {
+            val layout = editText.layout
+            if (layout != null) {
+                // Convert screen coordinates to text offset
+                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = layout.getOffsetForHorizontal(line, x)
+                
+                val text = editText.text.toString()
+                if (offset >= 0 && offset <= text.length) {
+                    // Find word boundaries
+                    var wordStart = offset
+                    var wordEnd = offset
+                    
+                    // Move left to find word start
+                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
+                        wordStart--
+                    }
+                    
+                    // Move right to find word end
+                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
+                        wordEnd++
+                    }
+                    
+                    // Select the word
+                    if (wordStart < wordEnd) {
+                        // Clear any existing selection
+                        editText.setSelection(wordStart, wordEnd)
+                        val selectedWord = text.substring(wordStart, wordEnd)
+                        currentSelectedText = selectedWord
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selectedWord)
+                        showSelectionHandles()
+                        EmergencyLog.log("Long press selected word: '$selectedWord' at offset $offset")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "selectWordAtPosition")
+        }
     }
     
     private fun selectWordAtCursor() {
