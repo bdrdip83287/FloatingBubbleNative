@@ -58,8 +58,6 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_HEIGHT = 850
 
     private val STORAGE_NOTES_LIST = "notes_list"
-
-    // ✅ নতুন: বাবল প্রথমবার তৈরি হলে ডিফল্ট অবস্থান ট্র্যাক করার জন্য
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
     private lateinit var prefs: SharedPreferences
@@ -97,15 +95,18 @@ class FloatingBubbleService : Service() {
     private var velocityTracker: VelocityTracker? = null
     private var velocityY = 0f
 
+    // Custom Selection Action Bar (Native Android style)
     private var floatingActionBar: View? = null
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
+    // Selection handles (Water drop style like native Android)
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
 
+    // Action bar hide/show on scroll
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
     private var isActionBarTemporarilyHidden = false
@@ -280,30 +281,21 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
-    // ✅ আপডেটেড: বাবল অবস্থান নির্ধারণ - প্রথমবার বা ডিলিটের পর ডান পাশে 150px নিচে
     private fun getInitialBubblePosition(displayMetrics: android.util.DisplayMetrics): Pair<Int, Int> {
         val screenWidth = displayMetrics.widthPixels
-        val screenHeight = displayMetrics.heightPixels
-        
-        // চেক করুন এটি প্রথমবার বাবল তৈরি হচ্ছে কিনা
         val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
         
         return if (isFirstTime) {
-            // প্রথমবার বা ডিলিটের পর: ডান পাশে, 150px নিচে
-            val defaultX = screenWidth - BUBBLE_SIZE - 20  // ডান পাশে (20px margin)
-            val defaultY = 150  // উপরে থেকে 150px নিচে
-            EmergencyLog.log("First time bubble - position: x=$defaultX, y=$defaultY")
+            val defaultX = screenWidth - BUBBLE_SIZE - 20
+            val defaultY = 150
             Pair(defaultX, defaultY)
         } else {
-            // আগের সেভ করা অবস্থান
             val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
             val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
-            EmergencyLog.log("Restored bubble position: x=$savedX, y=$savedY")
             Pair(savedX, savedY)
         }
     }
     
-    // ✅ বাবল তৈরি হওয়ার পর first-time flag অফ করে দিন
     private fun markBubbleCreated() {
         if (prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)) {
             prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, false).apply()
@@ -311,7 +303,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ বাবল ডিলিট করার সময় flag রিসেট করুন
     private fun resetFirstTimeFlag() {
         prefs.edit().putBoolean(KEY_FIRST_TIME_BUBBLE, true).apply()
         EmergencyLog.log("First time bubble flag reset (bubble deleted)")
@@ -368,8 +359,6 @@ class FloatingBubbleService : Service() {
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
-            
-            // প্রথমবার তৈরি হলে flag অফ করুন
             markBubbleCreated()
             
             EmergencyLog.log("Bubble created at position: x=${params.x}, y=${params.y}")
@@ -449,7 +438,6 @@ class FloatingBubbleService : Service() {
 
                         if (isInDeleteZone) {
                             EmergencyLog.log("Bubble deleted via delete zone")
-                            // ✅ বাবল ডিলিট হলে first-time flag রিসেট করুন
                             resetFirstTimeFlag()
                             deleteBubble()
                             return true
@@ -556,7 +544,6 @@ class FloatingBubbleService : Service() {
                     windowManager.updateViewLayout(bubbleView!!, params)
                     applyTinySpringEffect(params, targetX.toInt())
                     
-                    // ✅ অবস্থান সেভ করুন
                     saveBubblePosition(params.x, params.y)
                     EmergencyLog.log("Bubble position saved: x=${params.x}, y=${params.y}")
                 }
@@ -760,6 +747,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // Create Selection Handles - Water drop style (like native Android)
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 36
         
@@ -788,6 +776,7 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
+    // Handle Touch Listener for dragging selection (like native Android)
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -988,6 +977,7 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
+    // ✅ Native Android Style Action Bar - Positioned above selected text
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -1008,6 +998,7 @@ class FloatingBubbleService : Service() {
             background = shape
         }
         
+        // Google Chrome Search Button
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -1024,6 +1015,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Cut Button
         val cutBtn = TextView(this).apply {
             text = "Cut"
             textSize = 13f
@@ -1046,6 +1038,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Copy Button
         val copyBtn = TextView(this).apply {
             text = "Copy"
             textSize = 13f
@@ -1063,6 +1056,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Paste Button
         val pasteBtn = TextView(this).apply {
             text = "Paste"
             textSize = 13f
@@ -1084,6 +1078,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Select All Button
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -1101,6 +1096,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Share Button
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1129,6 +1125,7 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
+        // Position action bar above selected text (native Android style)
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
@@ -1150,7 +1147,7 @@ class FloatingBubbleService : Service() {
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = x.toInt() - 50
-            params.y = (y - 120).toInt()
+            params.y = (y - 80).toInt() // Position above selected text
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
@@ -1442,6 +1439,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
+        // ✅ EditText with full native selection support
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1451,17 +1449,18 @@ class FloatingBubbleService : Service() {
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             
             setLineSpacing(0f, 1.15f)
-            
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
             
+            // ✅ Input configuration for good editing
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
+            // ✅ Native selection support
             setTextIsSelectable(true)
             isLongClickable = true
             customInsertionActionModeCallback = null
@@ -1472,11 +1471,13 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
+            // ✅ Long press to select word
             setOnLongClickListener {
                 selectWordAtCursor()
                 true
             }
             
+            // ✅ Touch listener for selection handling
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
