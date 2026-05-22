@@ -32,6 +32,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.doOnLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -99,6 +100,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
+    // Tear drop selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -744,39 +746,30 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ IMPROVED Selection Handles - Always positioned at selection boundaries
+    // ✅ TEAR DROP Selection Handles - Custom drawable
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 48  // Slightly larger for better touch
+        val handleSize = 48
         
-        val leftHandle = View(this).apply {
-            val shape = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#2196F3"))
-                setStroke(3, Color.WHITE)
-                setSize(handleSize, handleSize)
-            }
-            background = shape
+        val leftHandle = ImageView(this).apply {
+            setImageDrawable(ContextCompat.getDrawable(this@FloatingBubbleService, R.drawable.tear_drop_handle))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
-        val rightHandle = View(this).apply {
-            val shape = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#2196F3"))
-                setStroke(3, Color.WHITE)
-                setSize(handleSize, handleSize)
-            }
-            background = shape
+        val rightHandle = ImageView(this).apply {
+            setImageDrawable(ContextCompat.getDrawable(this@FloatingBubbleService, R.drawable.tear_drop_handle))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            // Flip the tear drop for right handle to face outward
+            rotation = 180f
             setOnTouchListener(HandleTouchListener(isLeft = false))
         }
         
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ IMPROVED Handle Touch Listener - Smooth dragging for selection adjustment
+    // Handle Touch Listener for smooth dragging
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
-        private var initialTouchY = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
@@ -785,7 +778,6 @@ class FloatingBubbleService : Service() {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialTouchX = event.rawX
-                    initialTouchY = event.rawY
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
@@ -799,37 +791,31 @@ class FloatingBubbleService : Service() {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val currentTime = System.currentTimeMillis()
-                    // Throttle updates for smooth performance (every 16ms ~60fps)
                     if (currentTime - lastUpdateTime < 16) {
                         return true
                     }
                     lastUpdateTime = currentTime
                     
                     val dx = event.rawX - initialTouchX
-                    val dy = event.rawY - initialTouchY
                     val layout = editText.layout
                     
                     if (layout != null) {
-                        // Get touch position in EditText coordinates
                         val location = IntArray(2)
                         editText.getLocationOnScreen(location)
                         val textX = event.rawX - location[0]
                         val textY = event.rawY - location[1] + editText.scrollY
                         
-                        // Find the line and offset at touch position
                         val line = layout.getLineForVertical(textY.toInt())
                         val offset = layout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
                         if (isLeft) {
-                            // For left handle: adjust selection start
                             if (newOffset < initialSelectionEnd) {
                                 editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
                                 editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
-                            // For right handle: adjust selection end
                             if (newOffset > initialSelectionStart) {
                                 editText.setSelection(initialSelectionStart, newOffset)
                             } else {
@@ -837,10 +823,8 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // Update handle positions
                         updateHandlePositions()
                         
-                        // Update action bar with new selection
                         val (start, end) = getSelection()
                         if (start != end && start >= 0 && end <= editText.text.length) {
                             val selected = editText.text.substring(start, end)
@@ -862,7 +846,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Update handle positions to always be at selection boundaries
+    // Update handle positions at selection boundaries
     private fun updateHandlePositions() {
         val start = editText.selectionStart
         val end = editText.selectionEnd
@@ -891,24 +875,24 @@ class FloatingBubbleService : Service() {
         val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
         
-        // Left handle - positioned at start of selection
+        // Left handle at start of selection
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = (startX - 24).toInt()  // Center handle on cursor
-                params.y = (startY - 24).toInt()
+                params.x = (startX - 24).toInt()
+                params.y = (startY - 30).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (e: Exception) { }
             }
         }
         
-        // Right handle - positioned at end of selection
+        // Right handle at end of selection
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = (endX - 24).toInt()  // Center handle on cursor
-                params.y = (endY - 48).toInt()
+                params.x = (endX - 24).toInt()
+                params.y = (endY - 30).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (e: Exception) { }
@@ -932,12 +916,10 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        // Get start cursor position
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
         val startY = layout.getLineTop(startLine) + location[1]
         
-        // Get end cursor position
         val endLine = layout.getLineForOffset(end)
         val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
@@ -954,7 +936,7 @@ class FloatingBubbleService : Service() {
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
             leftParams.x = (startX - 24).toInt()
-            leftParams.y = (startY - 24).toInt()
+            leftParams.y = (startY - 30).toInt()
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
             } catch (e: Exception) { }
@@ -972,7 +954,7 @@ class FloatingBubbleService : Service() {
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
             rightParams.x = (endX - 24).toInt()
-            rightParams.y = (endY - 48).toInt()
+            rightParams.y = (endY - 30).toInt()
             try {
                 actionBarWindowManager?.addView(rightHandleView, rightParams)
             } catch (e: Exception) { }
