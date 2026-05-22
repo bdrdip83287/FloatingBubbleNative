@@ -10,9 +10,9 @@ android {
     defaultConfig {
         applicationId "com.dip83287.floatingbubble"
         minSdk 23
-        targetSdk 34
-        versionCode 4
-        versionName "1.3"
+        targetSdk 33
+        versionCode 3
+        versionName "1.2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -34,11 +34,11 @@ android {
         }
         release {
             signingConfig signingConfigs.debug
-            minifyEnabled true
+            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
-
+    
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
