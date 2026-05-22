@@ -1324,6 +1324,49 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
+    // Helper function to select word at specific screen coordinates
+    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
+        try {
+            val layout = editText.layout
+            if (layout != null) {
+                // Convert screen coordinates to text offset
+                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = layout.getOffsetForHorizontal(line, x)
+                
+                val text = editText.text.toString()
+                if (offset >= 0 && offset <= text.length) {
+                    // Find word boundaries
+                    var wordStart = offset
+                    var wordEnd = offset
+                    
+                    // Move left to find word start
+                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
+                        wordStart--
+                    }
+                    
+                    // Move right to find word end
+                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
+                        wordEnd++
+                    }
+                    
+                    // Select the word
+                    if (wordStart < wordEnd) {
+                        // Clear any existing selection
+                        editText.setSelection(wordStart, wordEnd)
+                        val selectedWord = text.substring(wordStart, wordEnd)
+                        currentSelectedText = selectedWord
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selectedWord)
+                        showSelectionHandles()
+                        EmergencyLog.log("Long press selected word: '$selectedWord' at offset $offset")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "selectWordAtPosition")
+        }
+    }
+
     private fun openEditorForNote(note: NoteItem) {
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -1426,7 +1469,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ FIXED: Long press selects the word under long press location, regardless of cursor position
+        // ✅ FIXED EditText with proper long press word selection
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1456,14 +1499,6 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ CRITICAL FIX: Get word at specific screen coordinates, not cursor position
-            setOnLongClickListener {
-                // We need to find which word the user long-pressed on
-                // To do this properly, we need to get the coordinates from the touch event
-                // The touch coordinates are passed through the OnTouchListener
-                true // Return true to indicate we handled it, actual selection happens in OnTouchListener
-            }
-            
             // ✅ Main touch handler for long press word selection
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
@@ -1486,14 +1521,14 @@ class FloatingBubbleService : Service() {
                                 Math.abs(y - lastTouchY) < 50) {
                                 // Double tap - select word at touch position
                                 cancelLongPress()
-                                selectWordAtPosition(x, y)
+                                selectWordAtPosition(this@apply, x, y)
                             } else {
                                 // Start long press detection
                                 isLongPressed = false
                                 longPressRunnable = Runnable {
                                     isLongPressed = true
                                     // Long press detected - select word at touch position
-                                    selectWordAtPosition(x, y)
+                                    selectWordAtPosition(this@apply, x, y)
                                 }
                                 longPressHandler.postDelayed(longPressRunnable, 300)
                             }
@@ -1508,8 +1543,8 @@ class FloatingBubbleService : Service() {
                             cancelLongPress()
                             
                             // If selection exists, show action bar
-                            if (editText.hasSelection()) {
-                                val selected = editText.text.substring(editText.selectionStart, editText.selectionEnd)
+                            if (this@apply.hasSelection()) {
+                                val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
@@ -1544,7 +1579,7 @@ class FloatingBubbleService : Service() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!hasSelection()) {
+                    if (!this@apply.hasSelection()) {
                         hideSelectionHandles()
                         hideFloatingActionBar()
                     } else {
@@ -1681,49 +1716,6 @@ class FloatingBubbleService : Service() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
         }, 300)
-    }
-    
-    // Helper function to select word at specific screen coordinates
-    private fun selectWordAtPosition(x: Float, y: Float) {
-        try {
-            val layout = editText.layout
-            if (layout != null) {
-                // Convert screen coordinates to text offset
-                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
-                val offset = layout.getOffsetForHorizontal(line, x)
-                
-                val text = editText.text.toString()
-                if (offset >= 0 && offset <= text.length) {
-                    // Find word boundaries
-                    var wordStart = offset
-                    var wordEnd = offset
-                    
-                    // Move left to find word start
-                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
-                        wordStart--
-                    }
-                    
-                    // Move right to find word end
-                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
-                        wordEnd++
-                    }
-                    
-                    // Select the word
-                    if (wordStart < wordEnd) {
-                        // Clear any existing selection
-                        editText.setSelection(wordStart, wordEnd)
-                        val selectedWord = text.substring(wordStart, wordEnd)
-                        currentSelectedText = selectedWord
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selectedWord)
-                        showSelectionHandles()
-                        EmergencyLog.log("Long press selected word: '$selectedWord' at offset $offset")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "selectWordAtPosition")
-        }
     }
     
     private fun selectWordAtCursor() {
