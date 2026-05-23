@@ -18,6 +18,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -42,6 +43,9 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.cos
+import kotlin.math.PI
 
 class FloatingBubbleService : Service() {
 
@@ -112,19 +116,16 @@ class FloatingBubbleService : Service() {
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
-    // ✅ FIXED: Selection sync runnable with safety checks
+    // Selection sync runnable with safety checks
     private val selectionSyncRunnable = object : Runnable {
         override fun run() {
-            // ✅ IMPORTANT: Only run if editText is initialized and service is active
             try {
                 if (isExpanded && ::editText.isInitialized && editText.hasSelection()) {
                     updateHandlePositions()
                 }
             } catch (e: Exception) {
-                // Silent fail - prevent crash
                 EmergencyLog.logException(e, "selectionSyncRunnable")
             }
-            // Continue the loop
             if (isExpanded) {
                 editText.postDelayed(this, 16)
             }
@@ -667,7 +668,6 @@ class FloatingBubbleService : Service() {
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
                         
-                        // ✅ Start continuous selection sync AFTER notepad is fully expanded
                         if (::editText.isInitialized) {
                             editText.post(selectionSyncRunnable)
                         }
@@ -708,14 +708,11 @@ class FloatingBubbleService : Service() {
     private fun collapseToBubble() {
         if (!isExpanded) return
 
-        // ✅ Stop continuous sync before collapsing
         try {
             if (::editText.isInitialized) {
                 editText.removeCallbacks(selectionSyncRunnable)
             }
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "collapseToBubble-removeCallbacks")
-        }
+        } catch (e: Exception) { }
         
         hideSelectionHandles()
         hideFloatingActionBar()
@@ -780,11 +777,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // Create tear drop drawable
-    private fun createTearDropDrawable(isLeft: Boolean, isZoomed: Boolean = false): Drawable {
+    // ✅ CORRECTED: Native Android Style Tear Drop Selection Handle Drawable
+    private fun createTearDropDrawable(isLeft: Boolean): Drawable {
         return object : android.graphics.drawable.Drawable() {
             private val mainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#2196F3")
+                color = Color.parseColor("#4285F4")  // Google Blue color like native Android
                 style = Paint.Style.FILL
             }
             private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -793,15 +790,8 @@ class FloatingBubbleService : Service() {
                 strokeWidth = 3f
             }
             private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#88000000")
+                color = Color.parseColor("#40000000")
                 style = Paint.Style.FILL
-            }
-            private val path = Path()
-            private var scale = if (isZoomed) 1.25f else 1.0f
-            
-            fun setZoomed(zoomed: Boolean) {
-                scale = if (zoomed) 1.25f else 1.0f
-                invalidateSelf()
             }
             
             override fun draw(canvas: Canvas) {
@@ -810,32 +800,68 @@ class FloatingBubbleService : Service() {
                 val centerX = width / 2
                 val centerY = height / 2
                 
+                // Draw shadow
                 canvas.save()
-                canvas.scale(scale, scale, centerX, centerY)
+                canvas.translate(2f, 3f)
                 
-                path.reset()
-                
+                val shadowPath = Path()
                 if (isLeft) {
-                    path.moveTo(width * 0.85f, height * 0.15f)
-                    path.cubicTo(width * 0.5f, height * 0.1f, width * 0.15f, height * 0.3f, width * 0.05f, height * 0.5f)
-                    path.cubicTo(width * 0.15f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.85f, height * 0.85f)
-                    path.cubicTo(width * 0.7f, height * 0.65f, width * 0.7f, height * 0.35f, width * 0.85f, height * 0.15f)
-                    path.addCircle(width * 0.75f, height * 0.2f, width * 0.08f, Path.Direction.CW)
+                    // Left handle shadow
+                    shadowPath.moveTo(width * 0.9f, height * 0.2f)
+                    shadowPath.cubicTo(width * 0.6f, height * 0.15f, width * 0.2f, height * 0.35f, width * 0.1f, height * 0.5f)
+                    shadowPath.cubicTo(width * 0.2f, height * 0.65f, width * 0.6f, height * 0.85f, width * 0.9f, height * 0.8f)
+                    shadowPath.cubicTo(width * 0.75f, height * 0.65f, width * 0.75f, height * 0.35f, width * 0.9f, height * 0.2f)
                 } else {
-                    path.moveTo(width * 0.15f, height * 0.15f)
-                    path.cubicTo(width * 0.5f, height * 0.1f, width * 0.85f, height * 0.3f, width * 0.95f, height * 0.5f)
-                    path.cubicTo(width * 0.85f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.15f, height * 0.85f)
-                    path.cubicTo(width * 0.3f, height * 0.65f, width * 0.3f, height * 0.35f, width * 0.15f, height * 0.15f)
-                    path.addCircle(width * 0.25f, height * 0.2f, width * 0.08f, Path.Direction.CW)
+                    // Right handle shadow
+                    shadowPath.moveTo(width * 0.1f, height * 0.2f)
+                    shadowPath.cubicTo(width * 0.4f, height * 0.15f, width * 0.8f, height * 0.35f, width * 0.9f, height * 0.5f)
+                    shadowPath.cubicTo(width * 0.8f, height * 0.65f, width * 0.4f, height * 0.85f, width * 0.1f, height * 0.8f)
+                    shadowPath.cubicTo(width * 0.25f, height * 0.65f, width * 0.25f, height * 0.35f, width * 0.1f, height * 0.2f)
                 }
+                shadowPath.close()
+                canvas.drawPath(shadowPath, shadowPaint)
+                canvas.restore()
                 
+                // Draw main tear drop shape
+                val path = Path()
+                if (isLeft) {
+                    // Left tear drop (pointing left) - like Android cursor handle
+                    // Start from top right corner
+                    path.moveTo(width * 0.9f, height * 0.2f)
+                    // Curve to the tip (pointing left)
+                    path.cubicTo(width * 0.6f, height * 0.15f, width * 0.2f, height * 0.35f, width * 0.08f, height * 0.5f)
+                    // Curve back to bottom right
+                    path.cubicTo(width * 0.2f, height * 0.65f, width * 0.6f, height * 0.85f, width * 0.9f, height * 0.8f)
+                    // Curve to create the rounded top
+                    path.cubicTo(width * 0.75f, height * 0.65f, width * 0.75f, height * 0.35f, width * 0.9f, height * 0.2f)
+                } else {
+                    // Right tear drop (pointing right) - like Android cursor handle
+                    // Start from top left corner
+                    path.moveTo(width * 0.1f, height * 0.2f)
+                    // Curve to the tip (pointing right)
+                    path.cubicTo(width * 0.4f, height * 0.15f, width * 0.8f, height * 0.35f, width * 0.92f, height * 0.5f)
+                    // Curve back to bottom left
+                    path.cubicTo(width * 0.8f, height * 0.65f, width * 0.4f, height * 0.85f, width * 0.1f, height * 0.8f)
+                    // Curve to create the rounded top
+                    path.cubicTo(width * 0.25f, height * 0.65f, width * 0.25f, height * 0.35f, width * 0.1f, height * 0.2f)
+                }
                 path.close()
                 
-                canvas.drawPath(path, shadowPaint)
+                // Draw main body
                 canvas.drawPath(path, mainPaint)
+                // Draw border
                 canvas.drawPath(path, borderPaint)
                 
-                canvas.restore()
+                // Draw a small white circle inside for better visibility
+                val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.WHITE
+                    alpha = 180
+                }
+                if (isLeft) {
+                    canvas.drawCircle(width * 0.75f, height * 0.5f, width * 0.12f, circlePaint)
+                } else {
+                    canvas.drawCircle(width * 0.25f, height * 0.5f, width * 0.12f, circlePaint)
+                }
             }
             
             override fun setAlpha(alpha: Int) {}
@@ -847,21 +873,17 @@ class FloatingBubbleService : Service() {
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 56
         
-        val leftDrawable = createTearDropDrawable(true, false)
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(leftDrawable)
+            setImageDrawable(createTearDropDrawable(true))
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(12, 12, 12, 12)
-            tag = leftDrawable
+            setPadding(8, 8, 8, 8)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
-        val rightDrawable = createTearDropDrawable(false, false)
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(rightDrawable)
+            setImageDrawable(createTearDropDrawable(false))
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(12, 12, 12, 12)
-            tag = rightDrawable
+            setPadding(8, 8, 8, 8)
             setOnTouchListener(HandleTouchListener(isLeft = false))
         }
         
@@ -873,7 +895,7 @@ class FloatingBubbleService : Service() {
         
         val targetScale = if (zoomIn) 1.2f else 1.0f
         handleZoomAnimator = ValueAnimator.ofFloat(1f, targetScale).apply {
-            duration = 120
+            duration = 100
             addUpdateListener { animator ->
                 val scale = animator.animatedValue as Float
                 handle.scaleX = scale
@@ -896,10 +918,7 @@ class FloatingBubbleService : Service() {
             }
             
             val layout = editText.layout
-            if (layout == null) {
-                hideSelectionHandles()
-                return
-            }
+            if (layout == null) return
             
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
