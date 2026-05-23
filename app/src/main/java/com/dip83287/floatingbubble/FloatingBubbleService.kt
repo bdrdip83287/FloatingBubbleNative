@@ -18,8 +18,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
+import android.graphics.ColorFilter
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -109,7 +108,6 @@ class FloatingBubbleService : Service() {
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
-    private var scrollListenerAttached = false
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -751,7 +749,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Native Android Style Selection Handles (Circle with center dot - like Android)
+    // ✅ Native Android Style Selection Handles (Circle with center dot)
     private fun createNativeSelectionHandle(isLeft: Boolean): Drawable {
         return object : Drawable() {
             private val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -853,7 +851,6 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // Update handle positions immediately
                         updateHandlePositions()
                         
                         val (start, end) = getSelection()
@@ -877,7 +874,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Update handle positions - follows selection exactly
     private fun updateHandlePositions() {
         val start = editText.selectionStart
         val end = editText.selectionEnd
@@ -896,17 +892,14 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        // Get start cursor position (accounts for scroll)
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
         val startY = layout.getLineTop(startLine) + location[1]
         
-        // Get end cursor position (accounts for scroll)
         val endLine = layout.getLineForOffset(end)
         val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
         
-        // Left handle at start of selection
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
@@ -918,7 +911,6 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // Right handle at end of selection
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
@@ -955,7 +947,6 @@ class FloatingBubbleService : Service() {
         val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
         
-        // Add left handle
         if (leftHandleView?.parent == null) {
             val leftParams = WindowManager.LayoutParams(
                 48, 48,
@@ -973,7 +964,6 @@ class FloatingBubbleService : Service() {
             } catch (e: Exception) { }
         }
         
-        // Add right handle
         if (rightHandleView?.parent == null) {
             val rightParams = WindowManager.LayoutParams(
                 48, 48,
@@ -1486,7 +1476,6 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // Update handle positions when scrolling
             viewTreeObserver.addOnScrollChangedListener {
                 if (editText.hasSelection()) {
                     updateHandlePositions()
