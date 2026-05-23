@@ -106,11 +106,15 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Programmatic tear drop selection handles
+    // Selection handles with zoom effect
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
+    
+    // For zoom effect
+    private var zoomAnimator: ValueAnimator? = null
+    private var lastHoverOffset = -1
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -283,7 +287,20 @@ class FloatingBubbleService : Service() {
             Handler(Looper.getMainLooper()).post { createBubble() }
         }
 
+        // Setup scroll listener for handle position updates
+        if (isExpanded && ::editText.isInitialized) {
+            setupScrollListener()
+        }
+
         return START_STICKY
+    }
+
+    private fun setupScrollListener() {
+        scrollView?.viewTreeObserver?.addOnScrollChangedListener {
+            if (editText.hasSelection()) {
+                updateHandlePositionsWithBoundsCheck()
+            }
+        }
     }
 
     private fun getInitialBubblePosition(displayMetrics: android.util.DisplayMetrics): Pair<Int, Int> {
@@ -652,6 +669,7 @@ class FloatingBubbleService : Service() {
 
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
+                        setupScrollListener()
                     }
                     .start()
             }
@@ -752,8 +770,8 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Programmatic Tear Drop Selection Handles
-    private fun createTearDropDrawable(isLeft: Boolean): Drawable {
+    // ✅ Programmatic Tear Drop Selection Handles with Zoom Effect
+    private fun createTearDropDrawable(isLeft: Boolean, scale: Float = 1f): Drawable {
         return object : android.graphics.drawable.Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
@@ -762,30 +780,50 @@ class FloatingBubbleService : Service() {
             private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.WHITE
                 style = Paint.Style.STROKE
-                strokeWidth = 2f
+                strokeWidth = 2f * scale
             }
             private val path = Path()
             
             override fun draw(canvas: Canvas) {
                 val width = bounds.width().toFloat()
                 val height = bounds.height().toFloat()
+                val scaledWidth = width * scale
+                val scaledHeight = height * scale
+                val offsetX = (width - scaledWidth) / 2
+                val offsetY = (height - scaledHeight) / 2
                 
                 path.reset()
                 
                 if (isLeft) {
                     // Left handle tear drop (pointing left)
-                    path.moveTo(width, height * 0.15f)
-                    path.cubicTo(width * 0.6f, height * 0.15f, width * 0.3f, height * 0.4f, width * 0.1f, height * 0.5f)
-                    path.cubicTo(width * 0.3f, height * 0.6f, width * 0.6f, height * 0.85f, width, height * 0.85f)
-                    path.cubicTo(width, height * 0.7f, width * 0.8f, height * 0.5f, width * 0.8f, height * 0.5f)
-                    path.cubicTo(width * 0.8f, height * 0.5f, width, height * 0.3f, width, height * 0.15f)
+                    path.moveTo(offsetX + scaledWidth, offsetY + scaledHeight * 0.15f)
+                    path.cubicTo(offsetX + scaledWidth * 0.6f, offsetY + scaledHeight * 0.15f, 
+                                 offsetX + scaledWidth * 0.3f, offsetY + scaledHeight * 0.4f, 
+                                 offsetX + scaledWidth * 0.1f, offsetY + scaledHeight * 0.5f)
+                    path.cubicTo(offsetX + scaledWidth * 0.3f, offsetY + scaledHeight * 0.6f, 
+                                 offsetX + scaledWidth * 0.6f, offsetY + scaledHeight * 0.85f, 
+                                 offsetX + scaledWidth, offsetY + scaledHeight * 0.85f)
+                    path.cubicTo(offsetX + scaledWidth, offsetY + scaledHeight * 0.7f, 
+                                 offsetX + scaledWidth * 0.8f, offsetY + scaledHeight * 0.5f, 
+                                 offsetX + scaledWidth * 0.8f, offsetY + scaledHeight * 0.5f)
+                    path.cubicTo(offsetX + scaledWidth * 0.8f, offsetY + scaledHeight * 0.5f, 
+                                 offsetX + scaledWidth, offsetY + scaledHeight * 0.3f, 
+                                 offsetX + scaledWidth, offsetY + scaledHeight * 0.15f)
                 } else {
                     // Right handle tear drop (pointing right)
-                    path.moveTo(0f, height * 0.15f)
-                    path.cubicTo(width * 0.4f, height * 0.15f, width * 0.7f, height * 0.4f, width * 0.9f, height * 0.5f)
-                    path.cubicTo(width * 0.7f, height * 0.6f, width * 0.4f, height * 0.85f, 0f, height * 0.85f)
-                    path.cubicTo(0f, height * 0.7f, width * 0.2f, height * 0.5f, width * 0.2f, height * 0.5f)
-                    path.cubicTo(width * 0.2f, height * 0.5f, 0f, height * 0.3f, 0f, height * 0.15f)
+                    path.moveTo(offsetX, offsetY + scaledHeight * 0.15f)
+                    path.cubicTo(offsetX + scaledWidth * 0.4f, offsetY + scaledHeight * 0.15f, 
+                                 offsetX + scaledWidth * 0.7f, offsetY + scaledHeight * 0.4f, 
+                                 offsetX + scaledWidth * 0.9f, offsetY + scaledHeight * 0.5f)
+                    path.cubicTo(offsetX + scaledWidth * 0.7f, offsetY + scaledHeight * 0.6f, 
+                                 offsetX + scaledWidth * 0.4f, offsetY + scaledHeight * 0.85f, 
+                                 offsetX, offsetY + scaledHeight * 0.85f)
+                    path.cubicTo(offsetX, offsetY + scaledHeight * 0.7f, 
+                                 offsetX + scaledWidth * 0.2f, offsetY + scaledHeight * 0.5f, 
+                                 offsetX + scaledWidth * 0.2f, offsetY + scaledHeight * 0.5f)
+                    path.cubicTo(offsetX + scaledWidth * 0.2f, offsetY + scaledHeight * 0.5f, 
+                                 offsetX, offsetY + scaledHeight * 0.3f, 
+                                 offsetX, offsetY + scaledHeight * 0.15f)
                 }
                 
                 path.close()
@@ -819,7 +857,129 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // Handle Touch Listener for smooth dragging
+    // Show zoom effect at character position
+    private fun showZoomEffect(offset: Int, isLeft: Boolean) {
+        if (lastHoverOffset == offset) return
+        lastHoverOffset = offset
+        
+        val layout = editText.layout
+        if (layout == null) return
+        
+        try {
+            val line = layout.getLineForOffset(offset)
+            val x = layout.getPrimaryHorizontal(offset)
+            val y = layout.getLineTop(line)
+            
+            // Create temporary highlight
+            val originalText = editText.text.toString()
+            if (offset >= 0 && offset < originalText.length) {
+                // Animate the handle
+                val handle = if (isLeft) leftHandleView else rightHandleView
+                handle?.animate()
+                    ?.scaleX(1.3f)
+                    ?.scaleY(1.3f)
+                    ?.setDuration(100)
+                    ?.withEndAction {
+                        handle.animate()
+                            ?.scaleX(1f)
+                            ?.scaleY(1f)
+                            ?.setDuration(100)
+                            ?.start()
+                    }
+                    ?.start()
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "showZoomEffect")
+        }
+    }
+    
+    // Update handle positions with bounds checking (prevents handles from going outside notepad)
+    private fun updateHandlePositionsWithBoundsCheck() {
+        val start = editText.selectionStart
+        val end = editText.selectionEnd
+        
+        if (start == end) {
+            hideSelectionHandles()
+            return
+        }
+        
+        val layout = editText.layout
+        if (layout == null) {
+            hideSelectionHandles()
+            return
+        }
+        
+        val noteLocation = IntArray(2)
+        noteView?.getLocationOnScreen(noteLocation)
+        val noteTop = noteLocation[1]
+        val noteBottom = noteTop + (noteView?.height ?: 0)
+        
+        val location = IntArray(2)
+        editText.getLocationOnScreen(location)
+        
+        // Get start cursor position (left handle)
+        val startLine = layout.getLineForOffset(start)
+        val startX = layout.getPrimaryHorizontal(start) + location[0]
+        val startY = layout.getLineTop(startLine) + location[1]
+        
+        // Get end cursor position (right handle)
+        val endLine = layout.getLineForOffset(end)
+        val endX = layout.getPrimaryHorizontal(end) + location[0]
+        val endY = layout.getLineBottom(endLine) + location[1]
+        
+        // Check if selection is within visible bounds
+        val isSelectionVisible = (startY >= noteTop - 50 && startY <= noteBottom + 50) ||
+                                 (endY >= noteTop - 50 && endY <= noteBottom + 50)
+        
+        if (!isSelectionVisible) {
+            hideSelectionHandles()
+            return
+        }
+        
+        // Update left handle position (clamped to note bounds)
+        leftHandleView?.let { handle ->
+            val params = handle.layoutParams as? WindowManager.LayoutParams
+            if (params != null && actionBarWindowManager != null) {
+                var newX = (startX - 24).toInt()
+                var newY = (startY - 30).toInt()
+                
+                // Clamp to note bounds
+                newX = newX.coerceIn(noteLocation[0] - 10, noteLocation[0] + (noteView?.width ?: 0) - 30)
+                newY = newY.coerceIn(noteTop - 10, noteBottom - 50)
+                
+                params.x = newX
+                params.y = newY
+                try {
+                    actionBarWindowManager?.updateViewLayout(handle, params)
+                } catch (e: Exception) { }
+            }
+        }
+        
+        // Update right handle position (clamped to note bounds)
+        rightHandleView?.let { handle ->
+            val params = handle.layoutParams as? WindowManager.LayoutParams
+            if (params != null && actionBarWindowManager != null) {
+                var newX = (endX - 24).toInt()
+                var newY = (endY - 30).toInt()
+                
+                // Clamp to note bounds
+                newX = newX.coerceIn(noteLocation[0] - 10, noteLocation[0] + (noteView?.width ?: 0) - 30)
+                newY = newY.coerceIn(noteTop - 10, noteBottom - 50)
+                
+                params.x = newX
+                params.y = newY
+                try {
+                    actionBarWindowManager?.updateViewLayout(handle, params)
+                } catch (e: Exception) { }
+            }
+        }
+    }
+    
+    private fun updateHandlePositions() {
+        updateHandlePositionsWithBoundsCheck()
+    }
+    
+    // Handle Touch Listener with zoom effect during drag
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -860,6 +1020,9 @@ class FloatingBubbleService : Service() {
                         val offset = layout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
+                        // Show zoom effect at the offset
+                        showZoomEffect(newOffset, isLeft)
+                        
                         if (isLeft) {
                             if (newOffset < initialSelectionEnd) {
                                 editText.setSelection(newOffset, initialSelectionEnd)
@@ -874,7 +1037,7 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        updateHandlePositions()
+                        updateHandlePositionsWithBoundsCheck()
                         
                         val (start, end) = getSelection()
                         if (start != end && start >= 0 && end <= editText.text.length) {
@@ -890,64 +1053,11 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
+                    lastHoverOffset = -1
                     return true
                 }
             }
             return false
-        }
-    }
-    
-    // Update handle positions at selection boundaries
-    private fun updateHandlePositions() {
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
-        
-        if (start == end) {
-            hideSelectionHandles()
-            return
-        }
-        
-        val layout = editText.layout
-        if (layout == null) {
-            hideSelectionHandles()
-            return
-        }
-        
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
-        
-        // Get start cursor position (left handle)
-        val startLine = layout.getLineForOffset(start)
-        val startX = layout.getPrimaryHorizontal(start) + location[0]
-        val startY = layout.getLineTop(startLine) + location[1]
-        
-        // Get end cursor position (right handle)
-        val endLine = layout.getLineForOffset(end)
-        val endX = layout.getPrimaryHorizontal(end) + location[0]
-        val endY = layout.getLineBottom(endLine) + location[1]
-        
-        // Left handle at start of selection
-        leftHandleView?.let { handle ->
-            val params = handle.layoutParams as? WindowManager.LayoutParams
-            if (params != null && actionBarWindowManager != null) {
-                params.x = (startX - 24).toInt()
-                params.y = (startY - 30).toInt()
-                try {
-                    actionBarWindowManager?.updateViewLayout(handle, params)
-                } catch (e: Exception) { }
-            }
-        }
-        
-        // Right handle at end of selection
-        rightHandleView?.let { handle ->
-            val params = handle.layoutParams as? WindowManager.LayoutParams
-            if (params != null && actionBarWindowManager != null) {
-                params.x = (endX - 24).toInt()
-                params.y = (endY - 30).toInt()
-                try {
-                    actionBarWindowManager?.updateViewLayout(handle, params)
-                } catch (e: Exception) { }
-            }
         }
     }
     
@@ -961,6 +1071,13 @@ class FloatingBubbleService : Service() {
             rightHandleView = handles.second
         }
         
+        updateHandlePositionsWithBoundsCheck()
+        
+        val noteLocation = IntArray(2)
+        noteView?.getLocationOnScreen(noteLocation)
+        val noteTop = noteLocation[1]
+        val noteBottom = noteTop + (noteView?.height ?: 0)
+        
         val layout = editText.layout
         if (layout == null) return
         
@@ -968,14 +1085,18 @@ class FloatingBubbleService : Service() {
         editText.getLocationOnScreen(location)
         
         val startLine = layout.getLineForOffset(start)
-        val startX = layout.getPrimaryHorizontal(start) + location[0]
         val startY = layout.getLineTop(startLine) + location[1]
-        
         val endLine = layout.getLineForOffset(end)
-        val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
         
-        // Add left handle
+        val isSelectionVisible = (startY >= noteTop - 50 && startY <= noteBottom + 50) ||
+                                 (endY >= noteTop - 50 && endY <= noteBottom + 50)
+        
+        if (!isSelectionVisible) {
+            hideSelectionHandles()
+            return
+        }
+        
         if (leftHandleView?.parent == null) {
             val leftParams = WindowManager.LayoutParams(
                 48, 48,
@@ -986,14 +1107,11 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
-            leftParams.x = (startX - 24).toInt()
-            leftParams.y = (startY - 30).toInt()
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
             } catch (e: Exception) { }
         }
         
-        // Add right handle
         if (rightHandleView?.parent == null) {
             val rightParams = WindowManager.LayoutParams(
                 48, 48,
@@ -1004,12 +1122,12 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
-            rightParams.x = (endX - 24).toInt()
-            rightParams.y = (endY - 30).toInt()
             try {
                 actionBarWindowManager?.addView(rightHandleView, rightParams)
             } catch (e: Exception) { }
         }
+        
+        updateHandlePositionsWithBoundsCheck()
     }
     
     private fun hideSelectionHandles() {
@@ -1022,6 +1140,7 @@ class FloatingBubbleService : Service() {
                 actionBarWindowManager?.removeView(it)
                 rightHandleView = null
             }
+            lastHoverOffset = -1
         } catch (e: Exception) { }
     }
 
@@ -1510,6 +1629,7 @@ class FloatingBubbleService : Service() {
                 if (editText.hasSelection()) {
                     temporarilyHideActionBar()
                     scheduleActionBarShow()
+                    updateHandlePositionsWithBoundsCheck()
                 }
             }
         }
@@ -1755,6 +1875,8 @@ class FloatingBubbleService : Service() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
         }, 300)
+        
+        setupScrollListener()
     }
     
     private fun selectWordAtCursor() {
@@ -1971,6 +2093,7 @@ class FloatingBubbleService : Service() {
         hideSelectionHandles()
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
+        zoomAnimator?.cancel()
     }
 
     override fun onBind(intent: Intent?) = null
