@@ -100,7 +100,6 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Native Android style tear drop selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -113,15 +112,21 @@ class FloatingBubbleService : Service() {
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
-    // ✅ NEW: Continuous position sync runnable
+    // ✅ FIXED: Selection sync runnable with safety checks
     private val selectionSyncRunnable = object : Runnable {
         override fun run() {
-            if (editText.hasSelection() && isExpanded) {
-                updateHandlePositions()
+            // ✅ IMPORTANT: Only run if editText is initialized and service is active
+            try {
+                if (isExpanded && ::editText.isInitialized && editText.hasSelection()) {
+                    updateHandlePositions()
+                }
+            } catch (e: Exception) {
+                // Silent fail - prevent crash
+                EmergencyLog.logException(e, "selectionSyncRunnable")
             }
-            // Continue the loop as long as service is running
+            // Continue the loop
             if (isExpanded) {
-                editText.postDelayed(this, 16) // ~60fps
+                editText.postDelayed(this, 16)
             }
         }
     }
@@ -662,8 +667,10 @@ class FloatingBubbleService : Service() {
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
                         
-                        // ✅ Start continuous selection sync after notepad expands
-                        editText.post(selectionSyncRunnable)
+                        // ✅ Start continuous selection sync AFTER notepad is fully expanded
+                        if (::editText.isInitialized) {
+                            editText.post(selectionSyncRunnable)
+                        }
                     }
                     .start()
             }
@@ -702,7 +709,13 @@ class FloatingBubbleService : Service() {
         if (!isExpanded) return
 
         // ✅ Stop continuous sync before collapsing
-        editText.removeCallbacks(selectionSyncRunnable)
+        try {
+            if (::editText.isInitialized) {
+                editText.removeCallbacks(selectionSyncRunnable)
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "collapseToBubble-removeCallbacks")
+        }
         
         hideSelectionHandles()
         hideFloatingActionBar()
@@ -767,7 +780,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // Native Android style tear drop selection handle drawable
+    // Create tear drop drawable
     private fun createTearDropDrawable(isLeft: Boolean, isZoomed: Boolean = false): Drawable {
         return object : android.graphics.drawable.Drawable() {
             private val mainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -871,51 +884,57 @@ class FloatingBubbleService : Service() {
     }
     
     private fun updateHandlePositions() {
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
-        
-        if (start == end) {
-            hideSelectionHandles()
-            return
-        }
-        
-        val layout = editText.layout
-        if (layout == null) {
-            hideSelectionHandles()
-            return
-        }
-        
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
-        
-        val startLine = layout.getLineForOffset(start)
-        val startX = layout.getPrimaryHorizontal(start) + location[0]
-        val startY = layout.getLineTop(startLine) + location[1]
-        
-        val endLine = layout.getLineForOffset(end)
-        val endX = layout.getPrimaryHorizontal(end) + location[0]
-        val endY = layout.getLineBottom(endLine) + location[1]
-        
-        leftHandleView?.let { handle ->
-            val params = handle.layoutParams as? WindowManager.LayoutParams
-            if (params != null && actionBarWindowManager != null) {
-                params.x = (startX - 28).toInt()
-                params.y = (startY - 30).toInt()
-                try {
-                    actionBarWindowManager?.updateViewLayout(handle, params)
-                } catch (e: Exception) { }
+        try {
+            if (!::editText.isInitialized) return
+            
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+            
+            if (start == end) {
+                hideSelectionHandles()
+                return
             }
-        }
-        
-        rightHandleView?.let { handle ->
-            val params = handle.layoutParams as? WindowManager.LayoutParams
-            if (params != null && actionBarWindowManager != null) {
-                params.x = (endX - 28).toInt()
-                params.y = (endY - 34).toInt()
-                try {
-                    actionBarWindowManager?.updateViewLayout(handle, params)
-                } catch (e: Exception) { }
+            
+            val layout = editText.layout
+            if (layout == null) {
+                hideSelectionHandles()
+                return
             }
+            
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
+            
+            val startLine = layout.getLineForOffset(start)
+            val startX = layout.getPrimaryHorizontal(start) + location[0]
+            val startY = layout.getLineTop(startLine) + location[1]
+            
+            val endLine = layout.getLineForOffset(end)
+            val endX = layout.getPrimaryHorizontal(end) + location[0]
+            val endY = layout.getLineBottom(endLine) + location[1]
+            
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as? WindowManager.LayoutParams
+                if (params != null && actionBarWindowManager != null) {
+                    params.x = (startX - 28).toInt()
+                    params.y = (startY - 30).toInt()
+                    try {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    } catch (e: Exception) { }
+                }
+            }
+            
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as? WindowManager.LayoutParams
+                if (params != null && actionBarWindowManager != null) {
+                    params.x = (endX - 28).toInt()
+                    params.y = (endY - 34).toInt()
+                    try {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    } catch (e: Exception) { }
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
         }
     }
     
@@ -1005,61 +1024,65 @@ class FloatingBubbleService : Service() {
     }
     
     private fun showSelectionHandles() {
-        val (start, end) = getSelection()
-        if (start == end) return
-        
-        if (leftHandleView == null || rightHandleView == null) {
-            val handles = createSelectionHandles()
-            leftHandleView = handles.first
-            rightHandleView = handles.second
-        }
-        
-        val layout = editText.layout
-        if (layout == null) return
-        
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
-        
-        val startLine = layout.getLineForOffset(start)
-        val startX = layout.getPrimaryHorizontal(start) + location[0]
-        val startY = layout.getLineTop(startLine) + location[1]
-        
-        val endLine = layout.getLineForOffset(end)
-        val endX = layout.getPrimaryHorizontal(end) + location[0]
-        val endY = layout.getLineBottom(endLine) + location[1]
-        
-        if (leftHandleView?.parent == null) {
-            val leftParams = WindowManager.LayoutParams(
-                56, 56,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
-            )
-            leftParams.gravity = Gravity.TOP or Gravity.START
-            leftParams.x = (startX - 28).toInt()
-            leftParams.y = (startY - 30).toInt()
-            try {
-                actionBarWindowManager?.addView(leftHandleView, leftParams)
-            } catch (e: Exception) { }
-        }
-        
-        if (rightHandleView?.parent == null) {
-            val rightParams = WindowManager.LayoutParams(
-                56, 56,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
-            )
-            rightParams.gravity = Gravity.TOP or Gravity.START
-            rightParams.x = (endX - 28).toInt()
-            rightParams.y = (endY - 34).toInt()
-            try {
-                actionBarWindowManager?.addView(rightHandleView, rightParams)
-            } catch (e: Exception) { }
+        try {
+            val (start, end) = getSelection()
+            if (start == end) return
+            
+            if (leftHandleView == null || rightHandleView == null) {
+                val handles = createSelectionHandles()
+                leftHandleView = handles.first
+                rightHandleView = handles.second
+            }
+            
+            val layout = editText.layout
+            if (layout == null) return
+            
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
+            
+            val startLine = layout.getLineForOffset(start)
+            val startX = layout.getPrimaryHorizontal(start) + location[0]
+            val startY = layout.getLineTop(startLine) + location[1]
+            
+            val endLine = layout.getLineForOffset(end)
+            val endX = layout.getPrimaryHorizontal(end) + location[0]
+            val endY = layout.getLineBottom(endLine) + location[1]
+            
+            if (leftHandleView?.parent == null) {
+                val leftParams = WindowManager.LayoutParams(
+                    56, 56,
+                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                )
+                leftParams.gravity = Gravity.TOP or Gravity.START
+                leftParams.x = (startX - 28).toInt()
+                leftParams.y = (startY - 30).toInt()
+                try {
+                    actionBarWindowManager?.addView(leftHandleView, leftParams)
+                } catch (e: Exception) { }
+            }
+            
+            if (rightHandleView?.parent == null) {
+                val rightParams = WindowManager.LayoutParams(
+                    56, 56,
+                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                )
+                rightParams.gravity = Gravity.TOP or Gravity.START
+                rightParams.x = (endX - 28).toInt()
+                rightParams.y = (endY - 34).toInt()
+                try {
+                    actionBarWindowManager?.addView(rightHandleView, rightParams)
+                } catch (e: Exception) { }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "showSelectionHandles")
         }
     }
     
@@ -1494,7 +1517,11 @@ class FloatingBubbleService : Service() {
             setTextColor(Color.parseColor("#333333"))
             setPadding(8, 0, 16, 0)
             setOnClickListener {
-                editText.removeCallbacks(selectionSyncRunnable)
+                try {
+                    if (::editText.isInitialized) {
+                        editText.removeCallbacks(selectionSyncRunnable)
+                    }
+                } catch (e: Exception) { }
                 hideSelectionHandles()
                 hideFloatingActionBar()
                 showNoteList()
@@ -1559,7 +1586,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
             
             viewTreeObserver.addOnScrollChangedListener {
-                if (editText.hasSelection()) {
+                if (::editText.isInitialized && editText.hasSelection()) {
                     updateHandlePositions()
                     temporarilyHideActionBar()
                     scheduleActionBarShow()
@@ -1863,7 +1890,11 @@ class FloatingBubbleService : Service() {
     }
 
     private fun showNoteList() {
-        editText.removeCallbacks(selectionSyncRunnable)
+        try {
+            if (::editText.isInitialized) {
+                editText.removeCallbacks(selectionSyncRunnable)
+            }
+        } catch (e: Exception) { }
         hideSelectionHandles()
         hideFloatingActionBar()
         val container = createFullNotePad()
@@ -2020,8 +2051,11 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // ✅ Clean up the continuous sync runnable
-        editText.removeCallbacks(selectionSyncRunnable)
+        try {
+            if (::editText.isInitialized) {
+                editText.removeCallbacks(selectionSyncRunnable)
+            }
+        } catch (e: Exception) { }
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
         handleZoomAnimator?.cancel()
