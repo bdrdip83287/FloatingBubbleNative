@@ -18,14 +18,12 @@ import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.RectF
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
-import android.text.Selection
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -44,9 +42,6 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
-import kotlin.math.cos
-import kotlin.math.PI
 
 class FloatingBubbleService : Service() {
 
@@ -117,6 +112,19 @@ class FloatingBubbleService : Service() {
     private var scrollHideRunnable: Runnable? = null
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
+
+    // ✅ NEW: Continuous position sync runnable
+    private val selectionSyncRunnable = object : Runnable {
+        override fun run() {
+            if (editText.hasSelection() && isExpanded) {
+                updateHandlePositions()
+            }
+            // Continue the loop as long as service is running
+            if (isExpanded) {
+                editText.postDelayed(this, 16) // ~60fps
+            }
+        }
+    }
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
@@ -653,6 +661,9 @@ class FloatingBubbleService : Service() {
 
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
+                        
+                        // ✅ Start continuous selection sync after notepad expands
+                        editText.post(selectionSyncRunnable)
                     }
                     .start()
             }
@@ -690,6 +701,9 @@ class FloatingBubbleService : Service() {
     private fun collapseToBubble() {
         if (!isExpanded) return
 
+        // ✅ Stop continuous sync before collapsing
+        editText.removeCallbacks(selectionSyncRunnable)
+        
         hideSelectionHandles()
         hideFloatingActionBar()
 
@@ -753,7 +767,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Native Android Style Tear Drop Selection Handle Drawable
+    // Native Android style tear drop selection handle drawable
     private fun createTearDropDrawable(isLeft: Boolean, isZoomed: Boolean = false): Drawable {
         return object : android.graphics.drawable.Drawable() {
             private val mainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -767,10 +781,6 @@ class FloatingBubbleService : Service() {
             }
             private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#88000000")
-                style = Paint.Style.FILL
-            }
-            private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#33FFFFFF")
                 style = Paint.Style.FILL
             }
             private val path = Path()
@@ -793,46 +803,24 @@ class FloatingBubbleService : Service() {
                 path.reset()
                 
                 if (isLeft) {
-                    // Left tear drop - pointing left (cursor handle style)
                     path.moveTo(width * 0.85f, height * 0.15f)
                     path.cubicTo(width * 0.5f, height * 0.1f, width * 0.15f, height * 0.3f, width * 0.05f, height * 0.5f)
                     path.cubicTo(width * 0.15f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.85f, height * 0.85f)
                     path.cubicTo(width * 0.7f, height * 0.65f, width * 0.7f, height * 0.35f, width * 0.85f, height * 0.15f)
-                    
-                    // Add a small circle at the top for more natural look
                     path.addCircle(width * 0.75f, height * 0.2f, width * 0.08f, Path.Direction.CW)
                 } else {
-                    // Right tear drop - pointing right (cursor handle style)
                     path.moveTo(width * 0.15f, height * 0.15f)
                     path.cubicTo(width * 0.5f, height * 0.1f, width * 0.85f, height * 0.3f, width * 0.95f, height * 0.5f)
                     path.cubicTo(width * 0.85f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.15f, height * 0.85f)
                     path.cubicTo(width * 0.3f, height * 0.65f, width * 0.3f, height * 0.35f, width * 0.15f, height * 0.15f)
-                    
                     path.addCircle(width * 0.25f, height * 0.2f, width * 0.08f, Path.Direction.CW)
                 }
                 
                 path.close()
                 
-                // Draw shadow
-                canvas.save()
-                canvas.translate(2f, 2f)
                 canvas.drawPath(path, shadowPaint)
-                canvas.restore()
-                
-                // Draw main shape
                 canvas.drawPath(path, mainPaint)
-                
-                // Draw border
                 canvas.drawPath(path, borderPaint)
-                
-                // Draw highlight for 3D effect
-                if (isLeft) {
-                    highlightPaint.alpha = 80
-                    canvas.drawCircle(width * 0.75f, height * 0.3f, width * 0.12f, highlightPaint)
-                } else {
-                    highlightPaint.alpha = 80
-                    canvas.drawCircle(width * 0.25f, height * 0.3f, width * 0.12f, highlightPaint)
-                }
                 
                 canvas.restore()
             }
@@ -908,7 +896,6 @@ class FloatingBubbleService : Service() {
         val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
         
-        // Left handle at start of selection
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
@@ -920,7 +907,6 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // Right handle at end of selection
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
@@ -1508,6 +1494,7 @@ class FloatingBubbleService : Service() {
             setTextColor(Color.parseColor("#333333"))
             setPadding(8, 0, 16, 0)
             setOnClickListener {
+                editText.removeCallbacks(selectionSyncRunnable)
                 hideSelectionHandles()
                 hideFloatingActionBar()
                 showNoteList()
@@ -1876,6 +1863,7 @@ class FloatingBubbleService : Service() {
     }
 
     private fun showNoteList() {
+        editText.removeCallbacks(selectionSyncRunnable)
         hideSelectionHandles()
         hideFloatingActionBar()
         val container = createFullNotePad()
@@ -2032,6 +2020,8 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // ✅ Clean up the continuous sync runnable
+        editText.removeCallbacks(selectionSyncRunnable)
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
         handleZoomAnimator?.cancel()
