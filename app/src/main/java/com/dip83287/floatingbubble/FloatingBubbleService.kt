@@ -18,7 +18,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.ColorFilter
+import android.graphics.RectF
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -26,7 +26,6 @@ import android.text.Editable
 import android.text.InputType
 import android.text.Layout
 import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -45,6 +44,9 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.cos
+import kotlin.math.PI
 
 class FloatingBubbleService : Service() {
 
@@ -103,11 +105,13 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Native Android style selection handles
+    // Native Android style tear drop selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
+    
+    private var handleZoomAnimator: ValueAnimator? = null
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -749,10 +753,10 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Native Android Style Selection Handles (Circle with center dot)
-    private fun createNativeSelectionHandle(isLeft: Boolean): Drawable {
-        return object : Drawable() {
-            private val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // ✅ Native Android Style Tear Drop Selection Handle Drawable
+    private fun createTearDropDrawable(isLeft: Boolean, isZoomed: Boolean = false): Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            private val mainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
@@ -761,116 +765,120 @@ class FloatingBubbleService : Service() {
                 style = Paint.Style.STROKE
                 strokeWidth = 3f
             }
-            private val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
+            private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#88000000")
                 style = Paint.Style.FILL
+            }
+            private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#33FFFFFF")
+                style = Paint.Style.FILL
+            }
+            private val path = Path()
+            private var scale = if (isZoomed) 1.25f else 1.0f
+            
+            fun setZoomed(zoomed: Boolean) {
+                scale = if (zoomed) 1.25f else 1.0f
+                invalidateSelf()
             }
             
             override fun draw(canvas: Canvas) {
-                val cx = bounds.centerX().toFloat()
-                val cy = bounds.centerY().toFloat()
-                val radius = bounds.width() / 2.5f
+                val width = bounds.width().toFloat()
+                val height = bounds.height().toFloat()
+                val centerX = width / 2
+                val centerY = height / 2
                 
-                // Outer circle
-                canvas.drawCircle(cx, cy, radius, outerPaint)
-                // Border
-                canvas.drawCircle(cx, cy, radius, borderPaint)
-                // Center dot
-                canvas.drawCircle(cx, cy, radius / 3, centerPaint)
+                canvas.save()
+                canvas.scale(scale, scale, centerX, centerY)
+                
+                path.reset()
+                
+                if (isLeft) {
+                    // Left tear drop - pointing left (cursor handle style)
+                    path.moveTo(width * 0.85f, height * 0.15f)
+                    path.cubicTo(width * 0.5f, height * 0.1f, width * 0.15f, height * 0.3f, width * 0.05f, height * 0.5f)
+                    path.cubicTo(width * 0.15f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.85f, height * 0.85f)
+                    path.cubicTo(width * 0.7f, height * 0.65f, width * 0.7f, height * 0.35f, width * 0.85f, height * 0.15f)
+                    
+                    // Add a small circle at the top for more natural look
+                    path.addCircle(width * 0.75f, height * 0.2f, width * 0.08f, Path.Direction.CW)
+                } else {
+                    // Right tear drop - pointing right (cursor handle style)
+                    path.moveTo(width * 0.15f, height * 0.15f)
+                    path.cubicTo(width * 0.5f, height * 0.1f, width * 0.85f, height * 0.3f, width * 0.95f, height * 0.5f)
+                    path.cubicTo(width * 0.85f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.15f, height * 0.85f)
+                    path.cubicTo(width * 0.3f, height * 0.65f, width * 0.3f, height * 0.35f, width * 0.15f, height * 0.15f)
+                    
+                    path.addCircle(width * 0.25f, height * 0.2f, width * 0.08f, Path.Direction.CW)
+                }
+                
+                path.close()
+                
+                // Draw shadow
+                canvas.save()
+                canvas.translate(2f, 2f)
+                canvas.drawPath(path, shadowPaint)
+                canvas.restore()
+                
+                // Draw main shape
+                canvas.drawPath(path, mainPaint)
+                
+                // Draw border
+                canvas.drawPath(path, borderPaint)
+                
+                // Draw highlight for 3D effect
+                if (isLeft) {
+                    highlightPaint.alpha = 80
+                    canvas.drawCircle(width * 0.75f, height * 0.3f, width * 0.12f, highlightPaint)
+                } else {
+                    highlightPaint.alpha = 80
+                    canvas.drawCircle(width * 0.25f, height * 0.3f, width * 0.12f, highlightPaint)
+                }
+                
+                canvas.restore()
             }
             
             override fun setAlpha(alpha: Int) {}
-            override fun setColorFilter(colorFilter: ColorFilter?) {}
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
             override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
         }
     }
     
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 48
+        val handleSize = 56
         
+        val leftDrawable = createTearDropDrawable(true, false)
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createNativeSelectionHandle(true))
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(8, 8, 8, 8)
+            setImageDrawable(leftDrawable)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(12, 12, 12, 12)
+            tag = leftDrawable
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
+        val rightDrawable = createTearDropDrawable(false, false)
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createNativeSelectionHandle(false))
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(8, 8, 8, 8)
+            setImageDrawable(rightDrawable)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(12, 12, 12, 12)
+            tag = rightDrawable
             setOnTouchListener(HandleTouchListener(isLeft = false))
         }
         
         return Pair(leftHandle, rightHandle)
     }
     
-    // Handle Touch Listener for smooth dragging
-    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-        private var initialTouchX = 0f
-        private var initialSelectionStart = 0
-        private var initialSelectionEnd = 0
+    private fun animateHandleZoom(handle: View, zoomIn: Boolean) {
+        handleZoomAnimator?.cancel()
         
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialTouchX = event.rawX
-                    initialSelectionStart = editText.selectionStart
-                    initialSelectionEnd = editText.selectionEnd
-                    
-                    if (isLeft) {
-                        isDraggingLeftHandle = true
-                    } else {
-                        isDraggingRightHandle = true
-                    }
-                    return true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val layout = editText.layout
-                    if (layout != null) {
-                        val location = IntArray(2)
-                        editText.getLocationOnScreen(location)
-                        val textX = event.rawX - location[0]
-                        val textY = event.rawY - location[1] + editText.scrollY
-                        
-                        val line = layout.getLineForVertical(textY.toInt().coerceIn(0, layout.height - 1))
-                        val offset = layout.getOffsetForHorizontal(line, textX)
-                        val newOffset = offset.coerceIn(0, editText.text.length)
-                        
-                        if (isLeft) {
-                            if (newOffset < initialSelectionEnd) {
-                                editText.setSelection(newOffset, initialSelectionEnd)
-                            } else {
-                                editText.setSelection(initialSelectionEnd, newOffset)
-                            }
-                        } else {
-                            if (newOffset > initialSelectionStart) {
-                                editText.setSelection(initialSelectionStart, newOffset)
-                            } else {
-                                editText.setSelection(newOffset, initialSelectionStart)
-                            }
-                        }
-                        
-                        updateHandlePositions()
-                        
-                        val (start, end) = getSelection()
-                        if (start != end && start >= 0 && end <= editText.text.length) {
-                            val selected = editText.text.substring(start, end)
-                            if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                showFloatingActionBar(selected)
-                            }
-                        }
-                    }
-                    return true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    isDraggingLeftHandle = false
-                    isDraggingRightHandle = false
-                    return true
-                }
+        val targetScale = if (zoomIn) 1.2f else 1.0f
+        handleZoomAnimator = ValueAnimator.ofFloat(1f, targetScale).apply {
+            duration = 120
+            addUpdateListener { animator ->
+                val scale = animator.animatedValue as Float
+                handle.scaleX = scale
+                handle.scaleY = scale
             }
-            return false
+            start()
         }
     }
     
@@ -900,26 +908,113 @@ class FloatingBubbleService : Service() {
         val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
         
+        // Left handle at start of selection
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = (startX - 24).toInt()
-                params.y = (startY - 28).toInt()
+                params.x = (startX - 28).toInt()
+                params.y = (startY - 30).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (e: Exception) { }
             }
         }
         
+        // Right handle at end of selection
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = (endX - 24).toInt()
-                params.y = (endY - 28).toInt()
+                params.x = (endX - 28).toInt()
+                params.y = (endY - 34).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (e: Exception) { }
             }
+        }
+    }
+    
+    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
+        private var initialTouchX = 0f
+        private var initialSelectionStart = 0
+        private var initialSelectionEnd = 0
+        private var lastUpdateTime = 0L
+        private var lastOffset = -1
+        
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialTouchX = event.rawX
+                    initialSelectionStart = editText.selectionStart
+                    initialSelectionEnd = editText.selectionEnd
+                    lastUpdateTime = System.currentTimeMillis()
+                    lastOffset = -1
+                    
+                    animateHandleZoom(v, true)
+                    
+                    if (isLeft) {
+                        isDraggingLeftHandle = true
+                    } else {
+                        isDraggingRightHandle = true
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastUpdateTime < 10) {
+                        return true
+                    }
+                    lastUpdateTime = currentTime
+                    
+                    val layout = editText.layout
+                    if (layout != null) {
+                        val location = IntArray(2)
+                        editText.getLocationOnScreen(location)
+                        val textX = event.rawX - location[0]
+                        val textY = event.rawY - location[1] + editText.scrollY
+                        
+                        val line = layout.getLineForVertical(textY.toInt().coerceIn(0, layout.height - 1))
+                        val offset = layout.getOffsetForHorizontal(line, textX)
+                        val newOffset = offset.coerceIn(0, editText.text.length)
+                        
+                        if (newOffset != lastOffset) {
+                            lastOffset = newOffset
+                            
+                            if (isLeft) {
+                                if (newOffset < initialSelectionEnd) {
+                                    editText.setSelection(newOffset, initialSelectionEnd)
+                                } else {
+                                    editText.setSelection(initialSelectionEnd, newOffset)
+                                }
+                            } else {
+                                if (newOffset > initialSelectionStart) {
+                                    editText.setSelection(initialSelectionStart, newOffset)
+                                } else {
+                                    editText.setSelection(newOffset, initialSelectionStart)
+                                }
+                            }
+                            
+                            updateHandlePositions()
+                            
+                            val (start, end) = getSelection()
+                            if (start != end && start >= 0 && end <= editText.text.length) {
+                                val selected = editText.text.substring(start, end)
+                                if (selected.isNotEmpty()) {
+                                    currentSelectedText = selected
+                                    showFloatingActionBar(selected)
+                                }
+                            }
+                        }
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    animateHandleZoom(v, false)
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    return true
+                }
+            }
+            return false
         }
     }
     
@@ -949,7 +1044,7 @@ class FloatingBubbleService : Service() {
         
         if (leftHandleView?.parent == null) {
             val leftParams = WindowManager.LayoutParams(
-                48, 48,
+                56, 56,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -957,8 +1052,8 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
-            leftParams.x = (startX - 24).toInt()
-            leftParams.y = (startY - 28).toInt()
+            leftParams.x = (startX - 28).toInt()
+            leftParams.y = (startY - 30).toInt()
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
             } catch (e: Exception) { }
@@ -966,7 +1061,7 @@ class FloatingBubbleService : Service() {
         
         if (rightHandleView?.parent == null) {
             val rightParams = WindowManager.LayoutParams(
-                48, 48,
+                56, 56,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -974,8 +1069,8 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
-            rightParams.x = (endX - 24).toInt()
-            rightParams.y = (endY - 28).toInt()
+            rightParams.x = (endX - 28).toInt()
+            rightParams.y = (endY - 34).toInt()
             try {
                 actionBarWindowManager?.addView(rightHandleView, rightParams)
             } catch (e: Exception) { }
@@ -1939,6 +2034,7 @@ class FloatingBubbleService : Service() {
         super.onDestroy()
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
+        handleZoomAnimator?.cancel()
         velocityTracker?.recycle()
         bubbleView?.let { windowManager.removeView(it) }
         noteView?.let { windowManager.removeView(it) }
