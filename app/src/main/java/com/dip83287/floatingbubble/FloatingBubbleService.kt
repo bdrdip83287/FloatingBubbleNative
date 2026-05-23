@@ -25,6 +25,7 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
+import android.text.Selection
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -43,9 +44,6 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
-import kotlin.math.cos
-import kotlin.math.PI
 
 class FloatingBubbleService : Service() {
 
@@ -116,7 +114,6 @@ class FloatingBubbleService : Service() {
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
-    // Selection sync runnable with safety checks
     private val selectionSyncRunnable = object : Runnable {
         override fun run() {
             try {
@@ -777,11 +774,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ CORRECTED: Native Android Style Tear Drop Selection Handle Drawable
+    // ✅ SIMPLIFIED - Working Tear Drop Drawable
     private fun createTearDropDrawable(isLeft: Boolean): Drawable {
         return object : android.graphics.drawable.Drawable() {
-            private val mainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#4285F4")  // Google Blue color like native Android
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#4285F4")
                 style = Paint.Style.FILL
             }
             private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -789,78 +786,40 @@ class FloatingBubbleService : Service() {
                 style = Paint.Style.STROKE
                 strokeWidth = 3f
             }
-            private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#40000000")
-                style = Paint.Style.FILL
-            }
             
             override fun draw(canvas: Canvas) {
                 val width = bounds.width().toFloat()
                 val height = bounds.height().toFloat()
-                val centerX = width / 2
-                val centerY = height / 2
                 
-                // Draw shadow
-                canvas.save()
-                canvas.translate(2f, 3f)
-                
-                val shadowPath = Path()
-                if (isLeft) {
-                    // Left handle shadow
-                    shadowPath.moveTo(width * 0.9f, height * 0.2f)
-                    shadowPath.cubicTo(width * 0.6f, height * 0.15f, width * 0.2f, height * 0.35f, width * 0.1f, height * 0.5f)
-                    shadowPath.cubicTo(width * 0.2f, height * 0.65f, width * 0.6f, height * 0.85f, width * 0.9f, height * 0.8f)
-                    shadowPath.cubicTo(width * 0.75f, height * 0.65f, width * 0.75f, height * 0.35f, width * 0.9f, height * 0.2f)
-                } else {
-                    // Right handle shadow
-                    shadowPath.moveTo(width * 0.1f, height * 0.2f)
-                    shadowPath.cubicTo(width * 0.4f, height * 0.15f, width * 0.8f, height * 0.35f, width * 0.9f, height * 0.5f)
-                    shadowPath.cubicTo(width * 0.8f, height * 0.65f, width * 0.4f, height * 0.85f, width * 0.1f, height * 0.8f)
-                    shadowPath.cubicTo(width * 0.25f, height * 0.65f, width * 0.25f, height * 0.35f, width * 0.1f, height * 0.2f)
-                }
-                shadowPath.close()
-                canvas.drawPath(shadowPath, shadowPaint)
-                canvas.restore()
-                
-                // Draw main tear drop shape
                 val path = Path()
+                
                 if (isLeft) {
-                    // Left tear drop (pointing left) - like Android cursor handle
-                    // Start from top right corner
-                    path.moveTo(width * 0.9f, height * 0.2f)
-                    // Curve to the tip (pointing left)
-                    path.cubicTo(width * 0.6f, height * 0.15f, width * 0.2f, height * 0.35f, width * 0.08f, height * 0.5f)
-                    // Curve back to bottom right
-                    path.cubicTo(width * 0.2f, height * 0.65f, width * 0.6f, height * 0.85f, width * 0.9f, height * 0.8f)
-                    // Curve to create the rounded top
-                    path.cubicTo(width * 0.75f, height * 0.65f, width * 0.75f, height * 0.35f, width * 0.9f, height * 0.2f)
+                    // Left tear drop shape
+                    path.moveTo(width * 0.8f, height * 0.2f)
+                    path.cubicTo(width * 0.5f, height * 0.1f, width * 0.2f, height * 0.3f, width * 0.1f, height * 0.5f)
+                    path.cubicTo(width * 0.2f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.8f, height * 0.8f)
+                    path.cubicTo(width * 0.7f, height * 0.65f, width * 0.7f, height * 0.35f, width * 0.8f, height * 0.2f)
                 } else {
-                    // Right tear drop (pointing right) - like Android cursor handle
-                    // Start from top left corner
-                    path.moveTo(width * 0.1f, height * 0.2f)
-                    // Curve to the tip (pointing right)
-                    path.cubicTo(width * 0.4f, height * 0.15f, width * 0.8f, height * 0.35f, width * 0.92f, height * 0.5f)
-                    // Curve back to bottom left
-                    path.cubicTo(width * 0.8f, height * 0.65f, width * 0.4f, height * 0.85f, width * 0.1f, height * 0.8f)
-                    // Curve to create the rounded top
-                    path.cubicTo(width * 0.25f, height * 0.65f, width * 0.25f, height * 0.35f, width * 0.1f, height * 0.2f)
+                    // Right tear drop shape
+                    path.moveTo(width * 0.2f, height * 0.2f)
+                    path.cubicTo(width * 0.5f, height * 0.1f, width * 0.8f, height * 0.3f, width * 0.9f, height * 0.5f)
+                    path.cubicTo(width * 0.8f, height * 0.7f, width * 0.5f, height * 0.9f, width * 0.2f, height * 0.8f)
+                    path.cubicTo(width * 0.3f, height * 0.65f, width * 0.3f, height * 0.35f, width * 0.2f, height * 0.2f)
                 }
                 path.close()
                 
-                // Draw main body
-                canvas.drawPath(path, mainPaint)
-                // Draw border
+                canvas.drawPath(path, paint)
                 canvas.drawPath(path, borderPaint)
                 
-                // Draw a small white circle inside for better visibility
-                val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                // Add a small highlight circle
+                val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.WHITE
                     alpha = 180
                 }
                 if (isLeft) {
-                    canvas.drawCircle(width * 0.75f, height * 0.5f, width * 0.12f, circlePaint)
+                    canvas.drawCircle(width * 0.65f, height * 0.45f, width * 0.1f, highlightPaint)
                 } else {
-                    canvas.drawCircle(width * 0.25f, height * 0.5f, width * 0.12f, circlePaint)
+                    canvas.drawCircle(width * 0.35f, height * 0.45f, width * 0.1f, highlightPaint)
                 }
             }
             
@@ -876,14 +835,14 @@ class FloatingBubbleService : Service() {
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createTearDropDrawable(true))
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(8, 8, 8, 8)
+            setPadding(12, 12, 12, 12)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
             setImageDrawable(createTearDropDrawable(false))
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(8, 8, 8, 8)
+            setPadding(12, 12, 12, 12)
             setOnTouchListener(HandleTouchListener(isLeft = false))
         }
         
@@ -931,6 +890,7 @@ class FloatingBubbleService : Service() {
             val endX = layout.getPrimaryHorizontal(end) + location[0]
             val endY = layout.getLineBottom(endLine) + location[1]
             
+            // Update left handle position
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? WindowManager.LayoutParams
                 if (params != null && actionBarWindowManager != null) {
@@ -942,6 +902,7 @@ class FloatingBubbleService : Service() {
                 }
             }
             
+            // Update right handle position
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? WindowManager.LayoutParams
                 if (params != null && actionBarWindowManager != null) {
