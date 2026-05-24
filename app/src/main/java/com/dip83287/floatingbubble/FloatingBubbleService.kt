@@ -95,7 +95,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Selection handles
+    // Ball type selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -741,66 +741,44 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Create visible ball handles
+    // ✅ Visible ball handles with proper drawable
+    private fun createBallHandle(): View {
+        val size = 44
+        return View(this).apply {
+            val shape = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#2196F3"))
+                setStroke(3, Color.WHITE)
+                setSize(size, size)
+            }
+            background = shape
+            // Add a shadow effect
+            elevation = 8f
+        }
+    }
+    
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 48
+        val leftHandle = createBallHandle()
+        val rightHandle = createBallHandle()
         
-        // Left handle
-        val leftHandle = ImageView(this).apply {
-            setImageDrawable(createBallDrawable())
-            scaleType = ImageView.ScaleType.CENTER
-            setPadding(8, 8, 8, 8)
-            setOnTouchListener(HandleTouchListener(isLeft = true))
-            visibility = View.VISIBLE
-        }
-        
-        // Right handle
-        val rightHandle = ImageView(this).apply {
-            setImageDrawable(createBallDrawable())
-            scaleType = ImageView.ScaleType.CENTER
-            setPadding(8, 8, 8, 8)
-            setOnTouchListener(HandleTouchListener(isLeft = false))
-            visibility = View.VISIBLE
-        }
+        leftHandle.setOnTouchListener(HandleTouchListener(isLeft = true))
+        rightHandle.setOnTouchListener(HandleTouchListener(isLeft = false))
         
         return Pair(leftHandle, rightHandle)
     }
     
-    private fun createBallDrawable(): Drawable {
-        return object : android.graphics.drawable.Drawable() {
-            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#2196F3")
-                style = Paint.Style.FILL
-            }
-            private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                style = Paint.Style.STROKE
-                strokeWidth = 3f
-            }
-            
-            override fun draw(canvas: Canvas) {
-                val cx = bounds.width() / 2f
-                val cy = bounds.height() / 2f
-                val radius = bounds.width() / 2f
-                canvas.drawCircle(cx, cy, radius, paint)
-                canvas.drawCircle(cx, cy, radius, borderPaint)
-            }
-            
-            override fun setAlpha(alpha: Int) {}
-            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
-            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
-        }
-    }
-    
+    // Handle touch listener
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
+        private var lastUpdateTime = 0L
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
+                    lastUpdateTime = System.currentTimeMillis()
                     
                     if (isLeft) {
                         isDraggingLeftHandle = true
@@ -810,6 +788,12 @@ class FloatingBubbleService : Service() {
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastUpdateTime < 16) {
+                        return true
+                    }
+                    lastUpdateTime = currentTime
+                    
                     val layout = editText.layout
                     if (layout != null) {
                         val location = IntArray(2)
@@ -858,6 +842,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
+    // Update handle positions exactly at selection boundaries
     private fun updateHandlePositions() {
         val start = editText.selectionStart
         val end = editText.selectionEnd
@@ -873,33 +858,35 @@ class FloatingBubbleService : Service() {
             return
         }
         
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
+        val editLocation = IntArray(2)
+        editText.getLocationOnScreen(editLocation)
         
-        // Left handle position (at start of selection)
+        // Get start handle position
         val startLine = layout.getLineForOffset(start)
-        val startX = layout.getPrimaryHorizontal(start) + location[0]
-        val startY = layout.getLineTop(startLine) + location[1]
+        val startX = layout.getPrimaryHorizontal(start) + editLocation[0]
+        val startY = layout.getLineTop(startLine) + editLocation[1]
         
-        // Right handle position (at end of selection)
+        // Get end handle position
         val endLine = layout.getLineForOffset(end)
-        val endX = layout.getPrimaryHorizontal(end) + location[0]
-        val endY = layout.getLineBottom(endLine) + location[1]
+        val endX = layout.getPrimaryHorizontal(end) + editLocation[0]
+        val endY = layout.getLineBottom(endLine) + editLocation[1]
         
+        // Left handle
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = (startX - 24).toInt()
-                params.y = (startY - 24).toInt()
+                params.x = (startX - 22).toInt()
+                params.y = (startY - 22).toInt()
                 actionBarWindowManager?.updateViewLayout(handle, params)
             }
         }
         
+        // Right handle
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
-                params.x = (endX - 24).toInt()
-                params.y = (endY - 24).toInt()
+                params.x = (endX - 22).toInt()
+                params.y = (endY - 22).toInt()
                 actionBarWindowManager?.updateViewLayout(handle, params)
             }
         }
@@ -909,10 +896,7 @@ class FloatingBubbleService : Service() {
         if (!::editText.isInitialized) return
         
         val (start, end) = getSelection()
-        if (start == end) {
-            hideSelectionHandles()
-            return
-        }
+        if (start == end) return
         
         if (leftHandleView == null || rightHandleView == null) {
             val handles = createSelectionHandles()
@@ -920,10 +904,22 @@ class FloatingBubbleService : Service() {
             rightHandleView = handles.second
         }
         
-        // Add left handle if not already added
+        val editLocation = IntArray(2)
+        editText.getLocationOnScreen(editLocation)
+        val layout = editText.layout
+        if (layout == null) return
+        
+        val startLine = layout.getLineForOffset(start)
+        val startX = layout.getPrimaryHorizontal(start) + editLocation[0]
+        val startY = layout.getLineTop(startLine) + editLocation[1]
+        
+        val endLine = layout.getLineForOffset(end)
+        val endX = layout.getPrimaryHorizontal(end) + editLocation[0]
+        val endY = layout.getLineBottom(endLine) + editLocation[1]
+        
         if (leftHandleView?.parent == null) {
             val leftParams = WindowManager.LayoutParams(
-                48, 48,
+                44, 44,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -931,13 +927,14 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
+            leftParams.x = (startX - 22).toInt()
+            leftParams.y = (startY - 22).toInt()
             actionBarWindowManager?.addView(leftHandleView, leftParams)
         }
         
-        // Add right handle if not already added
         if (rightHandleView?.parent == null) {
             val rightParams = WindowManager.LayoutParams(
-                48, 48,
+                44, 44,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -945,10 +942,10 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
+            rightParams.x = (endX - 22).toInt()
+            rightParams.y = (endY - 22).toInt()
             actionBarWindowManager?.addView(rightHandleView, rightParams)
         }
-        
-        updateHandlePositions()
     }
     
     private fun hideSelectionHandles() {
