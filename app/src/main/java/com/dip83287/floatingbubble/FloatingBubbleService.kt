@@ -107,9 +107,7 @@ class FloatingBubbleService : Service() {
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
-    private var lastHoverOffset = -1
     private var scrollListenerAttached = false
-    private var currentZoomAnimator: ValueAnimator? = null
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -816,52 +814,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ IMPROVED: Smooth Zoom Effect with transition
-    private fun showZoomEffectWithTransition(offset: Int, isLeft: Boolean) {
-        if (lastHoverOffset == offset) return
-        
-        val handle = if (isLeft) leftHandleView else rightHandleView
-        handle?.let { h ->
-            // Cancel any ongoing animation
-            currentZoomAnimator?.cancel()
-            
-            // Animate scale up
-            currentZoomAnimator = ValueAnimator.ofFloat(1f, 1.35f, 1f).apply {
-                duration = 200
-                interpolator = AccelerateDecelerateInterpolator()
-                addUpdateListener { animator ->
-                    val scale = animator.animatedValue as Float
-                    h.scaleX = scale
-                    h.scaleY = scale
-                }
-                start()
-            }
-        }
-        
-        lastHoverOffset = offset
-        
-        // Also highlight the character in the edit text for visual feedback
-        val text = editText.text.toString()
-        if (offset >= 0 && offset < text.length) {
-            // Temporarily highlight the character
-            val spannable = editText.text as Spannable
-            val existingSpans = spannable.getSpans(0, text.length, BackgroundColorSpan::class.java)
-            existingSpans.forEach { spannable.removeSpan(it) }
-            
-            val highlightSpan = BackgroundColorSpan(Color.parseColor("#88BB86FC"))
-            spannable.setSpan(highlightSpan, offset, offset + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-            
-            // Remove highlight after animation
-            Handler(Looper.getMainLooper()).postDelayed({
-                try {
-                    if (editText.text is Spannable) {
-                        (editText.text as Spannable).removeSpan(highlightSpan)
-                    }
-                } catch (e: Exception) { }
-            }, 200)
-        }
-    }
-    
     private fun updateHandlePositionsWithBoundsCheck() {
         if (!::editText.isInitialized) return
         if (editText.layout == null) return
@@ -990,19 +942,15 @@ class FloatingBubbleService : Service() {
                 actionBarWindowManager?.removeView(it)
                 rightHandleView = null
             }
-            lastHoverOffset = -1
-            currentZoomAnimator?.cancel()
         } catch (e: Exception) { }
     }
     
-    // ✅ IMPROVED: Handle Touch Listener with smooth character selection and zoom
+    // ✅ SIMPLIFIED Handle Touch Listener - No zoom effect to prevent lag
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
-        private var lastOffset = -1
-        private var lastSelectionValue = 0
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -1011,8 +959,6 @@ class FloatingBubbleService : Service() {
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
-                    lastOffset = -1
-                    lastSelectionValue = if (isLeft) initialSelectionStart else initialSelectionEnd
                     
                     if (isLeft) {
                         isDraggingLeftHandle = true
@@ -1040,22 +986,19 @@ class FloatingBubbleService : Service() {
                         val offset = layout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
-                        // Show zoom effect with smooth transition at the new character position
-                        if (lastOffset != newOffset) {
-                            lastOffset = newOffset
-                            showZoomEffectWithTransition(newOffset, isLeft)
-                        }
-                        
-                        // Smooth character-level selection with value animator for transition
                         if (isLeft) {
-                            if (newOffset != lastSelectionValue) {
-                                lastSelectionValue = newOffset
-                                animateSelectionChange(newOffset, initialSelectionEnd, true)
+                            // Left handle: adjust selection start
+                            if (newOffset < initialSelectionEnd) {
+                                editText.setSelection(newOffset, initialSelectionEnd)
+                            } else {
+                                editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
-                            if (newOffset != lastSelectionValue) {
-                                lastSelectionValue = newOffset
-                                animateSelectionChange(initialSelectionStart, newOffset, false)
+                            // Right handle: adjust selection end
+                            if (newOffset > initialSelectionStart) {
+                                editText.setSelection(initialSelectionStart, newOffset)
+                            } else {
+                                editText.setSelection(newOffset, initialSelectionStart)
                             }
                         }
                         
@@ -1075,32 +1018,10 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
-                    lastOffset = -1
-                    lastHoverOffset = -1
-                    currentZoomAnimator?.cancel()
                     return true
                 }
             }
             return false
-        }
-        
-        // Smooth selection change with animation
-        private fun animateSelectionChange(newStart: Int, newEnd: Int, isLeft: Boolean) {
-            val valueAnimator = ValueAnimator.ofInt(0, 100).apply {
-                duration = 50
-                interpolator = DecelerateInterpolator()
-                addUpdateListener { animator ->
-                    val progress = animator.animatedFraction
-                    if (isLeft) {
-                        val start = (initialSelectionStart + (newStart - initialSelectionStart) * progress).toInt()
-                        editText.setSelection(start, initialSelectionEnd)
-                    } else {
-                        val end = (initialSelectionEnd + (newEnd - initialSelectionEnd) * progress).toInt()
-                        editText.setSelection(initialSelectionStart, end)
-                    }
-                }
-                start()
-            }
         }
     }
 
@@ -2014,7 +1935,6 @@ class FloatingBubbleService : Service() {
         hideSelectionHandles()
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
-        currentZoomAnimator?.cancel()
     }
 
     override fun onBind(intent: Intent?) = null
