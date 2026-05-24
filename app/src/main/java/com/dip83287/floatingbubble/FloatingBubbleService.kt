@@ -14,6 +14,10 @@ import android.graphics.PixelFormat
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -734,7 +738,7 @@ class FloatingBubbleService : Service() {
     }
 
     private fun createHandleDrawable(isLeft: Boolean): Drawable {
-        return object : android.graphics.drawable.Drawable() {
+        return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
@@ -1167,9 +1171,12 @@ class FloatingBubbleService : Service() {
     }
     
     private fun scheduleActionBarShow() {
-        scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
+        val currentRunnable = scrollHideRunnable
+        if (currentRunnable != null) {
+            scrollHideHandler?.removeCallbacks(currentRunnable)
+        }
         
-        scrollHideRunnable = Runnable {
+        val newRunnable = Runnable {
             if (isActionBarTemporarilyHidden && editText.hasSelection()) {
                 val (start, end) = getSelection()
                 if (start != end) {
@@ -1184,7 +1191,8 @@ class FloatingBubbleService : Service() {
                 }
             }
         }
-        scrollHideHandler?.postDelayed(scrollHideRunnable, 2000)
+        scrollHideRunnable = newRunnable
+        scrollHideHandler?.postDelayed(newRunnable, 2000)
     }
     
     private fun getSelection(): Pair<Int, Int> {
@@ -1479,14 +1487,22 @@ class FloatingBubbleService : Service() {
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
-                                longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                                val r = longPressRunnable
+                                if (r != null) {
+                                    longPressHandler.removeCallbacks(r)
+                                    longPressRunnable = null
+                                }
                                 selectCharacterAtPosition(x, y)
                             } else {
-                                longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                                longPressRunnable = Runnable {
+                                val r = longPressRunnable
+                                if (r != null) {
+                                    longPressHandler.removeCallbacks(r)
+                                }
+                                val newRunnable = Runnable {
                                     selectCharacterAtPosition(x, y)
                                 }
-                                longPressHandler.postDelayed(longPressRunnable, 300)
+                                longPressRunnable = newRunnable
+                                longPressHandler.postDelayed(newRunnable, 300)
                             }
                             
                             lastTouchTime = currentTime
@@ -1496,8 +1512,11 @@ class FloatingBubbleService : Service() {
                         }
                         
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                            longPressRunnable = null
+                            val r = longPressRunnable
+                            if (r != null) {
+                                longPressHandler.removeCallbacks(r)
+                                longPressRunnable = null
+                            }
                             
                             if (hasSelection()) {
                                 val selected = text.substring(selectionStart, selectionEnd)
@@ -1517,8 +1536,11 @@ class FloatingBubbleService : Service() {
                             val dx = Math.abs(event.x - lastTouchX)
                             val dy = Math.abs(event.y - lastTouchY)
                             if (dx > 10 || dy > 10) {
-                                longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                                longPressRunnable = null
+                                val r = longPressRunnable
+                                if (r != null) {
+                                    longPressHandler.removeCallbacks(r)
+                                    longPressRunnable = null
+                                }
                             }
                         }
                     }
@@ -1541,8 +1563,11 @@ class FloatingBubbleService : Service() {
                         }
                     }
                     
-                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
-                    saveRunnable = Runnable {
+                    val currentSaveRunnable = saveRunnable
+                    if (currentSaveRunnable != null) {
+                        saveHandler.removeCallbacks(currentSaveRunnable)
+                    }
+                    val newRunnable = Runnable {
                         val index = notesList.indexOfFirst { it.id == note.id }
                         if (index != -1) {
                             val updatedNote = notesList[index].copy(
@@ -1554,7 +1579,8 @@ class FloatingBubbleService : Service() {
                             saveNotesToPrefs()
                         }
                     }
-                    saveHandler.postDelayed(saveRunnable, 600)
+                    saveRunnable = newRunnable
+                    saveHandler.postDelayed(newRunnable, 600)
                 }
                 override fun afterTextChanged(s: Editable?) {}
             })
@@ -1861,7 +1887,10 @@ class FloatingBubbleService : Service() {
         deleteZoneView?.let { windowManager.removeView(it) }
         hideSelectionHandles()
         hideFloatingActionBar()
-        scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
+        val currentRunnable = scrollHideRunnable
+        if (currentRunnable != null) {
+            scrollHideHandler?.removeCallbacks(currentRunnable)
+        }
     }
 
     override fun onBind(intent: Intent?) = null
