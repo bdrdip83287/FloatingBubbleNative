@@ -107,7 +107,9 @@ class FloatingBubbleService : Service() {
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
+    private var lastHoverOffset = -1
     private var scrollListenerAttached = false
+    private var highlightSpan: BackgroundColorSpan? = null
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -814,6 +816,29 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
+    // Simple zoom effect without character highlight to avoid lag
+    private fun showSimpleZoomEffect(offset: Int, isLeft: Boolean) {
+        if (lastHoverOffset == offset) return
+        
+        val handle = if (isLeft) leftHandleView else rightHandleView
+        handle?.let { h ->
+            h.animate()
+                .scaleX(1.25f)
+                .scaleY(1.25f)
+                .setDuration(80)
+                .withEndAction {
+                    h.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(80)
+                        .start()
+                }
+                .start()
+        }
+        
+        lastHoverOffset = offset
+    }
+    
     private fun updateHandlePositionsWithBoundsCheck() {
         if (!::editText.isInitialized) return
         if (editText.layout == null) return
@@ -942,12 +967,12 @@ class FloatingBubbleService : Service() {
                 actionBarWindowManager?.removeView(it)
                 rightHandleView = null
             }
+            lastHoverOffset = -1
         } catch (e: Exception) { }
     }
     
-    // ✅ SIMPLIFIED Handle Touch Listener - No zoom effect to prevent lag
+    // Simplified handle touch listener - no lag
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-        private var initialTouchX = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
@@ -955,7 +980,6 @@ class FloatingBubbleService : Service() {
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialTouchX = event.rawX
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
@@ -969,7 +993,7 @@ class FloatingBubbleService : Service() {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastUpdateTime < 16) {
+                    if (currentTime - lastUpdateTime < 20) {
                         return true
                     }
                     lastUpdateTime = currentTime
@@ -986,15 +1010,16 @@ class FloatingBubbleService : Service() {
                         val offset = layout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
+                        // Simple zoom effect
+                        showSimpleZoomEffect(newOffset, isLeft)
+                        
                         if (isLeft) {
-                            // Left handle: adjust selection start
                             if (newOffset < initialSelectionEnd) {
                                 editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
                                 editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
-                            // Right handle: adjust selection end
                             if (newOffset > initialSelectionStart) {
                                 editText.setSelection(initialSelectionStart, newOffset)
                             } else {
@@ -1018,6 +1043,7 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
+                    lastHoverOffset = -1
                     return true
                 }
             }
@@ -1391,7 +1417,6 @@ class FloatingBubbleService : Service() {
                     isActionBarTemporarilyHidden = false
                     hideSelectionHandles()
                     hideFloatingActionBar()
-                    EmergencyLog.log("Character selected at offset $offset")
                 }
             }
         } catch (e: Exception) {
@@ -1935,6 +1960,7 @@ class FloatingBubbleService : Service() {
         hideSelectionHandles()
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
+        highlightSpan?.let { (editText.text as? Spannable)?.removeSpan(it) }
     }
 
     override fun onBind(intent: Intent?) = null
