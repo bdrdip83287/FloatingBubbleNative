@@ -834,7 +834,6 @@ class FloatingBubbleService : Service() {
             ?.start()
     }
     
-    // Update handle positions with bounds checking
     private fun updateHandlePositionsWithBoundsCheck() {
         if (!::editText.isInitialized) return
         if (editText.layout == null) return
@@ -967,12 +966,13 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
     
-    // Handle Touch Listener with zoom effect
+    // ✅ UPDATED: Handle Touch Listener with CHARACTER-LEVEL selection (not word-level)
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
+        private var lastOffset = -1
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -981,6 +981,7 @@ class FloatingBubbleService : Service() {
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
+                    lastOffset = -1
                     
                     if (isLeft) {
                         isDraggingLeftHandle = true
@@ -1005,18 +1006,26 @@ class FloatingBubbleService : Service() {
                         val textY = event.rawY - location[1] + editText.scrollY
                         
                         val line = layout.getLineForVertical(textY.toInt())
+                        // ✅ Get the nearest character offset (not word boundary)
                         val offset = layout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
-                        showZoomEffect(newOffset, isLeft)
+                        // Show zoom effect at the character position
+                        if (lastOffset != newOffset) {
+                            lastOffset = newOffset
+                            showZoomEffect(newOffset, isLeft)
+                        }
                         
+                        // ✅ CHARACTER-LEVEL selection - selects one character at a time
                         if (isLeft) {
+                            // Left handle: adjust selection start
                             if (newOffset < initialSelectionEnd) {
                                 editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
                                 editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
+                            // Right handle: adjust selection end
                             if (newOffset > initialSelectionStart) {
                                 editText.setSelection(initialSelectionStart, newOffset)
                             } else {
@@ -1040,6 +1049,7 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
+                    lastOffset = -1
                     lastHoverOffset = -1
                     return true
                 }
@@ -1409,25 +1419,14 @@ class FloatingBubbleService : Service() {
                 
                 val text = editText.text.toString()
                 if (offset >= 0 && offset <= text.length) {
-                    var wordStart = offset
-                    var wordEnd = offset
-                    
-                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
-                        wordStart--
-                    }
-                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
-                        wordEnd++
-                    }
-                    
-                    if (wordStart < wordEnd) {
-                        editText.setSelection(wordStart, wordEnd)
-                        val selectedWord = text.substring(wordStart, wordEnd)
-                        currentSelectedText = selectedWord
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selectedWord)
-                        showSelectionHandles()
-                        EmergencyLog.log("Long press selected word: '$selectedWord' at offset $offset")
-                    }
+                    // ✅ CHARACTER-LEVEL selection for long press (not word)
+                    // Just move cursor to the character position (no word selection)
+                    editText.setSelection(offset)
+                    currentSelectedText = ""
+                    isActionBarTemporarilyHidden = false
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                    EmergencyLog.log("Long press at character offset $offset")
                 }
             }
         } catch (e: Exception) {
@@ -1530,6 +1529,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
+        // ✅ EditText with character-level selection support
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1577,11 +1577,13 @@ class FloatingBubbleService : Service() {
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
                                 cancelLongPress()
-                                selectWordAtPosition(this@apply, x, y)
+                                // Double tap - select character at position (not word)
+                                selectCharacterAtPosition(this@apply, x, y)
                             } else {
                                 cancelLongPress()
                                 val runnable = Runnable {
-                                    selectWordAtPosition(this@apply, x, y)
+                                    // Long press - select character at position (not word)
+                                    selectCharacterAtPosition(this@apply, x, y)
                                 }
                                 longPressRunnable = runnable
                                 longPressHandler.postDelayed(runnable, 300)
@@ -1780,6 +1782,30 @@ class FloatingBubbleService : Service() {
                     updateHandlePositionsWithBoundsCheck()
                 }
             }
+        }
+    }
+    
+    // ✅ Select single character at position (not word)
+    private fun selectCharacterAtPosition(editText: EditText, x: Float, y: Float) {
+        try {
+            val layout = editText.layout
+            if (layout != null) {
+                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = layout.getOffsetForHorizontal(line, x)
+                
+                val text = editText.text.toString()
+                if (offset >= 0 && offset <= text.length) {
+                    // Set cursor position only (no selection)
+                    editText.setSelection(offset)
+                    currentSelectedText = ""
+                    isActionBarTemporarilyHidden = false
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                    EmergencyLog.log("Character selected at offset $offset")
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "selectCharacterAtPosition")
         }
     }
     
