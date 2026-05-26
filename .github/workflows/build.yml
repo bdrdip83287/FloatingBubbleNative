@@ -12,41 +12,42 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Gradle
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create debug keystore if not exists
         run: |
-          chmod +x gradlew 2>/dev/null || true
-          if [ -d "android" ]; then
-            cd android && chmod +x gradlew 2>/dev/null || true
-            cd ..
+          # Check if keystore already exists in repo
+          if [ -f "debug.keystore" ]; then
+            echo "Keystore already exists in repo, using it."
+            cp debug.keystore app/debug.keystore
+          elif [ -f "app/debug.keystore" ]; then
+            echo "Keystore already exists in app folder, using it."
+          else
+            echo "Creating new keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, O=Android, C=US" -noprompt
+            cp debug.keystore app/debug.keystore
           fi
+          
+          # Verify keystore exists
+          ls -la app/debug.keystore
 
       - name: Build APK
         run: |
-          if [ -f "gradlew" ]; then
-            ./gradlew clean assembleDebug --stacktrace
-          elif [ -f "android/gradlew" ]; then
-            cd android
-            ./gradlew clean assembleDebug --stacktrace
-          else
-            echo "Error: gradlew not found!"
-            exit 1
-          fi
+          chmod +x gradlew
+          ./gradlew clean assembleDebug --stacktrace
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FloatingBubbleApp-Debug
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 30
+          name: FloatingNotes-Latest
+          path: app/build/outputs/apk/debug/*.apk
