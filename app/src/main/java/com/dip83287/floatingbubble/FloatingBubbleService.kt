@@ -12,7 +12,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.PixelFormat
 import android.graphics.Color
-import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.*
@@ -67,7 +66,7 @@ class FloatingBubbleService : Service() {
     private var bubbleView: View? = null
     private var noteView: View? = null
     private var isExpanded = false
-    private lateinit var editText: CustomEditText
+    private lateinit var editText: EditText
     private lateinit var titleInput: EditText
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
@@ -91,7 +90,6 @@ class FloatingBubbleService : Service() {
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
-    private var isActionBarTemporarilyHidden = false
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
@@ -105,34 +103,6 @@ class FloatingBubbleService : Service() {
         var content: String,
         val lastEdited: Long = System.currentTimeMillis()
     )
-
-    // ✅ Custom EditText with proper ActionMode handling for overlay window
-    inner class CustomEditText(context: Context) : EditText(context) {
-        
-        override fun startActionMode(callback: ActionMode.Callback, type: Int): ActionMode? {
-            EmergencyLog.log("startActionMode called with type: $type")
-            return try {
-                // Try to show action mode on decor view for overlay compatibility
-                val decorView = (context as? android.app.Activity)?.window?.decorView
-                if (decorView != null) {
-                    decorView.startActionModeForChild(this, callback, type)
-                } else {
-                    super.startActionMode(callback, type)
-                }
-            } catch (e: Exception) {
-                EmergencyLog.logException(e, "startActionMode")
-                super.startActionMode(callback, type)
-            }
-        }
-        
-        override fun onCheckIsTextEditor(): Boolean {
-            return true
-        }
-        
-        override fun getDefaultEditable(): Boolean {
-            return true
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
@@ -976,8 +946,7 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = false
         }
         
-        // ✅ Using CustomEditText for native selection support in overlay
-        editText = CustomEditText(this).apply {
+        editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
             textSize = 15f
@@ -996,13 +965,9 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ Enable native selection system
+            // Enable native selection
             setTextIsSelectable(true)
             isLongClickable = true
-            
-            // Remove custom callbacks to let native system handle everything
-            customInsertionActionModeCallback = null
-            customSelectionActionModeCallback = null
             
             isClickable = true
             isCursorVisible = true
