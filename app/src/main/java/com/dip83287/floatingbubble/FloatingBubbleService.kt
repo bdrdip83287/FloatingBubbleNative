@@ -18,18 +18,13 @@ import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
-import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -38,7 +33,6 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import androidx.core.view.doOnLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -46,8 +40,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -66,9 +58,6 @@ class FloatingBubbleService : Service() {
 
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
-    // ✅ 1. Handle color can be customized from preferences
-    private val KEY_HANDLE_COLOR = "handle_color"
-    private val DEFAULT_HANDLE_COLOR = "#2196F3"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -120,6 +109,11 @@ class FloatingBubbleService : Service() {
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
+    // Scroll listener for updating handle positions
+    private var isScrolling = false
+    private val scrollUpdateHandler = Handler(Looper.getMainLooper())
+    private var scrollUpdateRunnable: Runnable? = null
+
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
@@ -148,11 +142,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
         }
-    }
-
-    // ✅ Get handle color from preferences
-    private fun getHandleColor(): String {
-        return prefs.getString(KEY_HANDLE_COLOR, DEFAULT_HANDLE_COLOR) ?: DEFAULT_HANDLE_COLOR
     }
 
     private fun loadNotes() {
@@ -760,12 +749,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Programmatic Tear Drop Selection Handles with customizable color
+    // ✅ Programmatic Tear Drop Selection Handles
     private fun createTearDropDrawable(isLeft: Boolean): Drawable {
-        val handleColor = Color.parseColor(getHandleColor())
         return object : android.graphics.drawable.Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = handleColor
+                color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
             private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -906,7 +894,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Updated handle positions - level with blinking cursor
+    // ✅ CRITICAL FIX: Update handle positions based on selection boundaries (follows selected text)
     private fun updateHandlePositions() {
         val start = editText.selectionStart
         val end = editText.selectionEnd
@@ -925,40 +913,34 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        // Get start cursor position (left handle)
+        // Get start cursor position (where selection begins)
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
         val startY = layout.getLineTop(startLine) + location[1]
-        val startBaseline = layout.getLineBaseline(startLine) + location[1]
         
-        // Get end cursor position (right handle)
+        // Get end cursor position (where selection ends)
         val endLine = layout.getLineForOffset(end)
         val endX = layout.getPrimaryHorizontal(end) + location[0]
-        val endY = layout.getLineTop(endLine) + location[1]
-        val endBaseline = layout.getLineBaseline(endLine) + location[1]
+        val endY = layout.getLineBottom(endLine) + location[1]
         
-        // ✅ Level handle with cursor (align with baseline)
-        val handleVerticalOffset = startBaseline - (48 / 2)
-        val rightHandleVerticalOffset = endBaseline - (48 / 2)
-        
-        // Left handle at start of selection
+        // Left handle - position at start of selection (moves with text)
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
                 params.x = (startX - 24).toInt()
-                params.y = handleVerticalOffset.toInt() - 10
+                params.y = (startY - 30).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (e: Exception) { }
             }
         }
         
-        // Right handle at end of selection
+        // Right handle - position at end of selection (moves with text)
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? WindowManager.LayoutParams
             if (params != null && actionBarWindowManager != null) {
                 params.x = (endX - 24).toInt()
-                params.y = rightHandleVerticalOffset.toInt() - 10
+                params.y = (endY - 30).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (e: Exception) { }
@@ -984,14 +966,11 @@ class FloatingBubbleService : Service() {
         
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
-        val startBaseline = layout.getLineBaseline(startLine) + location[1]
+        val startY = layout.getLineTop(startLine) + location[1]
         
         val endLine = layout.getLineForOffset(end)
         val endX = layout.getPrimaryHorizontal(end) + location[0]
-        val endBaseline = layout.getLineBaseline(endLine) + location[1]
-        
-        val handleVerticalOffset = startBaseline - (48 / 2)
-        val rightHandleVerticalOffset = endBaseline - (48 / 2)
+        val endY = layout.getLineBottom(endLine) + location[1]
         
         // Add left handle
         if (leftHandleView?.parent == null) {
@@ -1005,7 +984,7 @@ class FloatingBubbleService : Service() {
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
             leftParams.x = (startX - 24).toInt()
-            leftParams.y = handleVerticalOffset.toInt() - 10
+            leftParams.y = (startY - 30).toInt()
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
             } catch (e: Exception) { }
@@ -1023,7 +1002,7 @@ class FloatingBubbleService : Service() {
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
             rightParams.x = (endX - 24).toInt()
-            rightParams.y = rightHandleVerticalOffset.toInt() - 10
+            rightParams.y = (endY - 30).toInt()
             try {
                 actionBarWindowManager?.addView(rightHandleView, rightParams)
             } catch (e: Exception) { }
@@ -1041,6 +1020,22 @@ class FloatingBubbleService : Service() {
                 rightHandleView = null
             }
         } catch (e: Exception) { }
+    }
+
+    // ✅ Trigger handle position update during scrolling
+    private fun scheduleHandleUpdateDuringScroll() {
+        if (!editText.hasSelection()) return
+        
+        scrollUpdateRunnable?.let { scrollUpdateHandler.removeCallbacks(it) }
+        
+        val runnable = Runnable {
+            if (editText.hasSelection()) {
+                updateHandlePositions()
+            }
+            isScrolling = false
+        }
+        scrollUpdateRunnable = runnable
+        scrollUpdateHandler.postDelayed(runnable, 16) // ~60fps smooth update
     }
 
     private fun showFloatingActionBar(selectedText: String) {
@@ -1395,14 +1390,38 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ 2. Fixed long press and double tap conflict with clear timing logic
-    private var pendingLongPressRunnable: Runnable? = null
-    private val longPressHandler = Handler(Looper.getMainLooper())
-    
-    private fun cancelLongPress() {
-        pendingLongPressRunnable?.let {
-            longPressHandler.removeCallbacks(it)
-            pendingLongPressRunnable = null
+    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
+        try {
+            val layout = editText.layout
+            if (layout != null) {
+                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = layout.getOffsetForHorizontal(line, x)
+                
+                val text = editText.text.toString()
+                if (offset >= 0 && offset <= text.length) {
+                    var wordStart = offset
+                    var wordEnd = offset
+                    
+                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
+                        wordStart--
+                    }
+                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
+                        wordEnd++
+                    }
+                    
+                    if (wordStart < wordEnd) {
+                        editText.setSelection(wordStart, wordEnd)
+                        val selectedWord = text.substring(wordStart, wordEnd)
+                        currentSelectedText = selectedWord
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selectedWord)
+                        showSelectionHandles()
+                        EmergencyLog.log("Long press selected word: '$selectedWord' at offset $offset")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "selectWordAtPosition")
         }
     }
 
@@ -1500,8 +1519,11 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
+            // ✅ Listen to scroll changes to update handle positions in real-time
             viewTreeObserver.addOnScrollChangedListener {
                 if (editText.hasSelection()) {
+                    // Update handle positions during scroll
+                    updateHandlePositions()
                     temporarilyHideActionBar()
                     scheduleActionBarShow()
                 }
@@ -1537,43 +1559,33 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Fixed: Clear long press and double tap conflict with proper timing
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
                 private var lastTouchY = 0f
-                private var isLongPressTriggered = false
+                private var longPressRunnable: Runnable? = null
+                private val longPressHandler = Handler(Looper.getMainLooper())
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
-                            cancelLongPress()
-                            isLongPressTriggered = false
-                            
                             val currentTime = System.currentTimeMillis()
                             val x = event.x
                             val y = event.y
                             
-                            // Check for double tap (two taps within 300ms)
-                            val isDoubleTap = currentTime - lastTouchTime < 300 &&
-                                Math.abs(x - lastTouchX) < 50 &&
-                                Math.abs(y - lastTouchY) < 50
-                            
-                            if (isDoubleTap) {
-                                // Double tap - select all text
-                                selectAllText()
-                                return true
-                            }
-                            
-                            // Setup long press
-                            val runnable = Runnable {
-                                if (!isLongPressTriggered) {
-                                    isLongPressTriggered = true
+                            if (currentTime - lastTouchTime < 300 && 
+                                Math.abs(x - lastTouchX) < 50 && 
+                                Math.abs(y - lastTouchY) < 50) {
+                                cancelLongPress()
+                                selectWordAtPosition(this@apply, x, y)
+                            } else {
+                                cancelLongPress()
+                                val runnable = Runnable {
                                     selectWordAtPosition(this@apply, x, y)
                                 }
+                                longPressRunnable = runnable
+                                longPressHandler.postDelayed(runnable, 300)
                             }
-                            pendingLongPressRunnable = runnable
-                            longPressHandler.postDelayed(runnable, 350)
                             
                             lastTouchTime = currentTime
                             lastTouchX = x
@@ -1584,7 +1596,7 @@ class FloatingBubbleService : Service() {
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                             cancelLongPress()
                             
-                            if (!isLongPressTriggered && this@apply.hasSelection()) {
+                            if (this@apply.hasSelection()) {
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
@@ -1592,7 +1604,7 @@ class FloatingBubbleService : Service() {
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
                                 }
-                            } else if (!isLongPressTriggered && !this@apply.hasSelection()) {
+                            } else {
                                 hideSelectionHandles()
                                 hideFloatingActionBar()
                             }
@@ -1601,8 +1613,7 @@ class FloatingBubbleService : Service() {
                         MotionEvent.ACTION_MOVE -> {
                             val dx = Math.abs(event.x - lastTouchX)
                             val dy = Math.abs(event.y - lastTouchY)
-                            // Cancel long press if user moves finger
-                            if (dx > 15 || dy > 15) {
+                            if (dx > 10 || dy > 10) {
                                 cancelLongPress()
                             }
                         }
@@ -1610,50 +1621,11 @@ class FloatingBubbleService : Service() {
                     return false
                 }
                 
-                private fun selectAllText() {
-                    if (editText.text.isNotEmpty()) {
-                        editText.selectAll()
-                        val allText = editText.text.toString()
-                        currentSelectedText = allText
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(allText)
-                        showSelectionHandles()
-                        EmergencyLog.log("Double tap: selected all text")
-                    }
-                }
-                
-                private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
-                    try {
-                        val layout = editText.layout
-                        if (layout != null) {
-                            val line = layout.getLineForVertical(editText.scrollY + y.toInt())
-                            val offset = layout.getOffsetForHorizontal(line, x)
-                            
-                            val text = editText.text.toString()
-                            if (offset >= 0 && offset <= text.length) {
-                                var wordStart = offset
-                                var wordEnd = offset
-                                
-                                while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
-                                    wordStart--
-                                }
-                                while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
-                                    wordEnd++
-                                }
-                                
-                                if (wordStart < wordEnd) {
-                                    editText.setSelection(wordStart, wordEnd)
-                                    val selectedWord = text.substring(wordStart, wordEnd)
-                                    currentSelectedText = selectedWord
-                                    isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selectedWord)
-                                    showSelectionHandles()
-                                    EmergencyLog.log("Long press selected word: '$selectedWord' at offset $offset")
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        EmergencyLog.logException(e, "selectWordAtPosition")
+                private fun cancelLongPress() {
+                    val runnable = longPressRunnable
+                    if (runnable != null) {
+                        longPressHandler.removeCallbacks(runnable)
+                        longPressRunnable = null
                     }
                 }
             })
@@ -2015,7 +1987,7 @@ class FloatingBubbleService : Service() {
         hideSelectionHandles()
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
-        cancelLongPress()
+        scrollUpdateRunnable?.let { scrollUpdateHandler.removeCallbacks(it) }
     }
 
     override fun onBind(intent: Intent?) = null
