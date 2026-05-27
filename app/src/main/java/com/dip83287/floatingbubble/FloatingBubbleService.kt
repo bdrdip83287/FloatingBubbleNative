@@ -2,6 +2,7 @@ package com.dip83287.floatingbubble
 
 import android.animation.Animator
 import android.animation.ValueAnimator
+import android.app.AlertDialog
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -96,7 +97,7 @@ class FloatingBubbleService : Service() {
     private var currentSelectedText = ""
 
     private val notesList = mutableListOf<NoteItem>()
-    private lateinit var notesAdapter: NoteAdapter
+    private var notesAdapter: NoteAdapter? = null
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
@@ -737,7 +738,7 @@ class FloatingBubbleService : Service() {
 
         // Title Input
         titleInput = EditText(this).apply {
-            setText(notesList.firstOrNull()?.title ?: NOTEPAD_TITLE)
+            setText(if (notesList.isNotEmpty()) notesList[0].title else NOTEPAD_TITLE)
             textSize = 18f
             setTextColor(Color.DKGRAY)
             setBackgroundColor(Color.TRANSPARENT)
@@ -754,8 +755,10 @@ class FloatingBubbleService : Service() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) {
-                    notesList.firstOrNull()?.title = s.toString()
-                    scheduleSave()
+                    if (notesList.isNotEmpty()) {
+                        notesList[0].title = s.toString()
+                        scheduleSave()
+                    }
                 }
             })
         }
@@ -763,12 +766,12 @@ class FloatingBubbleService : Service() {
 
         // Content EditText with NATIVE selection handles
         editText = EditText(this).apply {
-            setText(notesList.firstOrNull()?.content ?: "")
+            setText(if (notesList.isNotEmpty()) notesList[0].content else "")
             textSize = 17f
             setTextColor(Color.DKGRAY)
             setBackgroundColor(Color.TRANSPARENT)
             
-            // ✅ Proper line height for Bengali & English
+            // Proper line height for Bengali & English
             setLineSpacing(2f, 1.25f)
             
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
@@ -781,19 +784,20 @@ class FloatingBubbleService : Service() {
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ IMPORTANT: Native selection handles enabled
+            // IMPORTANT: Native selection handles enabled
             setTextIsSelectable(true)
             isLongClickable = true
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
-            // Handle text changes with auto-save
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) {
-                    notesList.firstOrNull()?.content = s.toString()
-                    scheduleSave()
+                    if (notesList.isNotEmpty()) {
+                        notesList[0].content = s.toString()
+                        scheduleSave()
+                    }
                 }
             })
         }
@@ -822,7 +826,7 @@ class FloatingBubbleService : Service() {
                 bottomMargin = 8
             }
             setOnClickListener {
-                showNoteList()
+                showNoteListDialog()
             }
         }
         container.addView(noteListButton)
@@ -849,12 +853,17 @@ class FloatingBubbleService : Service() {
         saveHandler.postDelayed(saveRunnable!!, 500)
     }
 
-    private fun showNoteList() {
-        // Create note list dialog or view
-        val notesArray = notesList.map { "${it.title}\n${it.content.take(50)}..." }.toTypedArray()
+    private fun showNoteListDialog() {
+        if (notesList.isEmpty()) {
+            Toast.makeText(this, "No notes available", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val noteTitles = notesList.map { it.title }.toTypedArray()
+        
         AlertDialog.Builder(this)
             .setTitle("My Notes")
-            .setItems(notesArray) { _, which ->
+            .setItems(noteTitles) { _, which ->
                 val note = notesList[which]
                 titleInput.setText(note.title)
                 editText.setText(note.content)
@@ -870,6 +879,7 @@ class FloatingBubbleService : Service() {
                 editText.setText(newNote.content)
                 saveNotesToPrefs()
                 updateBubbleCount()
+                Toast.makeText(this, "New note created", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Close", null)
             .show()
