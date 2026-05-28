@@ -774,7 +774,7 @@ class FloatingBubbleService : Service() {
     
     // Create selection handles (Circle style - no padding)
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 40
+        val handleSize = dpToPx(40)
         
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createCircleHandleDrawable())
@@ -906,6 +906,7 @@ class FloatingBubbleService : Service() {
     }
     
     // ✅ CORRECTED Handle Positioning - 15px upward adjustment
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
     private fun updateHandlePositions() {
         val start = editText.selectionStart
         val end = editText.selectionEnd
