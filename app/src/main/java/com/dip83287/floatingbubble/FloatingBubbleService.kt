@@ -908,6 +908,7 @@ class FloatingBubbleService : Service() {
     // ✅ CORRECTED Handle Positioning - 15px upward adjustment
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
     private fun updateHandlePositions() {
+        if (isScrolling) return
         val start = editText.selectionStart
         val end = editText.selectionEnd
 
