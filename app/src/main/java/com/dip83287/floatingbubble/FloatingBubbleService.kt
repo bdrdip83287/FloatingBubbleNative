@@ -96,6 +96,9 @@ class FloatingBubbleService : Service() {
     private var flingAnimator: ValueAnimator? = null
 
     private var velocityTracker: VelocityTracker? = null
+    private var isScrolling = false
+    private val scrollDelayHandler = Handler(Looper.getMainLooper())
+    private var scrollEndRunnable: Runnable? = null
     private var velocityY = 0f
 
     private var floatingActionBar: View? = null
@@ -908,6 +911,7 @@ class FloatingBubbleService : Service() {
     // ✅ CORRECTED Handle Positioning - 15px upward adjustment
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
     private fun updateHandlePositions() {
+        if (isScrolling) return
         if (isScrolling) return
         val start = editText.selectionStart
         val end = editText.selectionEnd
