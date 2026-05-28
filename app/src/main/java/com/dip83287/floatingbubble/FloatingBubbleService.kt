@@ -925,7 +925,7 @@ class FloatingBubbleService : Service() {
         
         val handleSize = 40
         val halfHandle = handleSize / 2
-        val upwardOffset = 30 // 15px upward adjustment
+        val upwardOffset = 40 // 15px upward adjustment
 
         // Left handle (selection start)
         val startLine = layout.getLineForOffset(start)
@@ -1005,7 +1005,7 @@ class FloatingBubbleService : Service() {
         
         val handleSize = 40
         val halfHandle = handleSize / 2
-        val upwardOffset = 30 // 15px upward adjustment
+        val upwardOffset = 40 // 15px upward adjustment
         
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
