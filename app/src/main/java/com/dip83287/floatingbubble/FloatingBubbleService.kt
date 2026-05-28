@@ -102,7 +102,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // ✅ Circle Selection Handles (Native Android style)
+    // Circle Selection Handles (Native Android style)
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -753,7 +753,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Circle Handle Drawable (Native Android style)
+    // Circle Handle Drawable (Native Android style)
     private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -772,7 +772,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Create selection handles (Circle style - no padding)
+    // Create selection handles (Circle style - no padding)
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 40
         
@@ -892,7 +892,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Debounced handle update
+    // Debounced handle update
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
         handleUpdatePending = true
@@ -905,7 +905,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ CORRECTED Handle Positioning (Native Android Style)
+    // ✅ CORRECTED Handle Positioning - 15px upward adjustment
     private fun updateHandlePositions() {
         val start = editText.selectionStart
         val end = editText.selectionEnd
@@ -925,6 +925,7 @@ class FloatingBubbleService : Service() {
         
         val handleSize = 40
         val halfHandle = handleSize / 2
+        val upwardOffset = 15 // 15px upward adjustment
 
         // Left handle (selection start)
         val startLine = layout.getLineForOffset(start)
@@ -934,7 +935,7 @@ class FloatingBubbleService : Service() {
         leftHandleView?.let { handle ->
             (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
                 params.x = (startX - halfHandle).toInt()
-                params.y = (startY - halfHandle).toInt()
+                params.y = (startY - halfHandle - upwardOffset).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (_: Exception) {}
@@ -949,7 +950,7 @@ class FloatingBubbleService : Service() {
         rightHandleView?.let { handle ->
             (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
                 params.x = (endX - halfHandle).toInt()
-                params.y = (endY - halfHandle).toInt()
+                params.y = (endY - halfHandle - upwardOffset).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
                 } catch (_: Exception) {}
@@ -1004,6 +1005,7 @@ class FloatingBubbleService : Service() {
         
         val handleSize = 40
         val halfHandle = handleSize / 2
+        val upwardOffset = 15 // 15px upward adjustment
         
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
@@ -1024,7 +1026,7 @@ class FloatingBubbleService : Service() {
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
             leftParams.x = (startX - halfHandle).toInt()
-            leftParams.y = (startY - halfHandle).toInt()
+            leftParams.y = (startY - halfHandle - upwardOffset).toInt()
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
             } catch (e: Exception) { }
@@ -1041,7 +1043,7 @@ class FloatingBubbleService : Service() {
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
             rightParams.x = (endX - halfHandle).toInt()
-            rightParams.y = (endY - halfHandle).toInt()
+            rightParams.y = (endY - halfHandle - upwardOffset).toInt()
             try {
                 actionBarWindowManager?.addView(rightHandleView, rightParams)
             } catch (e: Exception) { }
@@ -1061,7 +1063,7 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // ✅ Show Action Bar 15px above selected text
+    // Show Action Bar 15px above selected text
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -1225,7 +1227,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Share large text using file-based sharing
+    // Share large text using file-based sharing
     private fun shareLargeText(text: String) {
         try {
             var textToShare = text
