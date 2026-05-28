@@ -923,9 +923,9 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        val handleSize = 40
+        val handleSize = 30
         val halfHandle = handleSize / 2
-        val upwardOffset = 70 // 15px upward adjustment
+        val upwardOffset = 60 // 15px upward adjustment
 
         // Left handle (selection start)
         val startLine = layout.getLineForOffset(start)
@@ -934,7 +934,7 @@ class FloatingBubbleService : Service() {
 
         leftHandleView?.let { handle ->
             (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
-                params.x = (startX - halfHandle).toInt()
+                params.x = (startX - halfHandle + 20).toInt()
                 params.y = (startY - halfHandle - upwardOffset).toInt()
                 try {
                     actionBarWindowManager?.updateViewLayout(handle, params)
@@ -1003,9 +1003,9 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        val handleSize = 20
+        val handleSize = 30
         val halfHandle = handleSize / 2
-        val upwardOffset = 70 // 15px upward adjustment
+        val upwardOffset = 60 // 15px upward adjustment
         
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
@@ -1025,7 +1025,7 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
-            leftParams.x = (startX - halfHandle).toInt()
+            leftParams.x = ( + 20).toInt()
             leftParams.y = (startY - halfHandle - upwardOffset).toInt()
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
