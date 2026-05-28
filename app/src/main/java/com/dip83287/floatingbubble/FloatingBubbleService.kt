@@ -42,8 +42,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -96,9 +94,6 @@ class FloatingBubbleService : Service() {
     private var flingAnimator: ValueAnimator? = null
 
     private var velocityTracker: VelocityTracker? = null
-    private var isScrolling = false
-    private val scrollDelayHandler = Handler(Looper.getMainLooper())
-    private var scrollEndRunnable: Runnable? = null
     private var velocityY = 0f
 
     private var floatingActionBar: View? = null
@@ -117,15 +112,27 @@ class FloatingBubbleService : Service() {
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
-    // Handle update debounce (scroll-safe, glitch-free)
-    private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
-    private var handleUpdatePending = false
+    // ✅ Smart Handle Update System - Prevents jitter during scrolling
+    private val handleUpdateHandler = Handler(Looper.getMainLooper())
+    private var handleUpdateRunnable: Runnable? = null
+    private var isScrolling = false
+    private var lastHandleUpdateTime = 0L
+    private val HANDLE_UPDATE_DELAY = 16L // ~60fps, but only when scrolling stops
+    
+    // Cached handle positions to prevent unnecessary updates
+    private var cachedLeftX = -1
+    private var cachedLeftY = -1
+    private var cachedRightX = -1
+    private var cachedRightY = -1
 
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
+
+    // dp to px converter
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 
     data class NoteItem(
         val id: Long,
@@ -756,7 +763,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // Circle Handle Drawable (Native Android style)
+    // Circle Handle Drawable
     private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -775,7 +782,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Create selection handles (Circle style - no padding)
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = dpToPx(40)
         
@@ -796,7 +802,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // Handle Touch Listener with zoom effect
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -855,7 +860,7 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        updateHandlePositionsSafe()
+                        updateHandlePositionsImmediate()
                         
                         val (start, end) = getSelection()
                         if (start != end && start >= 0 && end <= editText.text.length) {
@@ -895,24 +900,8 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Debounced handle update
-    private fun updateHandlePositionsSafe() {
-        if (handleUpdatePending) return
-        handleUpdatePending = true
-        handleUpdateDebounceHandler.post {
-            try {
-                updateHandlePositions()
-            } finally {
-                handleUpdatePending = false
-            }
-        }
-    }
-    
-    // ✅ CORRECTED Handle Positioning - 15px upward adjustment
-    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
-    private fun updateHandlePositions() {
-        if (isScrolling) return
-        if (isScrolling) return
+    // ✅ Immediate handle update (for drag operations)
+    private fun updateHandlePositionsImmediate() {
         val start = editText.selectionStart
         val end = editText.selectionEnd
 
@@ -929,42 +918,153 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        val handleSize = 30
-        val halfHandle = handleSize / 2
-        val upwardOffset = 60 // 15px upward adjustment
+        val halfHandle = dpToPx(20) // handleSize/2
+        val upwardOffset = dpToPx(15)
+        val rightOffset = dpToPx(15)
 
-        // Left handle (selection start)
         val startLine = layout.getLineForOffset(start)
         val startX = layout.getPrimaryHorizontal(start) + location[0]
         val startY = layout.getLineBottom(startLine) + location[1]
 
-        leftHandleView?.let { handle ->
-            (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
-                params.x = (startX - halfHandle + 20).toInt()
-                params.y = (startY - halfHandle - upwardOffset).toInt()
-                try {
-                    actionBarWindowManager?.updateViewLayout(handle, params)
-                } catch (_: Exception) {}
-            }
-        }
-
-        // Right handle (selection end)
         val endLine = layout.getLineForOffset(end)
         val endX = layout.getPrimaryHorizontal(end) + location[0]
         val endY = layout.getLineBottom(endLine) + location[1]
 
+        // Update left handle
+        leftHandleView?.let { handle ->
+            (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
+                val newX = (startX - halfHandle + rightOffset).toInt()
+                val newY = (startY - halfHandle - upwardOffset).toInt()
+                if (newX != cachedLeftX || newY != cachedLeftY) {
+                    cachedLeftX = newX
+                    cachedLeftY = newY
+                    params.x = newX
+                    params.y = newY
+                    try {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
+        // Update right handle
         rightHandleView?.let { handle ->
             (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
-                params.x = (endX - halfHandle).toInt()
-                params.y = (endY - halfHandle - upwardOffset).toInt()
-                try {
-                    actionBarWindowManager?.updateViewLayout(handle, params)
-                } catch (_: Exception) {}
+                val newX = (endX - halfHandle + rightOffset).toInt()
+                val newY = (endY - halfHandle - upwardOffset).toInt()
+                if (newX != cachedRightX || newY != cachedRightY) {
+                    cachedRightX = newX
+                    cachedRightY = newY
+                    params.x = newX
+                    params.y = newY
+                    try {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    } catch (_: Exception) {}
+                }
             }
         }
     }
     
-    // EditText extension for selection change listener
+    // ✅ Smart handle update - only updates when scrolling stops
+    private fun updateHandlePositionsSmart() {
+        val start = editText.selectionStart
+        val end = editText.selectionEnd
+
+        if (start == end) {
+            hideSelectionHandles()
+            return
+        }
+        
+        // If currently scrolling, schedule update for later
+        if (isScrolling) {
+            scheduleHandleUpdate()
+            return
+        }
+        
+        val layout = editText.layout ?: run { 
+            hideSelectionHandles()
+            return 
+        }
+        
+        val location = IntArray(2)
+        editText.getLocationOnScreen(location)
+        
+        val halfHandle = dpToPx(20)
+        val upwardOffset = dpToPx(15)
+        val rightOffset = dpToPx(15)
+
+        val startLine = layout.getLineForOffset(start)
+        val startX = layout.getPrimaryHorizontal(start) + location[0]
+        val startY = layout.getLineBottom(startLine) + location[1]
+
+        val endLine = layout.getLineForOffset(end)
+        val endX = layout.getPrimaryHorizontal(end) + location[0]
+        val endY = layout.getLineBottom(endLine) + location[1]
+
+        var needsUpdate = false
+
+        leftHandleView?.let { handle ->
+            (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
+                val newX = (startX - halfHandle + rightOffset).toInt()
+                val newY = (startY - halfHandle - upwardOffset).toInt()
+                if (newX != cachedLeftX || newY != cachedLeftY) {
+                    cachedLeftX = newX
+                    cachedLeftY = newY
+                    params.x = newX
+                    params.y = newY
+                    needsUpdate = true
+                }
+            }
+        }
+
+        rightHandleView?.let { handle ->
+            (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
+                val newX = (endX - halfHandle + rightOffset).toInt()
+                val newY = (endY - halfHandle - upwardOffset).toInt()
+                if (newX != cachedRightX || newY != cachedRightY) {
+                    cachedRightX = newX
+                    cachedRightY = newY
+                    params.x = newX
+                    params.y = newY
+                    needsUpdate = true
+                }
+            }
+        }
+        
+        if (needsUpdate) {
+            try {
+                leftHandleView?.let { actionBarWindowManager?.updateViewLayout(it, it.layoutParams) }
+                rightHandleView?.let { actionBarWindowManager?.updateViewLayout(it, it.layoutParams) }
+            } catch (_: Exception) {}
+        }
+    }
+    
+    private fun scheduleHandleUpdate() {
+        handleUpdateRunnable?.let { handleUpdateHandler.removeCallbacks(it) }
+        handleUpdateRunnable = Runnable {
+            updateHandlePositionsSmart()
+        }
+        handleUpdateHandler.postDelayed(handleUpdateRunnable, HANDLE_UPDATE_DELAY)
+    }
+    
+    // Scroll start callback
+    private fun onScrollStart() {
+        isScrolling = true
+        // Cancel any pending updates
+        handleUpdateRunnable?.let { handleUpdateHandler.removeCallbacks(it) }
+    }
+    
+    // Scroll end callback
+    private fun onScrollEnd() {
+        isScrolling = false
+        // Update handle positions once scrolling stops
+        updateHandlePositionsSmart()
+    }
+    
+    private fun updateHandlePositions() {
+        updateHandlePositionsSmart()
+    }
+    
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
         this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
             override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
@@ -1003,27 +1103,11 @@ class FloatingBubbleService : Service() {
             rightHandleView = handles.second
         }
         
-        val layout = editText.layout
-        if (layout == null) return
-        
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
-        
-        val handleSize = 30
-        val halfHandle = handleSize / 2
-        val upwardOffset = 60 // 15px upward adjustment
-        
-        val startLine = layout.getLineForOffset(start)
-        val startX = layout.getPrimaryHorizontal(start) + location[0]
-        val startY = layout.getLineBottom(startLine) + location[1]
-        
-        val endLine = layout.getLineForOffset(end)
-        val endX = layout.getPrimaryHorizontal(end) + location[0]
-        val endY = layout.getLineBottom(endLine) + location[1]
+        updateHandlePositionsSmart()
         
         if (leftHandleView?.parent == null) {
             val leftParams = WindowManager.LayoutParams(
-                handleSize, handleSize,
+                dpToPx(40), dpToPx(40),
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -1031,8 +1115,6 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             leftParams.gravity = Gravity.TOP or Gravity.START
-            leftParams.x = ( + 20).toInt()
-            leftParams.y = (startY - halfHandle - upwardOffset).toInt()
             try {
                 actionBarWindowManager?.addView(leftHandleView, leftParams)
             } catch (e: Exception) { }
@@ -1040,7 +1122,7 @@ class FloatingBubbleService : Service() {
         
         if (rightHandleView?.parent == null) {
             val rightParams = WindowManager.LayoutParams(
-                handleSize, handleSize,
+                dpToPx(40), dpToPx(40),
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -1048,12 +1130,12 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             rightParams.gravity = Gravity.TOP or Gravity.START
-            rightParams.x = (endX - halfHandle).toInt()
-            rightParams.y = (endY - halfHandle - upwardOffset).toInt()
             try {
                 actionBarWindowManager?.addView(rightHandleView, rightParams)
             } catch (e: Exception) { }
         }
+        
+        updateHandlePositionsSmart()
     }
     
     private fun hideSelectionHandles() {
@@ -1066,10 +1148,13 @@ class FloatingBubbleService : Service() {
                 actionBarWindowManager?.removeView(it)
                 rightHandleView = null
             }
+            cachedLeftX = -1
+            cachedLeftY = -1
+            cachedRightX = -1
+            cachedRightY = -1
         } catch (e: Exception) { }
     }
 
-    // Show Action Bar 15px above selected text
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -1223,8 +1308,8 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
-            params.x = x.toInt() - 50
-            params.y = (y - 55).toInt()
+            params.x = x.toInt() - dpToPx(50)
+            params.y = (y - dpToPx(55)).toInt()
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
@@ -1233,7 +1318,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Share large text using file-based sharing
     private fun shareLargeText(text: String) {
         try {
             var textToShare = text
@@ -1613,12 +1697,18 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
+            // ✅ Smart scroll listener for handles
             viewTreeObserver.addOnScrollChangedListener {
                 if (editText.hasSelection()) {
                     temporarilyHideActionBar()
                     scheduleActionBarShow()
+                    // Mark scrolling started
+                    if (!isScrolling) {
+                        onScrollStart()
+                    }
+                    // Schedule update for when scrolling stops
+                    scheduleHandleUpdate()
                 }
-                updateHandlePositionsSafe()
             }
         }
         
@@ -1652,12 +1742,20 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = true
             
             setOnSelectionChangedListener { _, _ ->
-                updateHandlePositionsSafe()
+                if (!isScrolling) {
+                    updateHandlePositionsSmart()
+                } else {
+                    scheduleHandleUpdate()
+                }
             }
             
             addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
-                    updateHandlePositionsSafe()
+                    if (!isScrolling) {
+                        updateHandlePositionsSmart()
+                    } else {
+                        scheduleHandleUpdate()
+                    }
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -1716,6 +1814,11 @@ class FloatingBubbleService : Service() {
                                 hideFloatingActionBar()
                             }
                             isSelecting = false
+                            
+                            // Reset scroll state on touch up
+                            if (isScrolling) {
+                                onScrollEnd()
+                            }
                         }
                         
                         MotionEvent.ACTION_MOVE -> {
@@ -1724,7 +1827,8 @@ class FloatingBubbleService : Service() {
                             if (dx > 20 || dy > 20) {
                                 cancelLongPress()
                                 if (this@apply.hasSelection()) {
-                                    updateHandlePositionsSafe()
+                                    // During drag, use immediate update
+                                    updateHandlePositionsImmediate()
                                 }
                             }
                         }
@@ -2068,6 +2172,7 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         zoomValueAnimator?.cancel()
+        handleUpdateRunnable?.let { handleUpdateHandler.removeCallbacks(it) }
     }
 
     override fun onBind(intent: Intent?) = null
