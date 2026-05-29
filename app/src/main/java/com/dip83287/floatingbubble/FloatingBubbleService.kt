@@ -803,6 +803,7 @@ class FloatingBubbleService : Service() {
     // ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
 // ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
 // ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
+// ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
 private fun createTearDropDrawable(): Drawable {
     return object : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -814,7 +815,7 @@ private fun createTearDropDrawable(): Drawable {
             val height = bounds.height().toFloat()
 
             val circleRadius = width * 0.30f
-            val barNarrowWidth = width * 0.20f   // Top side (more narrow, for taper)
+            val barNarrowWidth = width * 0.10f   // Top side (more narrow, for taper)
             val barWideWidth = width * 0.61f     // Just above circle
             val barHeight = height - circleRadius
 
