@@ -19,7 +19,6 @@ import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.RectF
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -42,9 +41,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.sin
-import kotlin.math.cos
-import kotlin.math.PI
 
 class FloatingBubbleService : Service() {
 
@@ -103,7 +99,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Enhanced Tear Drop Selection Handles
+    // Sharp Tear Drop Selection Handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -803,15 +799,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Enhanced Tear Drop Handle Drawable (Longer, Sharper, Smooth Merge)
-    private fun createTearDropDrawable(): Drawable {
+    // ✅ Sharp Tear Drop Handle Drawable (Long vertical bar with sharp tip, 92% of height)
+    private fun createSharpTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
-                style = Paint.Style.FILL
-            }
-            private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#1a6fb3")
                 style = Paint.Style.FILL
             }
             
@@ -820,96 +812,64 @@ class FloatingBubbleService : Service() {
                 val height = bounds.height().toFloat()
                 val centerX = width / 2f
                 
-                // Draw shadow effect (slightly offset)
-                canvas.save()
-                canvas.translate(1f, 1f)
-                drawTearDrop(canvas, centerX, height, shadowPaint)
-                canvas.restore()
-                
-                // Draw main tear drop
-                drawTearDrop(canvas, centerX, height, paint)
-            }
-            
-            private fun drawTearDrop(canvas: Canvas, centerX: Float, height: Float, paint: Paint) {
-                val circleRadius = height * 0.45f
+                // Circle radius (bottom part)
+                val circleRadius = width * 0.5f
                 val circleY = height - circleRadius
                 
-                // Create smooth tear drop path using bezier curves
-                val path = Path()
+                // Draw the circular part at the bottom
+                canvas.drawCircle(centerX, circleY, circleRadius, paint)
                 
-                // Start from top point (sharp tip)
-                val tipX = centerX
-                val tipY = height * 0.08f
-                path.moveTo(tipX, tipY)
+                // Create sharp tear drop path
+                val tearDropPath = Path().apply {
+                    // Start from the sharp tip at the top
+                    moveTo(centerX, 0f)
+                    
+                    // Curve down to the right side
+                    cubicTo(
+                        centerX + width * 0.3f, height * 0.25f,
+                        centerX + width * 0.45f, height * 0.6f,
+                        centerX + circleRadius, circleY - circleRadius * 0.3f
+                    )
+                    
+                    // Curve around the right side of the circle
+                    cubicTo(
+                        centerX + circleRadius, circleY - circleRadius * 0.1f,
+                        centerX + circleRadius, circleY + circleRadius * 0.1f,
+                        centerX + circleRadius, circleY + circleRadius * 0.3f
+                    )
+                    
+                    // Curve to bottom of circle
+                    cubicTo(
+                        centerX + circleRadius * 0.7f, circleY + circleRadius,
+                        centerX + circleRadius * 0.3f, circleY + circleRadius,
+                        centerX, circleY + circleRadius
+                    )
+                    
+                    // Curve back up the left side
+                    cubicTo(
+                        centerX - circleRadius * 0.3f, circleY + circleRadius,
+                        centerX - circleRadius * 0.7f, circleY + circleRadius,
+                        centerX - circleRadius, circleY + circleRadius * 0.3f
+                    )
+                    
+                    // Curve up the left side
+                    cubicTo(
+                        centerX - circleRadius, circleY + circleRadius * 0.1f,
+                        centerX - circleRadius, circleY - circleRadius * 0.1f,
+                        centerX - circleRadius, circleY - circleRadius * 0.3f
+                    )
+                    
+                    // Curve back to the sharp tip
+                    cubicTo(
+                        centerX - width * 0.45f, height * 0.6f,
+                        centerX - width * 0.3f, height * 0.25f,
+                        centerX, 0f
+                    )
+                    
+                    close()
+                }
                 
-                // Upper left curve - narrow and smooth
-                val upperLeftX = centerX - height * 0.12f
-                val upperLeftY = height * 0.25f
-                val upperLeftControl1X = centerX - height * 0.08f
-                val upperLeftControl1Y = height * 0.15f
-                val upperLeftControl2X = centerX - height * 0.1f
-                val upperLeftControl2Y = height * 0.2f
-                path.cubicTo(upperLeftControl1X, upperLeftControl1Y, upperLeftControl2X, upperLeftControl2Y, upperLeftX, upperLeftY)
-                
-                // Mid left curve - widening to meet circle
-                val midLeftX = centerX - height * 0.35f
-                val midLeftY = height * 0.55f
-                val midLeftControl1X = centerX - height * 0.2f
-                val midLeftControl1Y = height * 0.35f
-                val midLeftControl2X = centerX - height * 0.28f
-                val midLeftControl2Y = height * 0.45f
-                path.cubicTo(midLeftControl1X, midLeftControl1Y, midLeftControl2X, midLeftControl2Y, midLeftX, midLeftY)
-                
-                // Bottom left curve - smoothly merging with circle
-                val bottomLeftX = centerX - circleRadius * 0.9f
-                val bottomLeftY = circleY + circleRadius * 0.5f
-                val bottomLeftControl1X = centerX - height * 0.4f
-                val bottomLeftControl1Y = height * 0.65f
-                val bottomLeftControl2X = centerX - circleRadius * 0.7f
-                val bottomLeftControl2Y = circleY + circleRadius * 0.3f
-                path.cubicTo(bottomLeftControl1X, bottomLeftControl1Y, bottomLeftControl2X, bottomLeftControl2Y, bottomLeftX, bottomLeftY)
-                
-                // Arc around the bottom circle
-                val circleArcRect = RectF(
-                    centerX - circleRadius,
-                    circleY - circleRadius,
-                    centerX + circleRadius,
-                    circleY + circleRadius
-                )
-                path.arcTo(circleArcRect, 180f, 180f)
-                
-                // Bottom right curve - coming back up
-                val bottomRightX = centerX + circleRadius * 0.9f
-                val bottomRightY = circleY + circleRadius * 0.5f
-                val bottomRightControl1X = centerX + circleRadius * 0.7f
-                val bottomRightControl1Y = circleY + circleRadius * 0.3f
-                val bottomRightControl2X = centerX + height * 0.4f
-                val bottomRightControl2Y = height * 0.65f
-                path.cubicTo(bottomRightControl1X, bottomRightControl1Y, bottomRightControl2X, bottomRightControl2Y, bottomRightX, bottomRightY)
-                
-                // Mid right curve - narrowing
-                val midRightX = centerX + height * 0.35f
-                val midRightY = height * 0.55f
-                val midRightControl1X = centerX + height * 0.28f
-                val midRightControl1Y = height * 0.45f
-                val midRightControl2X = centerX + height * 0.2f
-                val midRightControl2Y = height * 0.35f
-                path.cubicTo(midRightControl1X, midRightControl1Y, midRightControl2X, midRightControl2Y, midRightX, midRightY)
-                
-                // Upper right curve - coming to tip
-                val upperRightX = centerX + height * 0.12f
-                val upperRightY = height * 0.25f
-                val upperRightControl1X = centerX + height * 0.1f
-                val upperRightControl1Y = height * 0.2f
-                val upperRightControl2X = centerX + height * 0.08f
-                val upperRightControl2Y = height * 0.15f
-                path.cubicTo(upperRightControl1X, upperRightControl1Y, upperRightControl2X, upperRightControl2Y, upperRightX, upperRightY)
-                
-                // Back to tip
-                path.lineTo(tipX, tipY)
-                path.close()
-                
-                canvas.drawPath(path, paint)
+                canvas.drawPath(tearDropPath, paint)
             }
             
             override fun setAlpha(alpha: Int) {}
@@ -919,19 +879,17 @@ class FloatingBubbleService : Service() {
     }
     
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 48
+        val handleSize = 52 // Slightly larger for the sharp tear drop
         
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createTearDropDrawable())
+            setImageDrawable(createSharpTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
-            // Mirror for left handle (pointing outward)
-            scaleX = -1f
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createTearDropDrawable())
+            setImageDrawable(createSharpTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -1076,7 +1034,7 @@ class FloatingBubbleService : Service() {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 48
+            val handleSize = 52
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
 
@@ -1157,7 +1115,7 @@ class FloatingBubbleService : Service() {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 48
+            val handleSize = 52
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
             
