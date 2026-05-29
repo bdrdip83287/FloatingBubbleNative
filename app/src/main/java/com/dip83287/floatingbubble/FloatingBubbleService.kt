@@ -18,6 +18,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -98,7 +99,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Circle Selection Handles with bar
+    // Tear Drop Selection Handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -117,7 +118,6 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 100L
     
-    // Configuration change tracking
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
     private var lastScreenHeight = 0
@@ -799,32 +799,55 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun createCircleHandleDrawable(): Drawable {
+    // ✅ Tear Drop Handle Drawable (Vertical bar smoothly merged with circle)
+    private fun createTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
-            private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#2196F3")
-                style = Paint.Style.FILL
-            }
-            private val barHeight = 6f
+            private val barHeight = 14f
+            private val barWidth = 12f
+            private val circleRadius = 20f
             
             override fun draw(canvas: Canvas) {
                 val width = bounds.width().toFloat()
                 val height = bounds.height().toFloat()
-                val radius = width / 2f
                 val centerX = width / 2f
                 
-                canvas.drawCircle(centerX, height - radius, radius, paint)
+                // Draw the circular part at the bottom
+                val circleY = height - circleRadius
+                canvas.drawCircle(centerX, circleY, circleRadius, paint)
                 
-                val barWidth = width * 0.6f
+                // Draw the vertical bar smoothly merging with the circle
                 val barLeft = centerX - barWidth / 2
                 val barTop = 0f
                 val barRight = centerX + barWidth / 2
-                val barBottom = barHeight
-                canvas.drawRect(barLeft, barTop, barRight, barBottom, barPaint)
+                val barBottom = height - circleRadius * 1.5f
+                
+                // Create rounded corners for the top of the bar
+                val barPath = Path().apply {
+                    // Start from top-left corner
+                    moveTo(barLeft, barTop)
+                    // Line to top-right corner
+                    lineTo(barRight, barTop)
+                    // Line to bottom-right with slight curve for smooth merge
+                    lineTo(barRight, barBottom)
+                    // Curve to smoothly merge with circle
+                    cubicTo(
+                        barRight, barBottom + circleRadius * 0.5f,
+                        centerX + circleRadius * 0.6f, barBottom + circleRadius * 0.8f,
+                        centerX + circleRadius * 0.8f, barBottom + circleRadius
+                    )
+                    // Curve back to left side
+                    cubicTo(
+                        centerX + circleRadius * 0.4f, barBottom + circleRadius * 0.6f,
+                        barLeft, barBottom + circleRadius * 0.4f,
+                        barLeft, barBottom
+                    )
+                    close()
+                }
+                canvas.drawPath(barPath, paint)
             }
             
             override fun setAlpha(alpha: Int) {}
@@ -834,17 +857,17 @@ class FloatingBubbleService : Service() {
     }
     
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 40
+        val handleSize = 48
         
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createCircleHandleDrawable())
+            setImageDrawable(createTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createCircleHandleDrawable())
+            setImageDrawable(createTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -989,7 +1012,7 @@ class FloatingBubbleService : Service() {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 40
+            val handleSize = 48
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
 
@@ -1070,7 +1093,7 @@ class FloatingBubbleService : Service() {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 40
+            val handleSize = 48
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
             
