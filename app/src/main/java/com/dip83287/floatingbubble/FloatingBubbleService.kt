@@ -800,61 +800,58 @@ class FloatingBubbleService : Service() {
     }
 
     // ✅ Tear Drop Handle Drawable (Vertical bar smoothly merged with circle)
-    private fun createTearDropDrawable(): Drawable {
-        return object : Drawable() {
-            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#2196F3")
-                style = Paint.Style.FILL
-            }
-            private val barHeight = 14f
-            private val barWidth = 12f
-            private val circleRadius = 20f
-            
-            override fun draw(canvas: Canvas) {
-                val width = bounds.width().toFloat()
-                val height = bounds.height().toFloat()
-                val centerX = width / 2f
-                
-                // Draw the circular part at the bottom
-                val circleY = height - circleRadius
-                canvas.drawCircle(centerX, circleY, circleRadius, paint)
-                
-                // Draw the vertical bar smoothly merging with the circle
-                val barLeft = centerX - barWidth / 2
-                val barTop = 0f
-                val barRight = centerX + barWidth / 2
-                val barBottom = height - circleRadius * 1.5f
-                
-                // Create rounded corners for the top of the bar
-                val barPath = Path().apply {
-                    // Start from top-left corner
-                    moveTo(barLeft, barTop)
-                    // Line to top-right corner
-                    lineTo(barRight, barTop)
-                    // Line to bottom-right with slight curve for smooth merge
-                    lineTo(barRight, barBottom)
-                    // Curve to smoothly merge with circle
-                    cubicTo(
-                        barRight, barBottom + circleRadius * 0.5f,
-                        centerX + circleRadius * 0.6f, barBottom + circleRadius * 0.8f,
-                        centerX + circleRadius * 0.8f, barBottom + circleRadius
-                    )
-                    // Curve back to left side
-                    cubicTo(
-                        centerX + circleRadius * 0.4f, barBottom + circleRadius * 0.6f,
-                        barLeft, barBottom + circleRadius * 0.4f,
-                        barLeft, barBottom
-                    )
-                    close()
-                }
-                canvas.drawPath(barPath, paint)
-            }
-            
-            override fun setAlpha(alpha: Int) {}
-            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
-            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    // ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
+private fun createTearDropDrawable(): Drawable {
+    return object : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#2196F3")
+            style = Paint.Style.FILL
         }
+        override fun draw(canvas: Canvas) {
+            val width = bounds.width().toFloat()
+            val height = bounds.height().toFloat()
+
+            val circleRadius = width * 0.4f
+            val barNarrowWidth = width * 0.30f   // Top side (more narrow, for taper)
+            val barWideWidth = width * 0.53f     // Just above circle
+            val barHeight = height - circleRadius
+
+            val centerX = width / 2f
+            val circleCenterY = height - circleRadius
+
+            val path = Path()
+            // Top center (narrowest point)
+            path.moveTo(centerX - barNarrowWidth / 2f, 0f)
+            // Top right
+            path.lineTo(centerX + barNarrowWidth / 2f, 0f)
+            // Right taper to just above circle
+            path.lineTo(centerX + barWideWidth / 2f, barHeight - circleRadius * 0.35f)
+            // Curve to circle edge (smooth connect)
+            path.quadTo(
+                centerX + barWideWidth / 2f, barHeight + circleRadius * 0.10f,
+                centerX + circleRadius * 0.96f, circleCenterY
+            )
+            // Circle arc: from right to left, forming the bottom
+            path.arcTo(
+                centerX - circleRadius, circleCenterY - circleRadius,
+                centerX + circleRadius, circleCenterY + circleRadius,
+                0f, 180f, false
+            )
+            // Left curve up for smooth blend
+            path.quadTo(
+                centerX - barWideWidth / 2f, barHeight + circleRadius * 0.10f,
+                centerX - barWideWidth / 2f, barHeight - circleRadius * 0.35f
+            )
+            // Connect back to top left
+            path.lineTo(centerX - barNarrowWidth / 2f, 0f)
+            path.close()
+            canvas.drawPath(path, paint)
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
+}
     
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 48
