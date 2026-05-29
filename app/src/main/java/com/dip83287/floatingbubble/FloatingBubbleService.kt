@@ -99,7 +99,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Sharp Tear Drop Selection Handles
+    // Tear Drop Selection Handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -799,77 +799,55 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Sharp Tear Drop Handle Drawable (Long vertical bar with sharp tip, 92% of height)
-    private fun createSharpTearDropDrawable(): Drawable {
+    // ✅ Tear Drop Handle Drawable (Vertical bar smoothly merged with circle)
+    private fun createTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
+            private val barHeight = 14f
+            private val barWidth = 12f
+            private val circleRadius = 20f
             
             override fun draw(canvas: Canvas) {
                 val width = bounds.width().toFloat()
                 val height = bounds.height().toFloat()
                 val centerX = width / 2f
                 
-                // Circle radius (bottom part)
-                val circleRadius = width * 0.5f
-                val circleY = height - circleRadius
-                
                 // Draw the circular part at the bottom
+                val circleY = height - circleRadius
                 canvas.drawCircle(centerX, circleY, circleRadius, paint)
                 
-                // Create sharp tear drop path
-                val tearDropPath = Path().apply {
-                    // Start from the sharp tip at the top
-                    moveTo(centerX, 0f)
-                    
-                    // Curve down to the right side
+                // Draw the vertical bar smoothly merging with the circle
+                val barLeft = centerX - barWidth / 2
+                val barTop = 0f
+                val barRight = centerX + barWidth / 2
+                val barBottom = height - circleRadius * 1.5f
+                
+                // Create rounded corners for the top of the bar
+                val barPath = Path().apply {
+                    // Start from top-left corner
+                    moveTo(barLeft, barTop)
+                    // Line to top-right corner
+                    lineTo(barRight, barTop)
+                    // Line to bottom-right with slight curve for smooth merge
+                    lineTo(barRight, barBottom)
+                    // Curve to smoothly merge with circle
                     cubicTo(
-                        centerX + width * 0.3f, height * 0.25f,
-                        centerX + width * 0.45f, height * 0.6f,
-                        centerX + circleRadius, circleY - circleRadius * 0.3f
+                        barRight, barBottom + circleRadius * 0.5f,
+                        centerX + circleRadius * 0.6f, barBottom + circleRadius * 0.8f,
+                        centerX + circleRadius * 0.8f, barBottom + circleRadius
                     )
-                    
-                    // Curve around the right side of the circle
+                    // Curve back to left side
                     cubicTo(
-                        centerX + circleRadius, circleY - circleRadius * 0.1f,
-                        centerX + circleRadius, circleY + circleRadius * 0.1f,
-                        centerX + circleRadius, circleY + circleRadius * 0.3f
+                        centerX + circleRadius * 0.4f, barBottom + circleRadius * 0.6f,
+                        barLeft, barBottom + circleRadius * 0.4f,
+                        barLeft, barBottom
                     )
-                    
-                    // Curve to bottom of circle
-                    cubicTo(
-                        centerX + circleRadius * 0.7f, circleY + circleRadius,
-                        centerX + circleRadius * 0.3f, circleY + circleRadius,
-                        centerX, circleY + circleRadius
-                    )
-                    
-                    // Curve back up the left side
-                    cubicTo(
-                        centerX - circleRadius * 0.3f, circleY + circleRadius,
-                        centerX - circleRadius * 0.7f, circleY + circleRadius,
-                        centerX - circleRadius, circleY + circleRadius * 0.3f
-                    )
-                    
-                    // Curve up the left side
-                    cubicTo(
-                        centerX - circleRadius, circleY + circleRadius * 0.1f,
-                        centerX - circleRadius, circleY - circleRadius * 0.1f,
-                        centerX - circleRadius, circleY - circleRadius * 0.3f
-                    )
-                    
-                    // Curve back to the sharp tip
-                    cubicTo(
-                        centerX - width * 0.45f, height * 0.6f,
-                        centerX - width * 0.3f, height * 0.25f,
-                        centerX, 0f
-                    )
-                    
                     close()
                 }
-                
-                canvas.drawPath(tearDropPath, paint)
+                canvas.drawPath(barPath, paint)
             }
             
             override fun setAlpha(alpha: Int) {}
@@ -879,17 +857,17 @@ class FloatingBubbleService : Service() {
     }
     
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 52 // Slightly larger for the sharp tear drop
+        val handleSize = 48
         
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createSharpTearDropDrawable())
+            setImageDrawable(createTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createSharpTearDropDrawable())
+            setImageDrawable(createTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -1034,7 +1012,7 @@ class FloatingBubbleService : Service() {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 52
+            val handleSize = 48
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
 
@@ -1115,7 +1093,7 @@ class FloatingBubbleService : Service() {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 52
+            val handleSize = 48
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
             
