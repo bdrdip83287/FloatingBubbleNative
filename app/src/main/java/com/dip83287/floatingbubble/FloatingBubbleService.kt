@@ -18,15 +18,12 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
-import android.text.Selection
-import android.text.Spannable
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -43,8 +40,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 class FloatingBubbleService : Service() {
 
@@ -103,7 +98,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // ✅ Selection Handles with bar
+    // Circle Selection Handles with bar
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -115,16 +110,14 @@ class FloatingBubbleService : Service() {
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
-    // Handle update debounce
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
     private var handleUpdatePending = false
     
-    // Scroll jitter fix
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 100L
     
-    // ✅ Configuration change tracking
+    // Configuration change tracking
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
     private var lastScreenHeight = 0
@@ -158,12 +151,10 @@ class FloatingBubbleService : Service() {
             scrollHideHandler = Handler(Looper.getMainLooper())
             scrollStopHandler = Handler(Looper.getMainLooper())
             
-            // Initialize configuration tracking
             lastFontScale = resources.configuration.fontScale
             lastScreenWidth = resources.displayMetrics.widthPixels
             lastScreenHeight = resources.displayMetrics.heightPixels
             
-            // Start configuration check
             startConfigurationCheck()
             
         } catch (e: Exception) {
@@ -171,35 +162,36 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Configuration change checker
     private fun startConfigurationCheck() {
-        configCheckRunnable = Runnable {
-            try {
-                val currentFontScale = resources.configuration.fontScale
-                val currentScreenWidth = resources.displayMetrics.widthPixels
-                val currentScreenHeight = resources.displayMetrics.heightPixels
-                
-                if (currentFontScale != lastFontScale || 
-                    currentScreenWidth != lastScreenWidth || 
-                    currentScreenHeight != lastScreenHeight) {
+        val runnable = object : Runnable {
+            override fun run() {
+                try {
+                    val currentFontScale = resources.configuration.fontScale
+                    val currentScreenWidth = resources.displayMetrics.widthPixels
+                    val currentScreenHeight = resources.displayMetrics.heightPixels
                     
-                    EmergencyLog.log("Configuration changed: fontScale=$lastFontScale->$currentFontScale, screen=${lastScreenWidth}x$lastScreenHeight->${currentScreenWidth}x$currentScreenHeight")
-                    
-                    lastFontScale = currentFontScale
-                    lastScreenWidth = currentScreenWidth
-                    lastScreenHeight = currentScreenHeight
-                    
-                    // ✅ Recalculate handle positions
-                    if (editText.hasSelection()) {
-                        updateHandlePositionsSafe()
+                    if (currentFontScale != lastFontScale || 
+                        currentScreenWidth != lastScreenWidth || 
+                        currentScreenHeight != lastScreenHeight) {
+                        
+                        EmergencyLog.log("Configuration changed")
+                        
+                        lastFontScale = currentFontScale
+                        lastScreenWidth = currentScreenWidth
+                        lastScreenHeight = currentScreenHeight
+                        
+                        if (editText.hasSelection()) {
+                            updateHandlePositionsSafe()
+                        }
                     }
+                } catch (e: Exception) {
+                    EmergencyLog.logException(e, "Configuration check")
                 }
-            } catch (e: Exception) {
-                EmergencyLog.logException(e, "Configuration check")
+                configCheckHandler.postDelayed(this, 500)
             }
-            configCheckHandler.postDelayed(configCheckRunnable, 500)
         }
-        configCheckHandler.postDelayed(configCheckRunnable, 500)
+        configCheckRunnable = runnable
+        configCheckHandler.postDelayed(runnable, 500)
     }
 
     private fun loadNotes() {
@@ -807,8 +799,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Handle Drawable with bar on top
-    private fun createHandleWithBarDrawable(): Drawable {
+    private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
@@ -826,10 +817,8 @@ class FloatingBubbleService : Service() {
                 val radius = width / 2f
                 val centerX = width / 2f
                 
-                // Draw circle
                 canvas.drawCircle(centerX, height - radius, radius, paint)
                 
-                // Draw bar on top (cursor-like bar)
                 val barWidth = width * 0.6f
                 val barLeft = centerX - barWidth / 2
                 val barTop = 0f
@@ -844,19 +833,18 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Create selection handles (Circle with bar)
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 40
         
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createHandleWithBarDrawable())
+            setImageDrawable(createCircleHandleDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createHandleWithBarDrawable())
+            setImageDrawable(createCircleHandleDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -865,7 +853,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // Handle Touch Listener
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -966,7 +953,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Debounced handle update
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
         handleUpdatePending = true
@@ -985,7 +971,6 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Corrected Handle Positioning with config change support
     private fun updateHandlePositions() {
         try {
             val start = editText.selectionStart
@@ -1008,7 +993,6 @@ class FloatingBubbleService : Service() {
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
 
-            // Left handle (selection start)
             val startLine = layout.getLineForOffset(start)
             val startX = layout.getPrimaryHorizontal(start) + location[0]
             val startY = layout.getLineBottom(startLine) + location[1]
@@ -1023,7 +1007,6 @@ class FloatingBubbleService : Service() {
                 }
             }
 
-            // Right handle (selection end)
             val endLine = layout.getLineForOffset(end)
             val endX = layout.getPrimaryHorizontal(end) + location[0]
             val endY = layout.getLineBottom(endLine) + location[1]
@@ -1042,7 +1025,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // EditText extension for selection change listener
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
         this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
             override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
@@ -1054,8 +1036,8 @@ class FloatingBubbleService : Service() {
         })
         
         val watcher = object : TextWatcher {
-            private var prevStart: Int = 0
-            private var prevEnd: Int = 0
+            private var prevStart = 0
+            private var prevEnd = 0
             override fun afterTextChanged(s: Editable?) {
                 val start = selectionStart
                 val end = selectionEnd
@@ -1151,7 +1133,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // Show Action Bar
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -1317,9 +1298,7 @@ class FloatingBubbleService : Service() {
     
     private fun shareLargeText(text: String) {
         try {
-            var useFileSharing = text.length > 500000
-            
-            if (useFileSharing) {
+            if (text.length > 500000) {
                 val timeStamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
                 val fileName = "shared_note_$timeStamp.txt"
                 val cacheFile = java.io.File(cacheDir, fileName)
@@ -1343,11 +1322,8 @@ class FloatingBubbleService : Service() {
                 startActivity(chooser)
                 
                 Handler(Looper.getMainLooper()).postDelayed({
-                    try {
-                        if (cacheFile.exists()) cacheFile.delete()
-                    } catch (e: Exception) { }
+                    try { if (cacheFile.exists()) cacheFile.delete() } catch (e: Exception) { }
                 }, 60000)
-                
             } else {
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
@@ -2143,7 +2119,7 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
-        configCheckHandler.removeCallbacks(configCheckRunnable)
+        configCheckRunnable?.let { configCheckHandler.removeCallbacks(it) }
         zoomValueAnimator?.cancel()
         EmergencyLog.log("FloatingBubbleService destroyed")
     }
