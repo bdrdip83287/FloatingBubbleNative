@@ -972,19 +972,53 @@ private fun createTearDropDrawable(): Drawable {
         }
     }
     
-    private fun updateHandlePositionsSafe() {
-        if (handleUpdatePending) return
-        handleUpdatePending = true
-        handleUpdateDebounceHandler.post {
-            try {
-                if (!isScrolling) {
-                    updateHandlePositions()
-                }
-            } finally {
-                handleUpdatePending = false
-            }
-        }
+    private fun updateHandlePositions() {
+    try {
+        val layout = editText.layout ?: return
+        if (leftHandleView == null || rightHandleView == null) return
+
+        val start = editText.selectionStart
+        val end = editText.selectionEnd
+
+        val startLine = layout.getLineForOffset(start)
+        val endLine = layout.getLineForOffset(end)
+
+        // Selection-bound X,Y (local to EditText)
+        val startX = layout.getPrimaryHorizontal(start)
+        val startY = layout.getLineBottom(startLine).toFloat()
+
+        val endX = layout.getPrimaryHorizontal(end)
+        val endY = layout.getLineBottom(endLine).toFloat()
+
+        // EditText position in screen coordinates
+        val editLocation = IntArray(2)
+        editText.getLocationOnScreen(editLocation)
+        val editX = editLocation[0]
+        val editY = editLocation[1]
+
+        // Handle view size
+        val handleHeight = leftHandleView!!.height
+        val handleWidth = leftHandleView!!.width
+        // Drawable's tip is at centerX, y=0
+
+        val handleTipOffsetX = handleWidth / 2
+        val handleTipOffsetY = 0 // top of handle view
+
+        // ---- Left Handle ----
+        val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
+        leftParams.x = (editX + startX - handleTipOffsetX).toInt()
+        leftParams.y = (editY + startY - handleHeight).toInt() // top = selection bound
+        windowManager.updateViewLayout(leftHandleView, leftParams)
+
+        // ---- Right Handle ----
+        val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
+        rightParams.x = (editX + endX - handleTipOffsetX).toInt()
+        rightParams.y = (editY + endY - handleHeight).toInt()
+        windowManager.updateViewLayout(rightHandleView, rightParams)
+    } catch (e: Exception) {
+        EmergencyLog.logException(e, "updateHandlePositions")
     }
+}
     
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
