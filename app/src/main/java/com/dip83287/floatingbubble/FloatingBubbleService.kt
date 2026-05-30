@@ -8,13 +8,13 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
-import android.graphics.RectF
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
@@ -100,7 +100,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Tear Drop Selection Handles
+    // Sharp Tear Drop Selection Handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -800,71 +800,87 @@ class FloatingBubbleService : Service() {
         }
     }
 
-// ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
-private fun createTearDropDrawable(): Drawable {
-    return object : Drawable() {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#2196F3")
-            style = Paint.Style.FILL
+    // Sharp Tear Drop Handle Drawable
+    private fun createSharpTearDropDrawable(): Drawable {
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#2196F3")
+                style = Paint.Style.FILL
+            }
+            
+            override fun draw(canvas: Canvas) {
+                val width = bounds.width().toFloat()
+                val height = bounds.height().toFloat()
+                val centerX = width / 2f
+                
+                val circleRadius = width * 0.5f
+                val circleY = height - circleRadius
+                
+                canvas.drawCircle(centerX, circleY, circleRadius, paint)
+                
+                val tearDropPath = Path().apply {
+                    moveTo(centerX, 0f)
+                    
+                    cubicTo(
+                        centerX + width * 0.3f, height * 0.25f,
+                        centerX + width * 0.45f, height * 0.6f,
+                        centerX + circleRadius, circleY - circleRadius * 0.3f
+                    )
+                    
+                    cubicTo(
+                        centerX + circleRadius, circleY - circleRadius * 0.1f,
+                        centerX + circleRadius, circleY + circleRadius * 0.1f,
+                        centerX + circleRadius, circleY + circleRadius * 0.3f
+                    )
+                    
+                    cubicTo(
+                        centerX + circleRadius * 0.7f, circleY + circleRadius,
+                        centerX + circleRadius * 0.3f, circleY + circleRadius,
+                        centerX, circleY + circleRadius
+                    )
+                    
+                    cubicTo(
+                        centerX - circleRadius * 0.3f, circleY + circleRadius,
+                        centerX - circleRadius * 0.7f, circleY + circleRadius,
+                        centerX - circleRadius, circleY + circleRadius * 0.3f
+                    )
+                    
+                    cubicTo(
+                        centerX - circleRadius, circleY + circleRadius * 0.1f,
+                        centerX - circleRadius, circleY - circleRadius * 0.1f,
+                        centerX - circleRadius, circleY - circleRadius * 0.3f
+                    )
+                    
+                    cubicTo(
+                        centerX - width * 0.45f, height * 0.6f,
+                        centerX - width * 0.3f, height * 0.25f,
+                        centerX, 0f
+                    )
+                    
+                    close()
+                }
+                
+                canvas.drawPath(tearDropPath, paint)
+            }
+            
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
         }
-        override fun draw(canvas: Canvas) {
-            val width = bounds.width().toFloat()
-            val height = bounds.height().toFloat()
-
-            val circleRadius = width * 0.29f
-            val barNarrowWidth = width * 0.05f   // Top side (more narrow, for taper)
-            val barWideWidth = width * 0.61f     // Just above circle
-            val barHeight = height - circleRadius
-
-            val centerX = width / 2f
-            val circleCenterY = height - circleRadius
-
-            val path = Path()
-            // Top center (narrowest point)
-            path.moveTo(centerX - barNarrowWidth / 2f, 0f)
-            // Top right
-            path.lineTo(centerX + barNarrowWidth / 2f, 0f)
-            // Right taper to just above circle
-            path.lineTo(centerX + barWideWidth / 2f, barHeight - circleRadius * 0.35f)
-            // Curve to circle edge (smooth connect)
-            path.quadTo(
-                centerX + barWideWidth / 2f, barHeight + circleRadius * 0.10f,
-                centerX + circleRadius * 0.96f, circleCenterY
-            )
-            // Circle arc: from right to left, forming the bottom
-            path.arcTo(
-                centerX - circleRadius, circleCenterY - circleRadius,
-                centerX + circleRadius, circleCenterY + circleRadius,
-                0f, 180f, false
-            )
-            // Left curve up for smooth blend
-            path.quadTo(
-                centerX - barWideWidth / 2f, barHeight + circleRadius * 0.10f,
-                centerX - barWideWidth / 2f, barHeight - circleRadius * 0.35f
-            )
-            // Connect back to top left
-            path.lineTo(centerX - barNarrowWidth / 2f, 0f)
-            path.close()
-            canvas.drawPath(path, paint)
-        }
-        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
-        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
-        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
-}
     
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 48
+        val handleSize = 52
         
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createTearDropDrawable())
+            setImageDrawable(createSharpTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createTearDropDrawable())
+            setImageDrawable(createSharpTearDropDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -973,52 +989,77 @@ private fun createTearDropDrawable(): Drawable {
         }
     }
     
-    private fun updateHandlePositions() {
-    try {
-        val layout = editText.layout ?: return
-        if (leftHandleView == null || rightHandleView == null) return
-
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
-
-        // বর্তমান সিলেকশনের highlight box-এর প্রকৃত bound ধরুন:
-        // (getLineTop + getPrimaryHorizontal) এ ভরসা না করে—layout.getSelectionPath() ব্যবহার করুন
-
-        val path = Path()
-        layout.getSelectionPath(start, end, path)
-        val bounds = RectF()
-        path.computeBounds(bounds, true)
-
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
-        val editScreenX = editLocation[0]
-        val editScreenY = editLocation[1]
-
-        val handleWidth = leftHandleView!!.width
-        val handleHeight = leftHandleView!!.height
-
-        // -------- LEFT HANDLE (Highlight box-এর একদম বাঁ প্রান্ত) --------
-        val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-        leftParams.x = (editScreenX + bounds.left - handleWidth / 2).toInt()
-        leftParams.y = (editScreenY + bounds.top - handleHeight).toInt()
-        windowManager.updateViewLayout(leftHandleView, leftParams)
-
-        // -------- RIGHT HANDLE (Highlight box-এর একদম ডান প্রান্ত) --------
-        val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-        rightParams.x = (editScreenX + bounds.right - handleWidth / 2).toInt()
-        rightParams.y = (editScreenY + bounds.bottom - handleHeight).toInt()
-        windowManager.updateViewLayout(rightHandleView, rightParams)
-
-    } catch (e: Exception) {
-        EmergencyLog.logException(e, "updateHandlePositions")
+    private fun updateHandlePositionsSafe() {
+        if (handleUpdatePending) return
+        handleUpdatePending = true
+        handleUpdateDebounceHandler.post {
+            try {
+                if (!isScrolling) {
+                    updateHandlePositions()
+                }
+            } finally {
+                handleUpdatePending = false
+            }
+        }
     }
-}
     
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    
+    private fun updateHandlePositions() {
+        try {
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+                hideSelectionHandles()
+                return
+            }
+            
+            val layout = editText.layout ?: run { 
+                hideSelectionHandles()
+                return 
+            }
+            
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
+            
+            val handleSize = 52
+            val halfHandle = handleSize / 2
+            val upwardShift = dpToPx(15)
+
+            val startLine = layout.getLineForOffset(start)
+            val startX = layout.getPrimaryHorizontal(start) + location[0]
+            val startY = layout.getLineBottom(startLine) + location[1]
+
+            leftHandleView?.let { handle ->
+                (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
+                    params.x = (startX - halfHandle).toInt()
+                    params.y = (startY - halfHandle - upwardShift).toInt()
+                    try {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    } catch (_: Exception) {}
+                }
+            }
+
+            val endLine = layout.getLineForOffset(end)
+            val endX = layout.getPrimaryHorizontal(end) + location[0]
+            val endY = layout.getLineBottom(endLine) + location[1]
+
+            rightHandleView?.let { handle ->
+                (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
+                    params.x = (endX - halfHandle).toInt()
+                    params.y = (endY - halfHandle - upwardShift).toInt()
+                    try {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
+        }
+    }
     
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
         this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
@@ -1065,7 +1106,7 @@ private fun createTearDropDrawable(): Drawable {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 48
+            val handleSize = 52
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
             
@@ -1357,17 +1398,6 @@ private fun createTearDropDrawable(): Drawable {
             hideFloatingActionBar()
         }
     }
-    
-    
-    private fun updateHandlePositionsSafe() {
-    if (!handleUpdatePending) {
-        handleUpdatePending = true
-        handleUpdateDebounceHandler.post {
-            handleUpdatePending = false
-            updateHandlePositions()
-        }
-    }
-}
     
     private fun scheduleActionBarShow() {
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
