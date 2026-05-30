@@ -1007,7 +1007,7 @@ private fun createTearDropDrawable(): Drawable {
         val handleTipY = 0 // হ্যান্ডেলের ড্রয়েবল-এর একদম টপ হলে tip, মানে ঐ পয়েন্টটা লাগানো হবে
 
         // ফাইনাল নিখুঁত পজিশন (ইয়োলো প্যাড়া = +১/−১ px এডজাস্ট করলে perfect লাগে)
-        val fudgeX = 0    // এক্সাটলি gap না থাকলে -2 অথবা +2 করে টেস্ট করুন
+        val fudgeX = 8    // এক্সাটলি gap না থাকলে -2 অথবা +2 করে টেস্ট করুন
         val fudgeY = 0    // চাইলে -2/2 দিয়ে গুতা দিতে হবে, ফন্টের ওপর ডিপেন্ড করে
 
         // ===== Left Handle (Selection start) =====
