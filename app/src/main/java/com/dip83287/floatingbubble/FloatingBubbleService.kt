@@ -1357,6 +1357,17 @@ private fun createTearDropDrawable(): Drawable {
         }
     }
     
+    
+    private fun updateHandlePositionsSafe() {
+    if (!handleUpdatePending) {
+        handleUpdatePending = true
+        handleUpdateDebounceHandler.post {
+            handleUpdatePending = false
+            updateHandlePositions()
+        }
+    }
+}
+    
     private fun scheduleActionBarShow() {
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         
