@@ -981,41 +981,46 @@ private fun createTearDropDrawable(): Drawable {
         val start = editText.selectionStart
         val end = editText.selectionEnd
 
-        // Selection-এর শুরু ও শেষের position (textView এর X,Y)
+        // সিলেকশন-এর highlight bound-এর টপ (visually Draw area)
         val startLine = layout.getLineForOffset(start)
         val endLine = layout.getLineForOffset(end)
 
+        // সংশ্লিষ্ট অক্ষরের বাঁ-প্রান্তিক x ও সে লাইনের নিচের y-coord (baseline পর নয়, নিচ বা top নেয়া শ্রেয়)
         val startX = layout.getPrimaryHorizontal(start)
-        val startY = layout.getLineBottom(startLine).toFloat()
-
         val endX = layout.getPrimaryHorizontal(end)
-        val endY = layout.getLineBottom(endLine).toFloat()
 
-        // EditText -এর উপর স্ক্রীনে অবস্থান (এক্স-ওয়াইজ)
+        // Highlight box-কে ধরতে চাইলে বেটার: getLineTop + Scroll & Padding adjust করে নিন
+        val startY = layout.getLineTop(startLine) - editText.scrollY + editText.paddingTop
+        val endY = layout.getLineTop(endLine) - editText.scrollY + editText.paddingTop
+
+        // EditText এর স্ক্রীনে এক্স ও ওয়াই অবস্থান (WindowManager-এর জন্য)
         val editLocation = IntArray(2)
         editText.getLocationOnScreen(editLocation)
-        val editX = editLocation[0]
-        val editY = editLocation[1]
+        val editScreenX = editLocation[0]
+        val editScreenY = editLocation[1]
 
-        val handleHeight = leftHandleView!!.height
         val handleWidth = leftHandleView!!.width
+        val handleHeight = leftHandleView!!.height
 
-        // Tear drop-এর টিপের জন্য correction
-        // ধরুন, tip হল Drawable-এর centerX এবং top (y=0).
-        val handleTipOffsetX = handleWidth / 2
-        val handleTipOffsetY = 0 // tip-টি একদম Top-এ
+        // Drawable রিসাইজ অনুয়ায়ী টিপের x-mid
+        val handleTipX = handleWidth / 2
+        val handleTipY = 0 // হ্যান্ডেলের ড্রয়েবল-এর একদম টপ হলে tip, মানে ঐ পয়েন্টটা লাগানো হবে
 
-        // ===== Left Handle (start/first) =====
+        // ফাইনাল নিখুঁত পজিশন (ইয়োলো প্যাড়া = +১/−১ px এডজাস্ট করলে perfect লাগে)
+        val fudgeX = 0    // এক্সাটলি gap না থাকলে -2 অথবা +2 করে টেস্ট করুন
+        val fudgeY = 0    // চাইলে -2/2 দিয়ে গুতা দিতে হবে, ফন্টের ওপর ডিপেন্ড করে
+
+        // ===== Left Handle (Selection start) =====
         val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-        leftParams.x = (editX + startX - handleTipOffsetX).toInt()
-        leftParams.y = (editY + startY - handleHeight).toInt()  // হ্যান্ডেলের শীর্ষ হচ্ছে selection bound-বক্সের প্রান্তে
+        leftParams.x = (editScreenX + startX - handleTipX + fudgeX).toInt()
+        leftParams.y = (editScreenY + startY - handleHeight + fudgeY).toInt()
 
         windowManager.updateViewLayout(leftHandleView, leftParams)
 
-        // ===== Right Handle (end/last) =====
+        // ===== Right Handle (Selection end) =====
         val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-        rightParams.x = (editX + endX - handleTipOffsetX).toInt()
-        rightParams.y = (editY + endY - handleHeight).toInt()
+        rightParams.x = (editScreenX + endX - handleTipX + fudgeX).toInt()
+        rightParams.y = (editScreenY + endY - handleHeight + fudgeY).toInt()
 
         windowManager.updateViewLayout(rightHandleView, rightParams)
     } catch (e: Exception) {
