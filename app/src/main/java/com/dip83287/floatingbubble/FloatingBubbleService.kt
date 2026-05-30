@@ -990,59 +990,7 @@ private fun createTearDropDrawable(): Drawable {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    private fun updateHandlePositions() {
-        try {
-            val start = editText.selectionStart
-            val end = editText.selectionEnd
-
-            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-                hideSelectionHandles()
-                return
-            }
-            
-            val layout = editText.layout ?: run { 
-                hideSelectionHandles()
-                return 
-            }
-            
-            val location = IntArray(2)
-            editText.getLocationOnScreen(location)
-            
-            val handleSize = 48
-            val halfHandle = handleSize / 2
-            val upwardShift = dpToPx(15)
-
-            val startLine = layout.getLineForOffset(start)
-            val startX = layout.getPrimaryHorizontal(start) + location[0]
-            val startY = layout.getLineBottom(startLine) + location[1]
-
-            leftHandleView?.let { handle ->
-                (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
-                    params.x = (startX - halfHandle).toInt()
-                    params.y = (startY - halfHandle - upwardShift).toInt()
-                    try {
-                        actionBarWindowManager?.updateViewLayout(handle, params)
-                    } catch (_: Exception) {}
-                }
-            }
-
-            val endLine = layout.getLineForOffset(end)
-            val endX = layout.getPrimaryHorizontal(end) + location[0]
-            val endY = layout.getLineBottom(endLine) + location[1]
-
-            rightHandleView?.let { handle ->
-                (handle.layoutParams as? WindowManager.LayoutParams)?.let { params ->
-                    params.x = (endX - halfHandle).toInt()
-                    params.y = (endY - halfHandle - upwardShift).toInt()
-                    try {
-                        actionBarWindowManager?.updateViewLayout(handle, params)
-                    } catch (_: Exception) {}
-                }
-            }
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositions")
-        }
-    }
+    
     
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
         this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
