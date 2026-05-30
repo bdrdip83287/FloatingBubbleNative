@@ -980,14 +980,13 @@ private fun createTearDropDrawable(): Drawable {
         val start = editText.selectionStart
         val end = editText.selectionEnd
 
-        val startLine = layout.getLineForOffset(start)
-        val endLine = layout.getLineForOffset(end)
+        // বর্তমান সিলেকশনের highlight box-এর প্রকৃত bound ধরুন:
+        // (getLineTop + getPrimaryHorizontal) এ ভরসা না করে—layout.getSelectionPath() ব্যবহার করুন
 
-        val startX = layout.getPrimaryHorizontal(start)
-        val endX = layout.getPrimaryHorizontal(end)
-
-        val startY = layout.getLineTop(startLine) - editText.scrollY + editText.paddingTop
-        val endY = layout.getLineTop(endLine) - editText.scrollY + editText.paddingTop
+        val path = Path()
+        layout.getSelectionPath(start, end, path)
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
 
         val editLocation = IntArray(2)
         editText.getLocationOnScreen(editLocation)
@@ -997,22 +996,16 @@ private fun createTearDropDrawable(): Drawable {
         val handleWidth = leftHandleView!!.width
         val handleHeight = leftHandleView!!.height
 
-        // যদি highlight box-এর "আসল" left/right ধরতে চান, সম্ভব হলে paddingLeft/paddingRight adjust করুন
-        // এভাবে গ্যাপ না থাকে, চাইলে fudgeX/sideGapFudge -/+1 করে টিউন করুন
-        val sideGapFudge = 0    // প্রয়োজনে -2/+2
-        
-        // -- LEFT Handle: বাঁ পাশের highlight bound ধরা --
+        // -------- LEFT HANDLE (Highlight box-এর একদম বাঁ প্রান্ত) --------
         val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-        // highlight left-bound এ handle-এর বাঁদিককে align করুন
-        leftParams.x = (editScreenX + startX - sideGapFudge).toInt()         // বাঁদিকে লাগানো
-        leftParams.y = (editScreenY + startY - handleHeight).toInt()
+        leftParams.x = (editScreenX + bounds.left - handleWidth / 2).toInt()
+        leftParams.y = (editScreenY + bounds.top - handleHeight).toInt()
         windowManager.updateViewLayout(leftHandleView, leftParams)
 
-        // -- RIGHT Handle: ডান পাশের highlight bound ধরা --
+        // -------- RIGHT HANDLE (Highlight box-এর একদম ডান প্রান্ত) --------
         val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-        // highlight right-bound এ handle-এর ডানদিককে align করুন
-        rightParams.x = (editScreenX + endX - handleWidth + sideGapFudge).toInt()    // ডানদিকে লাগানো
-        rightParams.y = (editScreenY + endY - handleHeight).toInt()
+        rightParams.x = (editScreenX + bounds.right - handleWidth / 2).toInt()
+        rightParams.y = (editScreenY + bounds.bottom - handleHeight).toInt()
         windowManager.updateViewLayout(rightHandleView, rightParams)
 
     } catch (e: Exception) {
