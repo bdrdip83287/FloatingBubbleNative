@@ -977,17 +977,21 @@ private fun createTearDropDrawable(): Drawable {
         val layout = editText.layout ?: return
         if (leftHandleView == null || rightHandleView == null) return
 
+        // বর্তমান সিলেকশনের শুরু ও শেষ ইনডেক্স
         val start = editText.selectionStart
         val end = editText.selectionEnd
 
+        // Selection-এর শুরু ও শেষের position (textView এর X,Y)
         val startLine = layout.getLineForOffset(start)
         val endLine = layout.getLineForOffset(end)
 
         val startX = layout.getPrimaryHorizontal(start)
         val startY = layout.getLineBottom(startLine).toFloat()
+
         val endX = layout.getPrimaryHorizontal(end)
         val endY = layout.getLineBottom(endLine).toFloat()
 
+        // EditText -এর উপর স্ক্রীনে অবস্থান (এক্স-ওয়াইজ)
         val editLocation = IntArray(2)
         editText.getLocationOnScreen(editLocation)
         val editX = editLocation[0]
@@ -995,18 +999,24 @@ private fun createTearDropDrawable(): Drawable {
 
         val handleHeight = leftHandleView!!.height
         val handleWidth = leftHandleView!!.width
-        val handleTipOffsetX = handleWidth / 2
 
-        // Left handle
+        // Tear drop-এর টিপের জন্য correction
+        // ধরুন, tip হল Drawable-এর centerX এবং top (y=0).
+        val handleTipOffsetX = handleWidth / 2
+        val handleTipOffsetY = 0 // tip-টি একদম Top-এ
+
+        // ===== Left Handle (start/first) =====
         val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
         leftParams.x = (editX + startX - handleTipOffsetX).toInt()
-        leftParams.y = (editY + startY - handleHeight).toInt()
+        leftParams.y = (editY + startY - handleHeight).toInt()  // হ্যান্ডেলের শীর্ষ হচ্ছে selection bound-বক্সের প্রান্তে
+
         windowManager.updateViewLayout(leftHandleView, leftParams)
 
-        // Right handle
+        // ===== Right Handle (end/last) =====
         val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
         rightParams.x = (editX + endX - handleTipOffsetX).toInt()
         rightParams.y = (editY + endY - handleHeight).toInt()
+
         windowManager.updateViewLayout(rightHandleView, rightParams)
     } catch (e: Exception) {
         EmergencyLog.logException(e, "updateHandlePositions")
