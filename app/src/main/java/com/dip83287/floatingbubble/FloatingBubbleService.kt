@@ -983,34 +983,27 @@ private fun createTearDropDrawable(): Drawable {
         val startLine = layout.getLineForOffset(start)
         val endLine = layout.getLineForOffset(end)
 
-        // Selection-bound X,Y (local to EditText)
         val startX = layout.getPrimaryHorizontal(start)
         val startY = layout.getLineBottom(startLine).toFloat()
-
         val endX = layout.getPrimaryHorizontal(end)
         val endY = layout.getLineBottom(endLine).toFloat()
 
-        // EditText position in screen coordinates
         val editLocation = IntArray(2)
         editText.getLocationOnScreen(editLocation)
         val editX = editLocation[0]
         val editY = editLocation[1]
 
-        // Handle view size
         val handleHeight = leftHandleView!!.height
         val handleWidth = leftHandleView!!.width
-        // Drawable's tip is at centerX, y=0
-
         val handleTipOffsetX = handleWidth / 2
-        val handleTipOffsetY = 0 // top of handle view
 
-        // ---- Left Handle ----
+        // Left handle
         val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
         leftParams.x = (editX + startX - handleTipOffsetX).toInt()
-        leftParams.y = (editY + startY - handleHeight).toInt() // top = selection bound
+        leftParams.y = (editY + startY - handleHeight).toInt()
         windowManager.updateViewLayout(leftHandleView, leftParams)
 
-        // ---- Right Handle ----
+        // Right handle
         val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
         rightParams.x = (editX + endX - handleTipOffsetX).toInt()
         rightParams.y = (editY + endY - handleHeight).toInt()
