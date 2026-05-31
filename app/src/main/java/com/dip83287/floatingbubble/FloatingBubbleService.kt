@@ -116,17 +116,14 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 100L
     
-    private var lastFontScale = 0f
-    private var lastScreenWidth = 0
-    private var lastScreenHeight = 0
-    private val configCheckHandler = Handler(Looper.getMainLooper())
-    private var configCheckRunnable: Runnable? = null
-
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
+    
+    // ViewTreeObserver for rotation handling
+    private var globalLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
 
     data class NoteItem(
         val id: Long,
@@ -149,59 +146,8 @@ class FloatingBubbleService : Service() {
             scrollHideHandler = Handler(Looper.getMainLooper())
             scrollStopHandler = Handler(Looper.getMainLooper())
             
-            lastFontScale = resources.configuration.fontScale
-            lastScreenWidth = resources.displayMetrics.widthPixels
-            lastScreenHeight = resources.displayMetrics.heightPixels
-            
-            startConfigurationCheck()
-            
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
-        }
-    }
-    
-    private fun startConfigurationCheck() {
-        val runnable = object : Runnable {
-            override fun run() {
-                try {
-                    val currentFontScale = resources.configuration.fontScale
-                    val currentScreenWidth = resources.displayMetrics.widthPixels
-                    val currentScreenHeight = resources.displayMetrics.heightPixels
-                    
-                    if (currentFontScale != lastFontScale || 
-                        currentScreenWidth != lastScreenWidth || 
-                        currentScreenHeight != lastScreenHeight) {
-                        
-                        EmergencyLog.log("Configuration changed - updating handles")
-                        
-                        lastFontScale = currentFontScale
-                        lastScreenWidth = currentScreenWidth
-                        lastScreenHeight = currentScreenHeight
-                        
-                        // Force immediate handle update
-                        if (editText.hasSelection()) {
-                            updateHandlePositionsImmediate()
-                        }
-                    }
-                } catch (e: Exception) {
-                    EmergencyLog.logException(e, "Configuration check")
-                }
-                configCheckHandler.postDelayed(this, 500)
-            }
-        }
-        configCheckRunnable = runnable
-        configCheckHandler.postDelayed(runnable, 500)
-    }
-    
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        EmergencyLog.log("onConfigurationChanged called")
-        
-        // Immediately update handles when configuration changes
-        if (editText.hasSelection()) {
-            handleUpdateDebounceHandler.postDelayed({
-                updateHandlePositionsImmediate()
-            }, 50)
         }
     }
 
@@ -954,7 +900,7 @@ class FloatingBubbleService : Service() {
         handleUpdateDebounceHandler.post {
             try {
                 if (!isScrolling) {
-                    updateHandlePositionsImmediate()
+                    updateHandlePositions()
                 }
             } finally {
                 handleUpdatePending = false
@@ -966,12 +912,11 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ IMMEDIATE HANDLE POSITIONING - Called directly without debounce for rotation
-    private fun updateHandlePositionsImmediate() {
+    private fun updateHandlePositions() {
         try {
             val layout = editText.layout
             if (layout == null) {
-                EmergencyLog.log("Layout is null, cannot update handles")
+                EmergencyLog.log("Layout is null")
                 return
             }
             if (leftHandleView == null || rightHandleView == null) return
@@ -1020,7 +965,7 @@ class FloatingBubbleService : Service() {
             leftParams.y = (editScreenY + startY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
-                EmergencyLog.log("Left handle position: x=${leftParams.x}, y=${leftParams.y}")
+                EmergencyLog.log("Left: x=${leftParams.x}, y=${leftParams.y}")
             } catch (e: Exception) { }
 
             // Update right handle
@@ -1029,12 +974,28 @@ class FloatingBubbleService : Service() {
             rightParams.y = (editScreenY + endY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
-                EmergencyLog.log("Right handle position: x=${rightParams.x}, y=${rightParams.y}")
+                EmergencyLog.log("Right: x=${rightParams.x}, y=${rightParams.y}")
             } catch (e: Exception) { }
             
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositionsImmediate")
+            EmergencyLog.logException(e, "updateHandlePositions")
         }
+    }
+    
+    // ✅ NEW: Setup rotation listener using ViewTreeObserver
+    private fun setupRotationListener() {
+        if (globalLayoutListener != null) {
+            editText.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener)
+        }
+        
+        globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
+            EmergencyLog.log("Global layout changed - updating handles")
+            if (editText.hasSelection()) {
+                updateHandlePositionsSafe()
+            }
+        }
+        
+        editText.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
     }
     
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
@@ -1109,6 +1070,8 @@ class FloatingBubbleService : Service() {
                 try {
                     actionBarWindowManager?.addView(leftHandleView, leftParams)
                 } catch (e: Exception) { }
+                // Setup rotation listener after handles are created
+                setupRotationListener()
             }
             
             if (rightHandleView?.parent == null) {
@@ -1126,6 +1089,8 @@ class FloatingBubbleService : Service() {
                 try {
                     actionBarWindowManager?.addView(rightHandleView, rightParams)
                 } catch (e: Exception) { }
+                // Setup rotation listener after handles are created
+                setupRotationListener()
             }
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -1134,6 +1099,12 @@ class FloatingBubbleService : Service() {
     
     private fun hideSelectionHandles() {
         try {
+            // Remove rotation listener
+            if (globalLayoutListener != null) {
+                editText.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener)
+                globalLayoutListener = null
+            }
+            
             leftHandleView?.let {
                 actionBarWindowManager?.removeView(it)
                 leftHandleView = null
@@ -2131,7 +2102,6 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
-        configCheckRunnable?.let { configCheckHandler.removeCallbacks(it) }
         zoomValueAnimator?.cancel()
         EmergencyLog.log("FloatingBubbleService destroyed")
     }
