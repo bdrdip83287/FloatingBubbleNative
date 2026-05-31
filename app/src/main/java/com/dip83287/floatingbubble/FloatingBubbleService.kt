@@ -798,64 +798,37 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Tear Drop Handle Drawable
-    private fun createTearDropDrawable(): Drawable {
+    // ✅ Simple Circle Handle Drawable (No complex tear drop for better visibility)
+    private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
             override fun draw(canvas: Canvas) {
-                val width = bounds.width().toFloat()
-                val height = bounds.height().toFloat()
-
-                val circleRadius = width * 0.29f
-                val barNarrowWidth = width * 0.05f
-                val barWideWidth = width * 0.61f
-                val barHeight = height - circleRadius
-
-                val centerX = width / 2f
-                val circleCenterY = height - circleRadius
-
-                val path = Path()
-                path.moveTo(centerX - barNarrowWidth / 2f, 0f)
-                path.lineTo(centerX + barNarrowWidth / 2f, 0f)
-                path.lineTo(centerX + barWideWidth / 2f, barHeight - circleRadius * 0.35f)
-                path.quadTo(
-                    centerX + barWideWidth / 2f, barHeight + circleRadius * 0.10f,
-                    centerX + circleRadius * 0.96f, circleCenterY
-                )
-                path.arcTo(
-                    centerX - circleRadius, circleCenterY - circleRadius,
-                    centerX + circleRadius, circleCenterY + circleRadius,
-                    0f, 180f, false
-                )
-                path.quadTo(
-                    centerX - barWideWidth / 2f, barHeight + circleRadius * 0.10f,
-                    centerX - barWideWidth / 2f, barHeight - circleRadius * 0.35f
-                )
-                path.lineTo(centerX - barNarrowWidth / 2f, 0f)
-                path.close()
-                canvas.drawPath(path, paint)
+                val cx = bounds.width() / 2f
+                val cy = bounds.height() / 2f
+                val radius = bounds.width().coerceAtMost(bounds.height()) / 2f
+                canvas.drawCircle(cx, cy, radius, paint)
             }
-            override fun setAlpha(alpha: Int) { paint.alpha = alpha }
-            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
             override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
         }
     }
     
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 48
+        val handleSize = 40
         
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createTearDropDrawable())
+            setImageDrawable(createCircleHandleDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createTearDropDrawable())
+            setImageDrawable(createCircleHandleDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -982,7 +955,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ ULTIMATE FIX - Perfect handle positioning with zero gap
+    // ✅ CORRECTED HANDLE POSITIONING - With proper X offset adjustment
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -1002,52 +975,49 @@ class FloatingBubbleService : Service() {
             val editScreenX = editLocation[0]
             val editScreenY = editLocation[1]
 
-            // Get line numbers for start and end
+            // Get line numbers
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
             
-            // Get exact X coordinates of character boundaries
-            val startX = layout.getPrimaryHorizontal(start)
-            val endX = layout.getPrimaryHorizontal(end)
+            // Get X coordinates - these are character positions
+            val startXRaw = layout.getPrimaryHorizontal(start)
+            val endXRaw = layout.getPrimaryHorizontal(end)
             
-            // Get Y coordinate (top of the line where the character sits)
-            // IMPORTANT: Use getLineTop() which gives the exact top of the line including padding
-            val startY = layout.getLineTop(startLine)
-            val endY = layout.getLineTop(endLine)
+            // Account for scroll X and padding left
+            val scrollX = editText.scrollX
+            val paddingLeft = editText.paddingLeft
             
-            // Account for scroll and padding
+            // Final X positions adjusted for scroll and padding
+            val startX = startXRaw - scrollX + paddingLeft
+            val endX = endXRaw - scrollX + paddingLeft
+            
+            // Get Y coordinates (top of line)
+            val startYRaw = layout.getLineTop(startLine)
+            val endYRaw = layout.getLineTop(endLine)
+            
+            // Account for scroll Y and padding top
             val scrollY = editText.scrollY
             val paddingTop = editText.paddingTop
-            val finalStartY = startY - scrollY + paddingTop
-            val finalEndY = endY - scrollY + paddingTop
-
-            val handleWidth = leftHandleView!!.width
-            val handleHeight = leftHandleView!!.height
-
-            // The tip of the tear drop is at the top center of the drawable
-            val handleTipX = handleWidth / 2f
-            val handleTipY = 0f
             
-            // Calculate left handle position - tip exactly at start of character
-            val leftHandleX = editScreenX + startX - handleTipX
-            val leftHandleY = editScreenY + finalStartY - handleHeight
-            
-            // Calculate right handle position - tip exactly at end of character
-            val rightHandleX = editScreenX + endX - handleTipX
-            val rightHandleY = editScreenY + finalEndY - handleHeight
+            val startY = startYRaw - scrollY + paddingTop
+            val endY = endYRaw - scrollY + paddingTop
 
-            // Update left handle
+            val handleSize = 40
+            val halfHandle = handleSize / 2
+            val upwardShift = dpToPx(15)
+
+            // Left handle - position at start of selection
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-            leftParams.x = leftHandleX.toInt()
-            leftParams.y = leftHandleY.toInt()
+            leftParams.x = (editScreenX + startX - halfHandle).toInt()
+            leftParams.y = (editScreenY + startY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
             } catch (e: Exception) { }
 
-            // Update right handle
+            // Right handle - position at end of selection  
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-            rightParams.x = rightHandleX.toInt()
-            rightParams.y = rightHandleY.toInt()
+            rightParams.x = (editScreenX + endX - halfHandle).toInt()
+            rightParams.y = (editScreenY + endY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
             } catch (e: Exception) { }
@@ -1102,7 +1072,7 @@ class FloatingBubbleService : Service() {
             val location = IntArray(2)
             editText.getLocationOnScreen(location)
             
-            val handleSize = 48
+            val handleSize = 40
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
             
