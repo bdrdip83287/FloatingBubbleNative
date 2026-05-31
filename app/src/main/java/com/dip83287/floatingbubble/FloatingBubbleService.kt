@@ -982,7 +982,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ PERFECT HANDLE POSITIONING - Zero gap, configuration aware
+    // ✅ ULTIMATE FIX - Perfect handle positioning with zero gap
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -996,7 +996,13 @@ class FloatingBubbleService : Service() {
                 return
             }
 
-            // Get the exact character positions
+            // Get EditText location on screen
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            val editScreenX = editLocation[0]
+            val editScreenY = editLocation[1]
+
+            // Get line numbers for start and end
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
             
@@ -1004,35 +1010,44 @@ class FloatingBubbleService : Service() {
             val startX = layout.getPrimaryHorizontal(start)
             val endX = layout.getPrimaryHorizontal(end)
             
-            // Get exact Y coordinates (top of the line where selection highlight starts)
-            val startY = layout.getLineTop(startLine) - editText.scrollY + editText.paddingTop
-            val endY = layout.getLineTop(endLine) - editText.scrollY + editText.paddingTop
-
-            // Get EditText screen position
-            val editLocation = IntArray(2)
-            editText.getLocationOnScreen(editLocation)
-            val editScreenX = editLocation[0]
-            val editScreenY = editLocation[1]
+            // Get Y coordinate (top of the line where the character sits)
+            // IMPORTANT: Use getLineTop() which gives the exact top of the line including padding
+            val startY = layout.getLineTop(startLine)
+            val endY = layout.getLineTop(endLine)
+            
+            // Account for scroll and padding
+            val scrollY = editText.scrollY
+            val paddingTop = editText.paddingTop
+            val finalStartY = startY - scrollY + paddingTop
+            val finalEndY = endY - scrollY + paddingTop
 
             val handleWidth = leftHandleView!!.width
             val handleHeight = leftHandleView!!.height
 
-            // The tip of the tear drop is at the top center (0,0 position in drawable)
-            val handleTipX = handleWidth / 2
-            val handleTipY = 0
+            // The tip of the tear drop is at the top center of the drawable
+            val handleTipX = handleWidth / 2f
+            val handleTipY = 0f
             
-            // Left handle - tip exactly at start of selection
+            // Calculate left handle position - tip exactly at start of character
+            val leftHandleX = editScreenX + startX - handleTipX
+            val leftHandleY = editScreenY + finalStartY - handleHeight
+            
+            // Calculate right handle position - tip exactly at end of character
+            val rightHandleX = editScreenX + endX - handleTipX
+            val rightHandleY = editScreenY + finalEndY - handleHeight
+
+            // Update left handle
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-            leftParams.x = (editScreenX + startX - handleTipX).toInt()
-            leftParams.y = (editScreenY + startY - handleHeight).toInt()
+            leftParams.x = leftHandleX.toInt()
+            leftParams.y = leftHandleY.toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
             } catch (e: Exception) { }
 
-            // Right handle - tip exactly at end of selection
+            // Update right handle
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-            rightParams.x = (editScreenX + endX - handleTipX).toInt()
-            rightParams.y = (editScreenY + endY - handleHeight).toInt()
+            rightParams.x = rightHandleX.toInt()
+            rightParams.y = rightHandleY.toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
             } catch (e: Exception) { }
