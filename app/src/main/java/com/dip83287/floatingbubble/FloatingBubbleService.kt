@@ -798,7 +798,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Smooth Tear Drop Handle Drawable
+    // ✅ Tear Drop Handle Drawable
     private fun createTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -982,7 +982,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ PERFECT HANDLE POSITIONING - Tip exactly at selection boundaries (no gap)
+    // ✅ PERFECT HANDLE POSITIONING - Zero gap, configuration aware
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -1000,11 +1000,11 @@ class FloatingBubbleService : Service() {
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
             
-            // Get the exact X coordinate of the character boundaries
+            // Get exact X coordinates of character boundaries
             val startX = layout.getPrimaryHorizontal(start)
             val endX = layout.getPrimaryHorizontal(end)
             
-            // Get the exact Y coordinate of the line top (where the selection highlight starts)
+            // Get exact Y coordinates (top of the line where selection highlight starts)
             val startY = layout.getLineTop(startLine) - editText.scrollY + editText.paddingTop
             val endY = layout.getLineTop(endLine) - editText.scrollY + editText.paddingTop
 
@@ -1017,11 +1017,11 @@ class FloatingBubbleService : Service() {
             val handleWidth = leftHandleView!!.width
             val handleHeight = leftHandleView!!.height
 
-            // The tip of the tear drop is at the top center
+            // The tip of the tear drop is at the top center (0,0 position in drawable)
             val handleTipX = handleWidth / 2
-            val handleTipY = 0  // Top tip of the handle
+            val handleTipY = 0
             
-            // Left handle - tip exactly at the start of selection (left edge)
+            // Left handle - tip exactly at start of selection
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
             leftParams.x = (editScreenX + startX - handleTipX).toInt()
             leftParams.y = (editScreenY + startY - handleHeight).toInt()
@@ -1029,7 +1029,7 @@ class FloatingBubbleService : Service() {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
             } catch (e: Exception) { }
 
-            // Right handle - tip exactly at the end of selection (right edge)
+            // Right handle - tip exactly at end of selection
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
             rightParams.x = (editScreenX + endX - handleTipX).toInt()
             rightParams.y = (editScreenY + endY - handleHeight).toInt()
