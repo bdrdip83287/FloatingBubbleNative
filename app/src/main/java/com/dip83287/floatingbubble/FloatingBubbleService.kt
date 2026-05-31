@@ -798,7 +798,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
+    // ✅ Smooth Tear Drop Handle Drawable
     private fun createTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -982,7 +982,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Your improved updateHandlePositions function
+    // ✅ PERFECT HANDLE POSITIONING - Tip exactly at selection boundaries (no gap)
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -990,16 +990,25 @@ class FloatingBubbleService : Service() {
 
             val start = editText.selectionStart
             val end = editText.selectionEnd
+            
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+                hideSelectionHandles()
+                return
+            }
 
+            // Get the exact character positions
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
-
+            
+            // Get the exact X coordinate of the character boundaries
             val startX = layout.getPrimaryHorizontal(start)
             val endX = layout.getPrimaryHorizontal(end)
-
+            
+            // Get the exact Y coordinate of the line top (where the selection highlight starts)
             val startY = layout.getLineTop(startLine) - editText.scrollY + editText.paddingTop
             val endY = layout.getLineTop(endLine) - editText.scrollY + editText.paddingTop
 
+            // Get EditText screen position
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
             val editScreenX = editLocation[0]
@@ -1008,25 +1017,26 @@ class FloatingBubbleService : Service() {
             val handleWidth = leftHandleView!!.width
             val handleHeight = leftHandleView!!.height
 
+            // The tip of the tear drop is at the top center
             val handleTipX = handleWidth / 2
-            val handleTipY = 0
-
-            val fudgeX = 8
-            val fudgeY = 0
-
+            val handleTipY = 0  // Top tip of the handle
+            
+            // Left handle - tip exactly at the start of selection (left edge)
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-            leftParams.x = (editScreenX + startX - handleTipX + fudgeX).toInt()
-            leftParams.y = (editScreenY + startY - handleHeight + fudgeY).toInt()
+            leftParams.x = (editScreenX + startX - handleTipX).toInt()
+            leftParams.y = (editScreenY + startY - handleHeight).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
             } catch (e: Exception) { }
 
+            // Right handle - tip exactly at the end of selection (right edge)
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-            rightParams.x = (editScreenX + endX - handleTipX + fudgeX).toInt()
-            rightParams.y = (editScreenY + endY - handleHeight + fudgeY).toInt()
+            rightParams.x = (editScreenX + endX - handleTipX).toInt()
+            rightParams.y = (editScreenY + endY - handleHeight).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
             } catch (e: Exception) { }
+            
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
         }
