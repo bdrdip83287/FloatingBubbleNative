@@ -122,8 +122,9 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
     
-    // ViewTreeObserver for rotation handling
-    private var globalLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    // Rotation handling - force update after configuration change
+    private var rotationHandler: Handler? = null
+    private var rotationUpdateRunnable: Runnable? = null
 
     data class NoteItem(
         val id: Long,
@@ -145,10 +146,27 @@ class FloatingBubbleService : Service() {
             createDeleteZone()
             scrollHideHandler = Handler(Looper.getMainLooper())
             scrollStopHandler = Handler(Looper.getMainLooper())
+            rotationHandler = Handler(Looper.getMainLooper())
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        EmergencyLog.log("onConfigurationChanged called - orientation changed")
+        
+        // Force update handles after rotation with delay to let layout settle
+        rotationUpdateRunnable?.let { rotationHandler?.removeCallbacks(it) }
+        rotationUpdateRunnable = Runnable {
+            EmergencyLog.log("Rotation update - forcing handle reposition")
+            if (editText.hasSelection()) {
+                // Clear and reposition handles
+                updateHandlePositionsForce()
+            }
+        }
+        rotationHandler?.postDelayed(rotationUpdateRunnable, 150)
     }
 
     private fun loadNotes() {
@@ -912,6 +930,26 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
+    // ✅ FORCE update - removes and re-adds handles at correct positions
+    private fun updateHandlePositionsForce() {
+        EmergencyLog.log("updateHandlePositionsForce called")
+        if (!editText.hasSelection()) return
+        
+        // Temporarily hide handles
+        val wasLeftVisible = leftHandleView != null && leftHandleView?.parent != null
+        val wasRightVisible = rightHandleView != null && rightHandleView?.parent != null
+        
+        if (wasLeftVisible) {
+            actionBarWindowManager?.removeView(leftHandleView)
+        }
+        if (wasRightVisible) {
+            actionBarWindowManager?.removeView(rightHandleView)
+        }
+        
+        // Re-add with correct positions
+        showSelectionHandles()
+    }
+    
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout
@@ -965,7 +1003,7 @@ class FloatingBubbleService : Service() {
             leftParams.y = (editScreenY + startY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
-                EmergencyLog.log("Left: x=${leftParams.x}, y=${leftParams.y}")
+                EmergencyLog.log("Left handle: x=${leftParams.x}, y=${leftParams.y}")
             } catch (e: Exception) { }
 
             // Update right handle
@@ -974,28 +1012,12 @@ class FloatingBubbleService : Service() {
             rightParams.y = (editScreenY + endY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
-                EmergencyLog.log("Right: x=${rightParams.x}, y=${rightParams.y}")
+                EmergencyLog.log("Right handle: x=${rightParams.x}, y=${rightParams.y}")
             } catch (e: Exception) { }
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
         }
-    }
-    
-    // ✅ NEW: Setup rotation listener using ViewTreeObserver
-    private fun setupRotationListener() {
-        if (globalLayoutListener != null) {
-            editText.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener)
-        }
-        
-        globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
-            EmergencyLog.log("Global layout changed - updating handles")
-            if (editText.hasSelection()) {
-                updateHandlePositionsSafe()
-            }
-        }
-        
-        editText.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
     }
     
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
@@ -1070,8 +1092,6 @@ class FloatingBubbleService : Service() {
                 try {
                     actionBarWindowManager?.addView(leftHandleView, leftParams)
                 } catch (e: Exception) { }
-                // Setup rotation listener after handles are created
-                setupRotationListener()
             }
             
             if (rightHandleView?.parent == null) {
@@ -1089,8 +1109,6 @@ class FloatingBubbleService : Service() {
                 try {
                     actionBarWindowManager?.addView(rightHandleView, rightParams)
                 } catch (e: Exception) { }
-                // Setup rotation listener after handles are created
-                setupRotationListener()
             }
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -1099,12 +1117,6 @@ class FloatingBubbleService : Service() {
     
     private fun hideSelectionHandles() {
         try {
-            // Remove rotation listener
-            if (globalLayoutListener != null) {
-                editText.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener)
-                globalLayoutListener = null
-            }
-            
             leftHandleView?.let {
                 actionBarWindowManager?.removeView(it)
                 leftHandleView = null
@@ -2102,6 +2114,7 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
+        rotationUpdateRunnable?.let { rotationHandler?.removeCallbacks(it) }
         zoomValueAnimator?.cancel()
         EmergencyLog.log("FloatingBubbleService destroyed")
     }
