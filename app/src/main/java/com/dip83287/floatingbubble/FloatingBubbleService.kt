@@ -18,7 +18,6 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -129,6 +128,9 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
+    // Rotation detection
+    private var lastRotation = 0
+
     data class NoteItem(
         val id: Long,
         var title: String,
@@ -153,6 +155,7 @@ class FloatingBubbleService : Service() {
             lastFontScale = resources.configuration.fontScale
             lastScreenWidth = resources.displayMetrics.widthPixels
             lastScreenHeight = resources.displayMetrics.heightPixels
+            lastRotation = resources.configuration.orientation
             
             startConfigurationCheck()
             
@@ -168,19 +171,27 @@ class FloatingBubbleService : Service() {
                     val currentFontScale = resources.configuration.fontScale
                     val currentScreenWidth = resources.displayMetrics.widthPixels
                     val currentScreenHeight = resources.displayMetrics.heightPixels
+                    val currentRotation = resources.configuration.orientation
                     
-                    if (currentFontScale != lastFontScale || 
+                    val needsUpdate = currentFontScale != lastFontScale || 
                         currentScreenWidth != lastScreenWidth || 
-                        currentScreenHeight != lastScreenHeight) {
-                        
-                        EmergencyLog.log("Configuration changed")
+                        currentScreenHeight != lastScreenHeight ||
+                        currentRotation != lastRotation
+                    
+                    if (needsUpdate) {
+                        EmergencyLog.log("Configuration changed - updating handles")
                         
                         lastFontScale = currentFontScale
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
+                        lastRotation = currentRotation
                         
+                        // Force immediate handle update on configuration change
                         if (editText.hasSelection()) {
-                            updateHandlePositionsSafe()
+                            // Post to ensure layout is updated
+                            handleUpdateDebounceHandler.postDelayed({
+                                updateHandlePositionsSafe()
+                            }, 100)
                         }
                     }
                 } catch (e: Exception) {
@@ -798,7 +809,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Simple Circle Handle Drawable (No complex tear drop for better visibility)
     private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -955,7 +965,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ CORRECTED HANDLE POSITIONING - With proper X offset adjustment
+    // ✅ ROTATION-AWARE HANDLE POSITIONING
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -969,58 +979,56 @@ class FloatingBubbleService : Service() {
                 return
             }
 
-            // Get EditText location on screen
-            val editLocation = IntArray(2)
-            editText.getLocationOnScreen(editLocation)
-            val editScreenX = editLocation[0]
-            val editScreenY = editLocation[1]
+            // Force layout update if needed
+            editText.post {
+                try {
+                    val updatedLayout = editText.layout
+                    if (updatedLayout == null) return@post
+                    
+                    val editLocation = IntArray(2)
+                    editText.getLocationOnScreen(editLocation)
+                    val editScreenX = editLocation[0]
+                    val editScreenY = editLocation[1]
 
-            // Get line numbers
-            val startLine = layout.getLineForOffset(start)
-            val endLine = layout.getLineForOffset(end)
-            
-            // Get X coordinates - these are character positions
-            val startXRaw = layout.getPrimaryHorizontal(start)
-            val endXRaw = layout.getPrimaryHorizontal(end)
-            
-            // Account for scroll X and padding left
-            val scrollX = editText.scrollX
-            val paddingLeft = editText.paddingLeft
-            
-            // Final X positions adjusted for scroll and padding
-            val startX = startXRaw - scrollX + paddingLeft
-            val endX = endXRaw - scrollX + paddingLeft
-            
-            // Get Y coordinates (top of line)
-            val startYRaw = layout.getLineTop(startLine)
-            val endYRaw = layout.getLineTop(endLine)
-            
-            // Account for scroll Y and padding top
-            val scrollY = editText.scrollY
-            val paddingTop = editText.paddingTop
-            
-            val startY = startYRaw - scrollY + paddingTop
-            val endY = endYRaw - scrollY + paddingTop
+                    val startLine = updatedLayout.getLineForOffset(start)
+                    val endLine = updatedLayout.getLineForOffset(end)
+                    
+                    // Get raw X positions
+                    val startXRaw = updatedLayout.getPrimaryHorizontal(start)
+                    val endXRaw = updatedLayout.getPrimaryHorizontal(end)
+                    
+                    // Apply scroll and padding adjustments
+                    val scrollX = editText.scrollX
+                    val scrollY = editText.scrollY
+                    val paddingLeft = editText.paddingLeft
+                    val paddingTop = editText.paddingTop
+                    
+                    val startX = startXRaw - scrollX + paddingLeft
+                    val endX = endXRaw - scrollX + paddingLeft
+                    
+                    val startY = updatedLayout.getLineTop(startLine) - scrollY + paddingTop
+                    val endY = updatedLayout.getLineTop(endLine) - scrollY + paddingTop
 
-            val handleSize = 40
-            val halfHandle = handleSize / 2
-            val upwardShift = dpToPx(15)
+                    val handleSize = 40
+                    val halfHandle = handleSize / 2
+                    val upwardShift = dpToPx(15)
 
-            // Left handle - position at start of selection
-            val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-            leftParams.x = (editScreenX + startX - halfHandle).toInt()
-            leftParams.y = (editScreenY + startY - handleSize - upwardShift).toInt()
-            try {
-                actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
-            } catch (e: Exception) { }
+                    // Update left handle
+                    val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
+                    leftParams.x = (editScreenX + startX - halfHandle).toInt()
+                    leftParams.y = (editScreenY + startY - handleSize - upwardShift).toInt()
+                    actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
 
-            // Right handle - position at end of selection  
-            val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-            rightParams.x = (editScreenX + endX - halfHandle).toInt()
-            rightParams.y = (editScreenY + endY - handleSize - upwardShift).toInt()
-            try {
-                actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
-            } catch (e: Exception) { }
+                    // Update right handle
+                    val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
+                    rightParams.x = (editScreenX + endX - halfHandle).toInt()
+                    rightParams.y = (editScreenY + endY - handleSize - upwardShift).toInt()
+                    actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
+                    
+                } catch (e: Exception) {
+                    EmergencyLog.logException(e, "updateHandlePositions inner")
+                }
+            }
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
