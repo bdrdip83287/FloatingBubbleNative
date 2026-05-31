@@ -159,14 +159,15 @@ class FloatingBubbleService : Service() {
         
         // Force update handles after rotation with delay to let layout settle
         rotationUpdateRunnable?.let { rotationHandler?.removeCallbacks(it) }
-        rotationUpdateRunnable = Runnable {
+        val runnable = Runnable {
             EmergencyLog.log("Rotation update - forcing handle reposition")
             if (editText.hasSelection()) {
                 // Clear and reposition handles
                 updateHandlePositionsForce()
             }
         }
-        rotationHandler?.postDelayed(rotationUpdateRunnable, 150)
+        rotationUpdateRunnable = runnable
+        rotationHandler?.postDelayed(runnable, 150)
     }
 
     private fun loadNotes() {
@@ -930,7 +931,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FORCE update - removes and re-adds handles at correct positions
+    // FORCE update - removes and re-adds handles at correct positions
     private fun updateHandlePositionsForce() {
         EmergencyLog.log("updateHandlePositionsForce called")
         if (!editText.hasSelection()) return
