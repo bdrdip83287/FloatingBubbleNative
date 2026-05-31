@@ -99,7 +99,6 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Tear Drop Selection Handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -799,58 +798,51 @@ class FloatingBubbleService : Service() {
         }
     }
 
-// ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
-private fun createTearDropDrawable(): Drawable {
-    return object : Drawable() {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#2196F3")
-            style = Paint.Style.FILL
+    // ✅ Smooth Tear Drop Handle Drawable (Smooth blend circle+bar)
+    private fun createTearDropDrawable(): Drawable {
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#2196F3")
+                style = Paint.Style.FILL
+            }
+            override fun draw(canvas: Canvas) {
+                val width = bounds.width().toFloat()
+                val height = bounds.height().toFloat()
+
+                val circleRadius = width * 0.29f
+                val barNarrowWidth = width * 0.05f
+                val barWideWidth = width * 0.61f
+                val barHeight = height - circleRadius
+
+                val centerX = width / 2f
+                val circleCenterY = height - circleRadius
+
+                val path = Path()
+                path.moveTo(centerX - barNarrowWidth / 2f, 0f)
+                path.lineTo(centerX + barNarrowWidth / 2f, 0f)
+                path.lineTo(centerX + barWideWidth / 2f, barHeight - circleRadius * 0.35f)
+                path.quadTo(
+                    centerX + barWideWidth / 2f, barHeight + circleRadius * 0.10f,
+                    centerX + circleRadius * 0.96f, circleCenterY
+                )
+                path.arcTo(
+                    centerX - circleRadius, circleCenterY - circleRadius,
+                    centerX + circleRadius, circleCenterY + circleRadius,
+                    0f, 180f, false
+                )
+                path.quadTo(
+                    centerX - barWideWidth / 2f, barHeight + circleRadius * 0.10f,
+                    centerX - barWideWidth / 2f, barHeight - circleRadius * 0.35f
+                )
+                path.lineTo(centerX - barNarrowWidth / 2f, 0f)
+                path.close()
+                canvas.drawPath(path, paint)
+            }
+            override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
         }
-        override fun draw(canvas: Canvas) {
-            val width = bounds.width().toFloat()
-            val height = bounds.height().toFloat()
-
-            val circleRadius = width * 0.29f
-            val barNarrowWidth = width * 0.05f   // Top side (more narrow, for taper)
-            val barWideWidth = width * 0.61f     // Just above circle
-            val barHeight = height - circleRadius
-
-            val centerX = width / 2f
-            val circleCenterY = height - circleRadius
-
-            val path = Path()
-            // Top center (narrowest point)
-            path.moveTo(centerX - barNarrowWidth / 2f, 0f)
-            // Top right
-            path.lineTo(centerX + barNarrowWidth / 2f, 0f)
-            // Right taper to just above circle
-            path.lineTo(centerX + barWideWidth / 2f, barHeight - circleRadius * 0.35f)
-            // Curve to circle edge (smooth connect)
-            path.quadTo(
-                centerX + barWideWidth / 2f, barHeight + circleRadius * 0.10f,
-                centerX + circleRadius * 0.96f, circleCenterY
-            )
-            // Circle arc: from right to left, forming the bottom
-            path.arcTo(
-                centerX - circleRadius, circleCenterY - circleRadius,
-                centerX + circleRadius, circleCenterY + circleRadius,
-                0f, 180f, false
-            )
-            // Left curve up for smooth blend
-            path.quadTo(
-                centerX - barWideWidth / 2f, barHeight + circleRadius * 0.10f,
-                centerX - barWideWidth / 2f, barHeight - circleRadius * 0.35f
-            )
-            // Connect back to top left
-            path.lineTo(centerX - barNarrowWidth / 2f, 0f)
-            path.close()
-            canvas.drawPath(path, paint)
-        }
-        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
-        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
-        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
-}
     
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 48
@@ -972,67 +964,73 @@ private fun createTearDropDrawable(): Drawable {
         }
     }
     
-    private fun updateHandlePositions() {
-    try {
-        val layout = editText.layout ?: return
-        if (leftHandleView == null || rightHandleView == null) return
-
-        // বর্তমান সিলেকশনের শুরু ও শেষ ইনডেক্স
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
-
-        // সিলেকশন-এর highlight bound-এর টপ (visually Draw area)
-        val startLine = layout.getLineForOffset(start)
-        val endLine = layout.getLineForOffset(end)
-
-        // সংশ্লিষ্ট অক্ষরের বাঁ-প্রান্তিক x ও সে লাইনের নিচের y-coord (baseline পর নয়, নিচ বা top নেয়া শ্রেয়)
-        val startX = layout.getPrimaryHorizontal(start)
-        val endX = layout.getPrimaryHorizontal(end)
-
-        // Highlight box-কে ধরতে চাইলে বেটার: getLineTop + Scroll & Padding adjust করে নিন
-        val startY = layout.getLineTop(startLine) - editText.scrollY + editText.paddingTop
-        val endY = layout.getLineTop(endLine) - editText.scrollY + editText.paddingTop
-
-        // EditText এর স্ক্রীনে এক্স ও ওয়াই অবস্থান (WindowManager-এর জন্য)
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
-        val editScreenX = editLocation[0]
-        val editScreenY = editLocation[1]
-
-        val handleWidth = leftHandleView!!.width
-        val handleHeight = leftHandleView!!.height
-
-        // Drawable রিসাইজ অনুয়ায়ী টিপের x-mid
-        val handleTipX = handleWidth / 2
-        val handleTipY = 0 // হ্যান্ডেলের ড্রয়েবল-এর একদম টপ হলে tip, মানে ঐ পয়েন্টটা লাগানো হবে
-
-        // ফাইনাল নিখুঁত পজিশন (ইয়োলো প্যাড়া = +১/−১ px এডজাস্ট করলে perfect লাগে)
-        val fudgeX = 8    // এক্সাটলি gap না থাকলে -2 অথবা +2 করে টেস্ট করুন
-        val fudgeY = 0    // চাইলে -2/2 দিয়ে গুতা দিতে হবে, ফন্টের ওপর ডিপেন্ড করে
-
-        // ===== Left Handle (Selection start) =====
-        val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-        leftParams.x = (editScreenX + startX - handleTipX + fudgeX).toInt()
-        leftParams.y = (editScreenY + startY - handleHeight + fudgeY).toInt()
-
-        windowManager.updateViewLayout(leftHandleView, leftParams)
-
-        // ===== Right Handle (Selection end) =====
-        val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-        rightParams.x = (editScreenX + endX - handleTipX + fudgeX).toInt()
-        rightParams.y = (editScreenY + endY - handleHeight + fudgeY).toInt()
-
-        windowManager.updateViewLayout(rightHandleView, rightParams)
-    } catch (e: Exception) {
-        EmergencyLog.logException(e, "updateHandlePositions")
+    private fun updateHandlePositionsSafe() {
+        if (handleUpdatePending) return
+        handleUpdatePending = true
+        handleUpdateDebounceHandler.post {
+            try {
+                if (!isScrolling) {
+                    updateHandlePositions()
+                }
+            } finally {
+                handleUpdatePending = false
+            }
+        }
     }
-}
     
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    
+    // ✅ Your improved updateHandlePositions function
+    private fun updateHandlePositions() {
+        try {
+            val layout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) return
+
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+
+            val startLine = layout.getLineForOffset(start)
+            val endLine = layout.getLineForOffset(end)
+
+            val startX = layout.getPrimaryHorizontal(start)
+            val endX = layout.getPrimaryHorizontal(end)
+
+            val startY = layout.getLineTop(startLine) - editText.scrollY + editText.paddingTop
+            val endY = layout.getLineTop(endLine) - editText.scrollY + editText.paddingTop
+
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            val editScreenX = editLocation[0]
+            val editScreenY = editLocation[1]
+
+            val handleWidth = leftHandleView!!.width
+            val handleHeight = leftHandleView!!.height
+
+            val handleTipX = handleWidth / 2
+            val handleTipY = 0
+
+            val fudgeX = 8
+            val fudgeY = 0
+
+            val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
+            leftParams.x = (editScreenX + startX - handleTipX + fudgeX).toInt()
+            leftParams.y = (editScreenY + startY - handleHeight + fudgeY).toInt()
+            try {
+                actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
+            } catch (e: Exception) { }
+
+            val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
+            rightParams.x = (editScreenX + endX - handleTipX + fudgeX).toInt()
+            rightParams.y = (editScreenY + endY - handleHeight + fudgeY).toInt()
+            try {
+                actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
+            } catch (e: Exception) { }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
+        }
+    }
     
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
         this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
@@ -1371,17 +1369,6 @@ private fun createTearDropDrawable(): Drawable {
             hideFloatingActionBar()
         }
     }
-    
-    
-    private fun updateHandlePositionsSafe() {
-    if (!handleUpdatePending) {
-        handleUpdatePending = true
-        handleUpdateDebounceHandler.post {
-            handleUpdatePending = false
-            updateHandlePositions()
-        }
-    }
-}
     
     private fun scheduleActionBarShow() {
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
