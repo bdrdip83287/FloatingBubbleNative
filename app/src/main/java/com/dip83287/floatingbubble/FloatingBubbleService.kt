@@ -116,6 +116,12 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 100L
     
+    private var lastFontScale = 0f
+    private var lastScreenWidth = 0
+    private var lastScreenHeight = 0
+    private val configCheckHandler = Handler(Looper.getMainLooper())
+    private var configCheckRunnable: Runnable? = null
+
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
@@ -143,8 +149,59 @@ class FloatingBubbleService : Service() {
             scrollHideHandler = Handler(Looper.getMainLooper())
             scrollStopHandler = Handler(Looper.getMainLooper())
             
+            lastFontScale = resources.configuration.fontScale
+            lastScreenWidth = resources.displayMetrics.widthPixels
+            lastScreenHeight = resources.displayMetrics.heightPixels
+            
+            startConfigurationCheck()
+            
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
+        }
+    }
+    
+    private fun startConfigurationCheck() {
+        val runnable = object : Runnable {
+            override fun run() {
+                try {
+                    val currentFontScale = resources.configuration.fontScale
+                    val currentScreenWidth = resources.displayMetrics.widthPixels
+                    val currentScreenHeight = resources.displayMetrics.heightPixels
+                    
+                    if (currentFontScale != lastFontScale || 
+                        currentScreenWidth != lastScreenWidth || 
+                        currentScreenHeight != lastScreenHeight) {
+                        
+                        EmergencyLog.log("Configuration changed - updating handles")
+                        
+                        lastFontScale = currentFontScale
+                        lastScreenWidth = currentScreenWidth
+                        lastScreenHeight = currentScreenHeight
+                        
+                        // Force immediate handle update
+                        if (editText.hasSelection()) {
+                            updateHandlePositionsImmediate()
+                        }
+                    }
+                } catch (e: Exception) {
+                    EmergencyLog.logException(e, "Configuration check")
+                }
+                configCheckHandler.postDelayed(this, 500)
+            }
+        }
+        configCheckRunnable = runnable
+        configCheckHandler.postDelayed(runnable, 500)
+    }
+    
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        EmergencyLog.log("onConfigurationChanged called")
+        
+        // Immediately update handles when configuration changes
+        if (editText.hasSelection()) {
+            handleUpdateDebounceHandler.postDelayed({
+                updateHandlePositionsImmediate()
+            }, 50)
         }
     }
 
@@ -897,7 +954,7 @@ class FloatingBubbleService : Service() {
         handleUpdateDebounceHandler.post {
             try {
                 if (!isScrolling) {
-                    updateHandlePositions()
+                    updateHandlePositionsImmediate()
                 }
             } finally {
                 handleUpdatePending = false
@@ -909,10 +966,14 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ ULTIMATE PIXEL-PERFECT HANDLE POSITIONING - Works on rotation, font change, any scenario
-    private fun updateHandlePositions() {
+    // ✅ IMMEDIATE HANDLE POSITIONING - Called directly without debounce for rotation
+    private fun updateHandlePositionsImmediate() {
         try {
-            val layout = editText.layout ?: return
+            val layout = editText.layout
+            if (layout == null) {
+                EmergencyLog.log("Layout is null, cannot update handles")
+                return
+            }
             if (leftHandleView == null || rightHandleView == null) return
 
             val start = editText.selectionStart
@@ -923,62 +984,57 @@ class FloatingBubbleService : Service() {
                 return
             }
 
-            // Get EditText location on screen - FRESH after rotation
+            // Get EditText location on screen
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
-            
-            // Get the line boundaries directly from layout
+            val editScreenX = editLocation[0]
+            val editScreenY = editLocation[1]
+
+            // Get line numbers
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
             
-            // Get the exact horizontal positions of the characters
-            val startX = layout.getPrimaryHorizontal(start)
-            val endX = layout.getPrimaryHorizontal(end)
+            // Get raw X positions (character boundaries)
+            val startXRaw = layout.getPrimaryHorizontal(start)
+            val endXRaw = layout.getPrimaryHorizontal(end)
             
-            // Get the vertical top positions of the lines
-            val startY = layout.getLineTop(startLine)
-            val endY = layout.getLineTop(endLine)
+            // Apply scroll and padding adjustments
+            val scrollX = editText.scrollX
+            val scrollY = editText.scrollY
+            val paddingLeft = editText.paddingLeft
+            val paddingTop = editText.paddingTop
             
-            // Add EditText's screen offset
-            val finalStartX = editLocation[0] + startX
-            val finalEndX = editLocation[0] + endX
-            val finalStartY = editLocation[1] + startY
-            val finalEndY = editLocation[1] + endY
+            val startX = startXRaw - scrollX + paddingLeft
+            val endX = endXRaw - scrollX + paddingLeft
+            
+            val startY = layout.getLineTop(startLine) - scrollY + paddingTop
+            val endY = layout.getLineTop(endLine) - scrollY + paddingTop
 
             val handleSize = 40
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
 
-            // Left handle - tip exactly at start of selection
+            // Update left handle
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-            leftParams.x = (finalStartX - halfHandle).toInt()
-            leftParams.y = (finalStartY - handleSize - upwardShift).toInt()
+            leftParams.x = (editScreenX + startX - halfHandle).toInt()
+            leftParams.y = (editScreenY + startY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
+                EmergencyLog.log("Left handle position: x=${leftParams.x}, y=${leftParams.y}")
             } catch (e: Exception) { }
 
-            // Right handle - tip exactly at end of selection
+            // Update right handle
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-            rightParams.x = (finalEndX - halfHandle).toInt()
-            rightParams.y = (finalEndY - handleSize - upwardShift).toInt()
+            rightParams.x = (editScreenX + endX - halfHandle).toInt()
+            rightParams.y = (editScreenY + endY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
+                EmergencyLog.log("Right handle position: x=${rightParams.x}, y=${rightParams.y}")
             } catch (e: Exception) { }
             
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositions")
+            EmergencyLog.logException(e, "updateHandlePositionsImmediate")
         }
-    }
-    
-    // Force update on configuration change (rotation, font scale, etc.)
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        EmergencyLog.log("Configuration changed - forcing handle update")
-        handleUpdateDebounceHandler.postDelayed({
-            if (editText.hasSelection()) {
-                updateHandlePositions()
-            }
-        }, 100)
     }
     
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
@@ -2075,6 +2131,7 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
+        configCheckRunnable?.let { configCheckHandler.removeCallbacks(it) }
         zoomValueAnimator?.cancel()
         EmergencyLog.log("FloatingBubbleService destroyed")
     }
