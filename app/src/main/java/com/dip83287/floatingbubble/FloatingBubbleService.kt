@@ -18,6 +18,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -116,15 +117,17 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 100L
     
+    private var lastFontScale = 0f
+    private var lastScreenWidth = 0
+    private var lastScreenHeight = 0
+    private val configCheckHandler = Handler(Looper.getMainLooper())
+    private var configCheckRunnable: Runnable? = null
+
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
-    
-    // Rotation handling - force update after configuration change
-    private var rotationHandler: Handler? = null
-    private var rotationUpdateRunnable: Runnable? = null
 
     data class NoteItem(
         val id: Long,
@@ -146,28 +149,48 @@ class FloatingBubbleService : Service() {
             createDeleteZone()
             scrollHideHandler = Handler(Looper.getMainLooper())
             scrollStopHandler = Handler(Looper.getMainLooper())
-            rotationHandler = Handler(Looper.getMainLooper())
+            
+            lastFontScale = resources.configuration.fontScale
+            lastScreenWidth = resources.displayMetrics.widthPixels
+            lastScreenHeight = resources.displayMetrics.heightPixels
+            
+            startConfigurationCheck()
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
         }
     }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        EmergencyLog.log("onConfigurationChanged called - orientation changed")
-        
-        // Force update handles after rotation with delay to let layout settle
-        rotationUpdateRunnable?.let { rotationHandler?.removeCallbacks(it) }
-        val runnable = Runnable {
-            EmergencyLog.log("Rotation update - forcing handle reposition")
-            if (editText.hasSelection()) {
-                // Clear and reposition handles
-                updateHandlePositionsForce()
+    
+    private fun startConfigurationCheck() {
+        val runnable = object : Runnable {
+            override fun run() {
+                try {
+                    val currentFontScale = resources.configuration.fontScale
+                    val currentScreenWidth = resources.displayMetrics.widthPixels
+                    val currentScreenHeight = resources.displayMetrics.heightPixels
+                    
+                    if (currentFontScale != lastFontScale || 
+                        currentScreenWidth != lastScreenWidth || 
+                        currentScreenHeight != lastScreenHeight) {
+                        
+                        EmergencyLog.log("Configuration changed")
+                        
+                        lastFontScale = currentFontScale
+                        lastScreenWidth = currentScreenWidth
+                        lastScreenHeight = currentScreenHeight
+                        
+                        if (editText.hasSelection()) {
+                            updateHandlePositionsSafe()
+                        }
+                    }
+                } catch (e: Exception) {
+                    EmergencyLog.logException(e, "Configuration check")
+                }
+                configCheckHandler.postDelayed(this, 500)
             }
         }
-        rotationUpdateRunnable = runnable
-        rotationHandler?.postDelayed(runnable, 150)
+        configCheckRunnable = runnable
+        configCheckHandler.postDelayed(runnable, 500)
     }
 
     private fun loadNotes() {
@@ -775,6 +798,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ✅ Simple Circle Handle Drawable (No complex tear drop for better visibility)
     private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -931,33 +955,10 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // FORCE update - removes and re-adds handles at correct positions
-    private fun updateHandlePositionsForce() {
-        EmergencyLog.log("updateHandlePositionsForce called")
-        if (!editText.hasSelection()) return
-        
-        // Temporarily hide handles
-        val wasLeftVisible = leftHandleView != null && leftHandleView?.parent != null
-        val wasRightVisible = rightHandleView != null && rightHandleView?.parent != null
-        
-        if (wasLeftVisible) {
-            actionBarWindowManager?.removeView(leftHandleView)
-        }
-        if (wasRightVisible) {
-            actionBarWindowManager?.removeView(rightHandleView)
-        }
-        
-        // Re-add with correct positions
-        showSelectionHandles()
-    }
-    
+    // ✅ CORRECTED HANDLE POSITIONING - With proper X offset adjustment
     private fun updateHandlePositions() {
         try {
-            val layout = editText.layout
-            if (layout == null) {
-                EmergencyLog.log("Layout is null")
-                return
-            }
+            val layout = editText.layout ?: return
             if (leftHandleView == null || rightHandleView == null) return
 
             val start = editText.selectionStart
@@ -978,42 +979,47 @@ class FloatingBubbleService : Service() {
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
             
-            // Get raw X positions (character boundaries)
+            // Get X coordinates - these are character positions
             val startXRaw = layout.getPrimaryHorizontal(start)
             val endXRaw = layout.getPrimaryHorizontal(end)
             
-            // Apply scroll and padding adjustments
+            // Account for scroll X and padding left
             val scrollX = editText.scrollX
-            val scrollY = editText.scrollY
             val paddingLeft = editText.paddingLeft
-            val paddingTop = editText.paddingTop
             
+            // Final X positions adjusted for scroll and padding
             val startX = startXRaw - scrollX + paddingLeft
             val endX = endXRaw - scrollX + paddingLeft
             
-            val startY = layout.getLineTop(startLine) - scrollY + paddingTop
-            val endY = layout.getLineTop(endLine) - scrollY + paddingTop
+            // Get Y coordinates (top of line)
+            val startYRaw = layout.getLineTop(startLine)
+            val endYRaw = layout.getLineTop(endLine)
+            
+            // Account for scroll Y and padding top
+            val scrollY = editText.scrollY
+            val paddingTop = editText.paddingTop
+            
+            val startY = startYRaw - scrollY + paddingTop
+            val endY = endYRaw - scrollY + paddingTop
 
             val handleSize = 40
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
 
-            // Update left handle
+            // Left handle - position at start of selection
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
             leftParams.x = (editScreenX + startX - halfHandle).toInt()
             leftParams.y = (editScreenY + startY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
-                EmergencyLog.log("Left handle: x=${leftParams.x}, y=${leftParams.y}")
             } catch (e: Exception) { }
 
-            // Update right handle
+            // Right handle - position at end of selection  
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
             rightParams.x = (editScreenX + endX - halfHandle).toInt()
             rightParams.y = (editScreenY + endY - handleSize - upwardShift).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
-                EmergencyLog.log("Right handle: x=${rightParams.x}, y=${rightParams.y}")
             } catch (e: Exception) { }
             
         } catch (e: Exception) {
@@ -2115,7 +2121,7 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
-        rotationUpdateRunnable?.let { rotationHandler?.removeCallbacks(it) }
+        configCheckRunnable?.let { configCheckHandler.removeCallbacks(it) }
         zoomValueAnimator?.cancel()
         EmergencyLog.log("FloatingBubbleService destroyed")
     }
