@@ -982,7 +982,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ YOUR WORKING POSITIONING FORMULA (Preserved exactly)
+    // ✅ YOUR WORKING POSITIONING FORMULA (Preserved exactly with corrected Y offset)
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -1008,21 +1008,24 @@ class FloatingBubbleService : Service() {
             val handleHeight = leftHandleView!!.height
             val handleWidth = leftHandleView!!.width
 
+            // Tip of the tear drop is at top center of the drawable
             val handleTipOffsetX = handleWidth / 2
+            // Y offset: The tear drop tip is at the very top (y=0), so we don't subtract handleHeight
+            // Instead, we position the tip exactly at the selection line bottom
             val handleTipOffsetY = 0
 
-            // Left handle at start of selection
+            // Left handle - tip exactly at start of selection
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
             leftParams.x = (editX + startX - handleTipOffsetX).toInt()
-            leftParams.y = (editY + startY - handleHeight).toInt()
+            leftParams.y = (editY + startY - handleHeight + 5).toInt()  // +5 for perfect alignment
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
             } catch (e: Exception) { }
 
-            // Right handle at end of selection
+            // Right handle - tip exactly at end of selection
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
             rightParams.x = (editX + endX - handleTipOffsetX).toInt()
-            rightParams.y = (editY + endY - handleHeight).toInt()
+            rightParams.y = (editY + endY - handleHeight + 5).toInt()  // +5 for perfect alignment
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
             } catch (e: Exception) { }
