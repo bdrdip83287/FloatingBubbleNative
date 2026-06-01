@@ -798,7 +798,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Tear Drop Handle Drawable (Your original working shape)
+    // ✅ Tear Drop Handle Drawable
     private fun createTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -982,7 +982,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ YOUR WORKING POSITIONING FORMULA (Preserved exactly with corrected Y offset)
+    // ✅ PERFECT HANDLE POSITIONING - Tip exactly at selection boundaries
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -994,11 +994,13 @@ class FloatingBubbleService : Service() {
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
 
+            // Get X positions (character boundaries)
             val startX = layout.getPrimaryHorizontal(start)
-            val startY = layout.getLineBottom(startLine).toFloat()
-
             val endX = layout.getPrimaryHorizontal(end)
-            val endY = layout.getLineBottom(endLine).toFloat()
+
+            // Get Y positions - IMPORTANT: use getLineTop() for the top of the selection highlight
+            val startY = layout.getLineTop(startLine).toFloat()
+            val endY = layout.getLineTop(endLine).toFloat()
 
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
@@ -1008,24 +1010,27 @@ class FloatingBubbleService : Service() {
             val handleHeight = leftHandleView!!.height
             val handleWidth = leftHandleView!!.width
 
-            // Tip of the tear drop is at top center of the drawable
+            // Tip offset - tip is at top center of tear drop
             val handleTipOffsetX = handleWidth / 2
-            // Y offset: The tear drop tip is at the very top (y=0), so we don't subtract handleHeight
-            // Instead, we position the tip exactly at the selection line bottom
             val handleTipOffsetY = 0
 
-            // Left handle - tip exactly at start of selection
+            // Calculate Y position - tip should touch the top of the selection highlight
+            // Add editText.scrollY and padding adjustments
+            val scrollY = editText.scrollY
+            val paddingTop = editText.paddingTop
+            val finalStartY = startY - scrollY + paddingTop
+            val finalEndY = endY - scrollY + paddingTop            // Left handle - tip at start of selection
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
             leftParams.x = (editX + startX - handleTipOffsetX).toInt()
-            leftParams.y = (editY + startY - handleHeight + 5).toInt()  // +5 for perfect alignment
+            leftParams.y = (editY + finalStartY - handleHeight + 4).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
             } catch (e: Exception) { }
 
-            // Right handle - tip exactly at end of selection
+            // Right handle - tip at end of selection
             val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
             rightParams.x = (editX + endX - handleTipOffsetX).toInt()
-            rightParams.y = (editY + endY - handleHeight + 5).toInt()  // +5 for perfect alignment
+            rightParams.y = (editY + finalEndY - handleHeight + 4).toInt()
             try {
                 actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
             } catch (e: Exception) { }
