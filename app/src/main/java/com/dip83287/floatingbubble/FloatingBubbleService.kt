@@ -982,7 +982,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ PERFECT HANDLE POSITIONING - Tip exactly at character boundaries
+    // ✅ PERFECT HANDLE POSITIONING - Exact character boundary
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -994,11 +994,11 @@ class FloatingBubbleService : Service() {
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
 
-            // Get exact character X positions
+            // Get exact character X positions (these are the exact boundaries)
             val startX = layout.getPrimaryHorizontal(start)
             val endX = layout.getPrimaryHorizontal(end)
 
-            // Get Y positions - use getLineTop() for the top of the selection highlight
+            // Get Y positions - use getLineTop() for top of selection
             val startY = layout.getLineTop(startLine).toFloat()
             val endY = layout.getLineTop(endLine).toFloat()
 
@@ -1011,20 +1011,21 @@ class FloatingBubbleService : Service() {
             val handleHeight = leftHandleView!!.height
             val handleWidth = leftHandleView!!.width
 
-            // Tip offset - center of the tear drop
+            // Tip of tear drop is at center of width, top of drawable (y=0)
             val handleTipOffsetX = handleWidth / 2
 
-            // Adjust for scroll and padding
+            // Adjust for scroll
             val scrollY = editText.scrollY
             val paddingTop = editText.paddingTop
             val finalStartY = startY - scrollY + paddingTop
             val finalEndY = endY - scrollY + paddingTop
 
-            // Calculate Y position - tip touches top of selection
-            val leftHandleY = editY + finalStartY - handleHeight + 6
-            val rightHandleY = editY + finalEndY - handleHeight + 6
+            // Calculate Y position - tip should touch top of selection
+            val leftHandleY = editY + finalStartY - handleHeight + 4
+            val rightHandleY = editY + finalEndY - handleHeight + 4
 
-            // Calculate X positions with exact character boundary
+            // Calculate X positions - tip should be exactly at character boundary
+            // No extra offset needed - just character position minus half handle width
             val leftHandleX = editX + startX - handleTipOffsetX
             val rightHandleX = editX + endX - handleTipOffsetX
 
