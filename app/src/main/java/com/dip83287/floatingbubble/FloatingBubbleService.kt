@@ -95,6 +95,12 @@ class FloatingBubbleService : Service() {
     private var velocityTracker: VelocityTracker? = null
     private var velocityY = 0f
 
+    private var floatingActionBar: View? = null
+    private var isActionBarVisible = false
+    private var actionBarWindowManager: WindowManager? = null
+    
+    private var zoomValueAnimator: ValueAnimator? = null
+
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
     private var isActionBarTemporarilyHidden = false
@@ -130,6 +136,7 @@ class FloatingBubbleService : Service() {
         super.onCreate()
         try {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
             loadNotes()
@@ -167,8 +174,6 @@ class FloatingBubbleService : Service() {
                         lastFontScale = currentFontScale
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
-                        
-                        // Recalculate positions if needed
                     }
                 } catch (e: Exception) {
                     EmergencyLog.logException(e, "Configuration check")
@@ -784,13 +789,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ USING ANDROID NATIVE SELECTION SYSTEM
-    // No custom handles needed - Android handles everything automatically
-    
     private fun EditText.hasSelection(): Boolean {
         return selectionStart != selectionEnd
     }
 
+    // Custom Action Bar for Google Search and Additional Options
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -811,11 +814,12 @@ class FloatingBubbleService : Service() {
             background = shape
         }
         
+        // Google Search Button
         val chromeBtn = TextView(this).apply {
-            text = "🌐"
-            textSize = 18f
+            text = "🌐 Google"
+            textSize = 13f
             setTextColor(Color.WHITE)
-            setPadding(16, 8, 16, 8)
+            setPadding(14, 8, 14, 8)
             setOnClickListener {
                 val searchIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=${Uri.encode(selectedText)}"))
                 searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -827,65 +831,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        val cutBtn = TextView(this).apply {
-            text = "Cut"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                val (start, end) = getSelection()
-                if (start != end) {
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("text", selectedText)
-                    clipboard.setPrimaryClip(clip)
-                    editText.text.delete(start, end)
-                    hideFloatingActionBar()
-                    Toast.makeText(this@FloatingBubbleService, "Cut", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        actionBarView.addView(cutBtn)
-        
-        actionBarView.addView(createDivider())
-        
-        val copyBtn = TextView(this).apply {
-            text = "Copy"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = android.content.ClipData.newPlainText("text", selectedText)
-                clipboard.setPrimaryClip(clip)
-                hideFloatingActionBar()
-                Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
-            }
-        }
-        actionBarView.addView(copyBtn)
-        
-        actionBarView.addView(createDivider())
-        
-        val pasteBtn = TextView(this).apply {
-            text = "Paste"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = clipboard.primaryClip
-                if (clip != null && clip.itemCount > 0) {
-                    val pastedText = clip.getItemAt(0).text.toString()
-                    val (start, end) = getSelection()
-                    editText.text.replace(start, end, pastedText)
-                    hideFloatingActionBar()
-                    Toast.makeText(this@FloatingBubbleService, "Pasted", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        actionBarView.addView(pasteBtn)
-        
-        actionBarView.addView(createDivider())
-        
+        // Select All Button
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -902,6 +848,7 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
+        // Share Button
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1338,15 +1285,9 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ CRITICAL: Enable Android Native Selection System
-            // This gives us:
-            // 1. Native copy/cut/paste popup on long press
-            // 2. Native selection handles (tear drops)
-            // 3. Works on all devices automatically
+            // ✅ Enable Android Native Selection System
             setTextIsSelectable(true)
             isLongClickable = true
-            
-            // Don't override custom selection actions - let Android handle it
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
@@ -1355,7 +1296,7 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ For our custom action bar, we still listen to selection changes
+            // Track selection for custom action bar
             addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
                     if (this@apply.hasSelection() && !isScrolling) {
@@ -1392,13 +1333,9 @@ class FloatingBubbleService : Service() {
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
-                                // Double tap - select word at position
                                 selectWordAtPosition(this@apply, x, y)
                             } else {
-                                // Prepare for long press (Android native will handle selection)
                                 val runnable = Runnable {
-                                    // Long press detected - Android native selection will appear
-                                    // We just log it
                                     EmergencyLog.log("Long press detected - native selection will appear")
                                 }
                                 longPressRunnable = runnable
@@ -1558,10 +1495,6 @@ class FloatingBubbleService : Service() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
         }, 300)
-    }
-
-    private fun EditText.hasSelection(): Boolean {
-        return selectionStart != selectionEnd
     }
 
     private fun saveCurrentNote(noteId: Long) {
