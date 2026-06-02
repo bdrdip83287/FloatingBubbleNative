@@ -99,7 +99,6 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Custom selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -819,33 +818,27 @@ class FloatingBubbleService : Service() {
                 val circleCenterY = height - circleRadius
 
                 val path = Path()
-                // Start from top center
                 path.moveTo(centerX, 0f)
-                // Top right curve
                 path.cubicTo(
                     centerX + barTopWidth / 2f, 0f,
                     centerX + barBottomWidth / 2f, barHeight * 0.3f,
                     centerX + barBottomWidth / 2f, barHeight
                 )
-                // Curve to right side of circle
                 path.cubicTo(
                     centerX + barBottomWidth / 2f, barHeight + circleRadius * 0.3f,
                     centerX + circleRadius * 0.9f, circleCenterY - circleRadius * 0.3f,
                     centerX + circleRadius * 0.9f, circleCenterY
                 )
-                // Draw bottom circle arc
                 path.arcTo(
                     centerX - circleRadius, circleCenterY - circleRadius,
                     centerX + circleRadius, circleCenterY + circleRadius,
                     0f, 180f, false
                 )
-                // Left side back up
                 path.cubicTo(
                     centerX - circleRadius * 0.9f, circleCenterY,
                     centerX - barBottomWidth / 2f, barHeight + circleRadius * 0.1f,
                     centerX - barBottomWidth / 2f, barHeight
                 )
-                // Curve back to top
                 path.cubicTo(
                     centerX - barBottomWidth / 2f, barHeight * 0.3f,
                     centerX - barTopWidth / 2f, 0f,
@@ -1035,7 +1028,6 @@ class FloatingBubbleService : Service() {
             val finalStartY = startY - scrollY + paddingTop
             val finalEndY = endY - scrollY + paddingTop
 
-            // Calculate dynamic offset based on density
             val density = resources.displayMetrics.density
             val xOffset = (-density * 2).toInt()
             val yOffset = (density * 2).toInt()
@@ -1653,16 +1645,19 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            setOnSelectionChangedListener { _, _ ->
-                if (!isScrolling) {
-                    updateHandlePositionsSafe()
-                }
-            }
-            
             addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
+                    if (this@apply.hasSelection() && !isScrolling) {
+                        val selected = s?.substring(selectionStart, selectionEnd) ?: ""
+                        if (selected.isNotEmpty()) {
+                            currentSelectedText = selected
+                            isActionBarTemporarilyHidden = false
+                            showFloatingActionBar(selected)
+                            showSelectionHandles()
+                        }
+                    } else if (!this@apply.hasSelection()) {
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
                     }
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
