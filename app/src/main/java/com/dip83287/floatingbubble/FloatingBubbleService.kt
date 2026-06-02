@@ -798,7 +798,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Tear Drop Handle Drawable
+    // ✅ Tear Drop Handle Drawable with customizable tip offset
     private fun createTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -982,7 +982,11 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ PERFECT HANDLE POSITIONING - Exact character boundary
+    // ✅ PERFECT HANDLE POSITIONING - with customizable offset
+    // You can adjust this value based on your device
+    private val HANDLE_X_OFFSET = -8  // Negative moves left, positive moves right
+    private val HANDLE_Y_OFFSET = 4   // Y position fine-tuning
+    
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -991,14 +995,19 @@ class FloatingBubbleService : Service() {
             val start = editText.selectionStart
             val end = editText.selectionEnd
 
+            if (start == end || start < 0 || end < 0) {
+                hideSelectionHandles()
+                return
+            }
+
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
 
-            // Get exact character X positions (these are the exact boundaries)
+            // Get exact character X positions
             val startX = layout.getPrimaryHorizontal(start)
             val endX = layout.getPrimaryHorizontal(end)
 
-            // Get Y positions - use getLineTop() for top of selection
+            // Get Y positions - top of the line
             val startY = layout.getLineTop(startLine).toFloat()
             val endY = layout.getLineTop(endLine).toFloat()
 
@@ -1011,7 +1020,7 @@ class FloatingBubbleService : Service() {
             val handleHeight = leftHandleView!!.height
             val handleWidth = leftHandleView!!.width
 
-            // Tip of tear drop is at center of width, top of drawable (y=0)
+            // Tip of tear drop is at center of width, top of drawable
             val handleTipOffsetX = handleWidth / 2
 
             // Adjust for scroll
@@ -1020,14 +1029,13 @@ class FloatingBubbleService : Service() {
             val finalStartY = startY - scrollY + paddingTop
             val finalEndY = endY - scrollY + paddingTop
 
-            // Calculate Y position - tip should touch top of selection
-            val leftHandleY = editY + finalStartY - handleHeight + 4
-            val rightHandleY = editY + finalEndY - handleHeight + 4
+            // Calculate Y position
+            val leftHandleY = editY + finalStartY - handleHeight + HANDLE_Y_OFFSET
+            val rightHandleY = editY + finalEndY - handleHeight + HANDLE_Y_OFFSET
 
-            // Calculate X positions - tip should be exactly at character boundary
-            // No extra offset needed - just character position minus half handle width
-            val leftHandleX = editX + startX - handleTipOffsetX
-            val rightHandleX = editX + endX - handleTipOffsetX
+            // Calculate X positions with customizable offset
+            val leftHandleX = editX + startX - handleTipOffsetX + HANDLE_X_OFFSET
+            val rightHandleX = editX + endX - handleTipOffsetX + HANDLE_X_OFFSET
 
             // Left handle
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
