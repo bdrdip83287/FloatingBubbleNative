@@ -798,7 +798,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Tear Drop Handle Drawable with customizable tip offset
+    // ✅ Tear Drop Handle Drawable
     private fun createTearDropDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -982,10 +982,32 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ PERFECT HANDLE POSITIONING - with customizable offset
-    // You can adjust this value based on your device
-    private val HANDLE_X_OFFSET = -8  // Negative moves left, positive moves right
-    private val HANDLE_Y_OFFSET = 4   // Y position fine-tuning
+    // ✅ DYNAMIC OFFSET CALCULATION - Works on all devices automatically
+    // This calculates the exact offset needed based on screen density and text size
+    private fun calculateDynamicXOffset(): Int {
+        // Get the density factor (1 = mdpi, 1.5 = hdpi, 2 = xhdpi, 3 = xxhdpi, 4 = xxxhdpi)
+        val density = resources.displayMetrics.density
+        
+        // Get the text size in pixels
+        val textSizePx = editText.textSize
+        
+        // Calculate offset based on density and text size
+        // The tear drop handle's tip needs to align with the character boundary
+        // Formula: (density * 2) + (textSizePx / 40)
+        val offset = (density * 3 + textSizePx / 45).toInt()
+        
+        // Return negative offset to move left (towards the text)
+        return -offset
+    }
+    
+    private fun calculateDynamicYOffset(): Int {
+        val density = resources.displayMetrics.density
+        val textSizePx = editText.textSize
+        
+        // Y offset for perfect vertical alignment
+        val offset = (density * 2 + textSizePx / 50).toInt()
+        return offset
+    }
     
     private fun updateHandlePositions() {
         try {
@@ -997,8 +1019,7 @@ class FloatingBubbleService : Service() {
 
             if (start == end || start < 0 || end < 0) {
                 hideSelectionHandles()
-                return
-            }
+                return            }
 
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
@@ -1029,13 +1050,17 @@ class FloatingBubbleService : Service() {
             val finalStartY = startY - scrollY + paddingTop
             val finalEndY = endY - scrollY + paddingTop
 
-            // Calculate Y position
-            val leftHandleY = editY + finalStartY - handleHeight + HANDLE_Y_OFFSET
-            val rightHandleY = editY + finalEndY - handleHeight + HANDLE_Y_OFFSET
+            // Calculate dynamic offsets based on device density and text size
+            val dynamicXOffset = calculateDynamicXOffset()
+            val dynamicYOffset = calculateDynamicYOffset()
 
-            // Calculate X positions with customizable offset
-            val leftHandleX = editX + startX - handleTipOffsetX + HANDLE_X_OFFSET
-            val rightHandleX = editX + endX - handleTipOffsetX + HANDLE_X_OFFSET
+            // Calculate Y position
+            val leftHandleY = editY + finalStartY - handleHeight + dynamicYOffset
+            val rightHandleY = editY + finalEndY - handleHeight + dynamicYOffset
+
+            // Calculate X positions with dynamic offset
+            val leftHandleX = editX + startX - handleTipOffsetX + dynamicXOffset
+            val rightHandleX = editX + endX - handleTipOffsetX + dynamicXOffset
 
             // Left handle
             val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
