@@ -938,116 +938,138 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ NATIVE ANDROID BEHAVIOR: Hide handles when selection is outside visible viewport
-    // ✅ FIXED: Android-like Selection Handle Sync (Overlay Safe Version)
-// ✅ FIXED: Handle only visible when selection is within visible viewport of notepad
-private fun updateHandlePositions() {
-    try {
-        val layout = editText.layout ?: return
-        val leftHandle = leftHandleView ?: return
-        val rightHandle = rightHandleView ?: return
+    // ✅ UPDATED: Handle only visible when selection is within visible viewport of notepad
+    private fun updateHandlePositions() {
+        try {
+            val layout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) return
 
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
-
-        if (start == end ||
-            start < 0 || end < 0 ||
-            start > editText.text.length ||
-            end > editText.text.length
-        ) {
-            hideSelectionHandles()
-            return
-        }
-
-        // Get EditText screen position
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
-        val editScreenX = editLocation[0]
-        val editScreenY = editLocation[1]
-
-        // Get visible ScrollView bounds (ONLY visible area)
-        val scrollLocation = IntArray(2)
-        scrollView.getLocationOnScreen(scrollLocation)
-
-        val visibleTop = scrollLocation[1]
-        val visibleBottom = scrollLocation[1] + scrollView.height
-
-        val startLine = layout.getLineForOffset(start)
-        val endLine = layout.getLineForOffset(end)
-
-        val scrollX = editText.scrollX
-        val scrollY = editText.scrollY
-        val paddingLeft = editText.paddingLeft
-        val paddingTop = editText.paddingTop
-
-        val startX = layout.getPrimaryHorizontal(start) - scrollX + paddingLeft
-        val endX = layout.getPrimaryHorizontal(end) - scrollX + paddingLeft
-
-        val startY = layout.getLineTop(startLine) - scrollY + paddingTop
-        val endY = layout.getLineTop(endLine) - scrollY + paddingTop
-
-        val handleSize = 40
-        val halfHandle = handleSize / 2
-        val upwardShift = dpToPx(15)
-
-        val leftX = editScreenX + startX - halfHandle
-        val leftY = editScreenY + startY - handleSize - upwardShift
-
-        val rightX = editScreenX + endX - halfHandle
-        val rightY = editScreenY + endY - handleSize - upwardShift
-
-        val leftVisible =
-            leftY in visibleTop..visibleBottom
-
-        val rightVisible =
-            rightY in visibleTop..visibleBottom
-
-        // ---------------- LEFT HANDLE ----------------
-        if (leftVisible) {
-            val params = leftHandle.layoutParams as WindowManager.LayoutParams
-            params.x = leftX.toInt()
-            params.y = leftY.toInt()
-            actionBarWindowManager?.updateViewLayout(leftHandle, params)
-        } else {
-            actionBarWindowManager?.removeView(leftHandle)
-            leftHandleView = null
-        }
-
-        // ---------------- RIGHT HANDLE ----------------
-        if (rightVisible) {
-            val params = rightHandle.layoutParams as WindowManager.LayoutParams
-            params.x = rightX.toInt()
-            params.y = rightY.toInt()
-            actionBarWindowManager?.updateViewLayout(rightHandle, params)
-        } else {
-            actionBarWindowManager?.removeView(rightHandle)
-            rightHandleView = null
-        }
-
-        // ---------------- BOTH OUTSIDE ----------------
-        if (!leftVisible && !rightVisible) {
-            hideSelectionHandles()
-
-            if (isActionBarVisible) {
-                hideFloatingActionBar()
-                isActionBarTemporarilyHidden = true
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+            
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+                hideSelectionHandles()
+                return
             }
-        } else if (editText.hasSelection()) {
 
-            // restore action bar if needed
-            if (isActionBarTemporarilyHidden) {
-                val selected = editText.text.substring(start, end)
-                if (selected.isNotEmpty()) {
-                    isActionBarTemporarilyHidden = false
-                    showFloatingActionBar(selected)
+            // Get EditText location on screen
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            val editScreenX = editLocation[0]
+            val editScreenY = editLocation[1]
+
+            // Get ScrollView's visible area (the actual notepad visible bounds)
+            val scrollLocation = IntArray(2)
+            scrollView.getLocationOnScreen(scrollLocation)
+            val notepadVisibleTop = scrollLocation[1]
+            val notepadVisibleBottom = scrollLocation[1] + scrollView.height
+
+            // Get line numbers for start and end
+            val startLine = layout.getLineForOffset(start)
+            val endLine = layout.getLineForOffset(end)
+            
+            // Get exact X coordinates of character boundaries
+            val startXRaw = layout.getPrimaryHorizontal(start)
+            val endXRaw = layout.getPrimaryHorizontal(end)
+            
+            // Account for scroll X and padding left
+            val scrollX = editText.scrollX
+            val paddingLeft = editText.paddingLeft
+            
+            // Final X positions adjusted for scroll and padding
+            val startX = startXRaw - scrollX + paddingLeft
+            val endX = endXRaw - scrollX + paddingLeft
+            
+            // Get Y coordinates (top of line)
+            val startYRaw = layout.getLineTop(startLine)
+            val endYRaw = layout.getLineTop(endLine)
+            
+            // Account for scroll Y and padding top
+            val scrollY = editText.scrollY
+            val paddingTop = editText.paddingTop
+            
+            val startY = startYRaw - scrollY + paddingTop
+            val endY = endYRaw - scrollY + paddingTop
+
+            val handleSize = 40
+            val halfHandle = handleSize / 2
+            val upwardShift = dpToPx(15)
+
+            // Calculate actual screen positions of handles
+            val leftHandleScreenY = editScreenY + startY - handleSize - upwardShift
+            val rightHandleScreenY = editScreenY + endY - handleSize - upwardShift
+            
+            // Get handle bottom positions
+            val leftHandleBottom = leftHandleScreenY + handleSize
+            val rightHandleBottom = rightHandleScreenY + handleSize
+            
+            // ✅ Check if handles are within the visible notepad area (ScrollView bounds)
+            val isLeftHandleVisible = (leftHandleScreenY >= notepadVisibleTop && leftHandleBottom <= notepadVisibleBottom)
+            val isRightHandleVisible = (rightHandleScreenY >= notepadVisibleTop && rightHandleBottom <= notepadVisibleBottom)
+            
+            // Also check if the selection line itself is visible
+            val selectionTopY = editScreenY + startY
+            val selectionBottomY = editScreenY + startY + (layout.getLineBottom(startLine) - layout.getLineTop(startLine))
+            val isSelectionVisible = (selectionTopY >= notepadVisibleTop && selectionBottomY <= notepadVisibleBottom)
+
+            // Update left handle (only if visible)
+            if (isLeftHandleVisible && isSelectionVisible) {
+                val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
+                leftParams.x = (editScreenX + startX - halfHandle).toInt()
+                leftParams.y = leftHandleScreenY.toInt()
+                try {
+                    actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
+                } catch (e: Exception) { }
+            } else {
+                // Hide left handle if outside bounds
+                try {
+                    leftHandleView?.let { 
+                        actionBarWindowManager?.removeView(it)
+                        leftHandleView = null
+                    }
+                } catch (e: Exception) { }
+            }
+
+            // Update right handle (only if visible)
+            if (isRightHandleVisible && isSelectionVisible) {
+                val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
+                rightParams.x = (editScreenX + endX - halfHandle).toInt()
+                rightParams.y = rightHandleScreenY.toInt()
+                try {
+                    actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
+                } catch (e: Exception) { }
+            } else {
+                // Hide right handle if outside bounds
+                try {
+                    rightHandleView?.let { 
+                        actionBarWindowManager?.removeView(it)
+                        rightHandleView = null
+                    }
+                } catch (e: Exception) { }
+            }
+            
+            // If both handles are outside, hide both and also hide action bar
+            if (!isLeftHandleVisible && !isRightHandleVisible) {
+                hideSelectionHandles()
+                if (isActionBarVisible) {
+                    hideFloatingActionBar()
+                    isActionBarTemporarilyHidden = true
+                }
+            } else if (isSelectionVisible) {
+                // If we're re-showing handles, make sure action bar comes back
+                if (isActionBarTemporarilyHidden && editText.hasSelection()) {
+                    val selected = editText.text.substring(start, end)
+                    if (selected.isNotEmpty()) {
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selected)
+                    }
                 }
             }
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
         }
-
-    } catch (e: Exception) {
-        EmergencyLog.logException(e, "updateHandlePositions")
     }
-}
 private fun isRectVisible(
     left: Int, top: Int, right: Int, bottom: Int,
     notepadLeft: Int, notepadTop: Int, notepadWidth: Int, notepadHeight: Int
