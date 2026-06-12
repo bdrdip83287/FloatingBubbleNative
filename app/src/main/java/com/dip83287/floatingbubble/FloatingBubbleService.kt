@@ -38,6 +38,7 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
+import java.lang.reflect.Method
 
 class FloatingBubbleService : Service() {
 
@@ -907,21 +908,71 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ Custom EditText that forces native selection handles to work in overlay window
-    class OverlayEditText(context: Context) : EditText(context) {
+    // ✅ Custom EditText with reflection to force native selection handles
+    class NativeSelectionEditText(context: Context) : EditText(context) {
+        
+        init {
+            // Force text selection to be enabled
+            setTextIsSelectable(true)
+            isLongClickable = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            
+            // Enable cursor and movement
+            isCursorVisible = true
+            movementMethod = ArrowKeyMovementMethod.getInstance()
+            
+            // Remove custom callbacks to let Android use default ones
+            customInsertionActionModeCallback = null
+            customSelectionActionModeCallback = null
+        }
         
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
-            // Force re-enable text selection after view is attached to window
-            // This is the key fix for overlay window selection handles [citation:1]
-            if (isTextSelectable) {
-                setTextIsSelectable(false)
-                setTextIsSelectable(true)
+            // Force selection handles to be initialized
+            try {
+                // Try to get Editor instance via reflection
+                val editorField = TextView::class.java.getDeclaredField("mEditor")
+                editorField.isAccessible = true
+                val editor = editorField.get(this)
+                
+                if (editor != null) {
+                    // Call methods that initialize selection handles
+                    val methods = arrayOf(
+                        "prepareCursorControllers",
+                        "startSelectionActionMode",
+                        "showFloatingToolbar"
+                    )
+                    
+                    for (methodName in methods) {
+                        try {
+                            val method: Method? = editor.javaClass.getDeclaredMethod(methodName, Boolean::class.javaPrimitiveType)
+                            method?.apply {
+                                isAccessible = true
+                                invoke(editor, true)
+                            }
+                        } catch (e: Exception) {
+                            // Method not found, continue
+                        }
+                    }
+                    
+                    // Try to get and initialize position listener
+                    try {
+                        val positionListenerField = editor.javaClass.getDeclaredField("mPositionListener")
+                        positionListenerField.isAccessible = true
+                        val positionListener = positionListenerField.get(editor)
+                        if (positionListener != null) {
+                            val updatePositionMethod = positionListener.javaClass.getDeclaredMethod("updatePosition")
+                            updatePositionMethod.isAccessible = true
+                            updatePositionMethod.invoke(positionListener)
+                        }
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                }
+            } catch (e: Exception) {
+                EmergencyLog.logException(e, "onAttachedToWindow")
             }
-        }
-        
-        override fun onDetachedFromWindow() {
-            super.onDetachedFromWindow()
         }
     }
     
@@ -1023,11 +1074,12 @@ class FloatingBubbleService : Service() {
                     temporarilyHideActionBar()
                     scheduleActionBarShow()
                 }
+                updateActionBarPosition()
             }
         }
         
-        // ✅ CRITICAL: Use custom OverlayEditText that forces selection handles
-        editText = OverlayEditText(this).apply {
+        // ✅ Use custom EditText that forces native selection handles
+        editText = NativeSelectionEditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
             textSize = 15f
@@ -1046,20 +1098,16 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ Enable text selection
+            // Already set in custom class, but ensure
             setTextIsSelectable(true)
             isLongClickable = true
-            
-            // Let Android use its default selection action mode
-            customInsertionActionModeCallback = null
-            customSelectionActionModeCallback = null
-            
             isClickable = true
             isCursorVisible = true
             isFocusable = true
             isFocusableInTouchMode = true
             
-            movementMethod = ArrowKeyMovementMethod.getInstance()
+            customInsertionActionModeCallback = null
+            customSelectionActionModeCallback = null
             
             // Long press listener for word selection
             setOnLongClickListener {
@@ -1082,7 +1130,7 @@ class FloatingBubbleService : Service() {
                 true
             }
             
-            // Touch listener
+            // Touch listener for single tap
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1492,6 +1540,30 @@ class FloatingBubbleService : Service() {
                 actionBarWindowManager?.addView(floatingActionBar, params)
                 isActionBarVisible = true
             } catch (e: Exception) { }
+        }
+    }
+    
+    private fun updateActionBarPosition() {
+        if (!isActionBarVisible) return
+        
+        val location = IntArray(2)
+        editText.getLocationOnScreen(location)
+        
+        val layout = editText.layout
+        if (layout != null && floatingActionBar != null) {
+            val start = editText.selectionStart
+            val startLine = layout.getLineForOffset(start)
+            val x = layout.getPrimaryHorizontal(start) + location[0]
+            val y = layout.getLineTop(startLine) + location[1]
+            
+            val params = floatingActionBar?.layoutParams as? WindowManager.LayoutParams
+            if (params != null) {
+                params.x = x.toInt() - 50
+                params.y = (y - 55).toInt()
+                try {
+                    actionBarWindowManager?.updateViewLayout(floatingActionBar, params)
+                } catch (e: Exception) { }
+            }
         }
     }
     
