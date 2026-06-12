@@ -692,7 +692,6 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
-            // ✅ CRITICAL FIX: Remove FLAG_NOT_FOCUSABLE to allow native selection handles
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -908,6 +907,24 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
+    // ✅ Custom EditText that forces native selection handles to work in overlay window
+    class OverlayEditText(context: Context) : EditText(context) {
+        
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            // Force re-enable text selection after view is attached to window
+            // This is the key fix for overlay window selection handles [citation:1]
+            if (isTextSelectable) {
+                setTextIsSelectable(false)
+                setTextIsSelectable(true)
+            }
+        }
+        
+        override fun onDetachedFromWindow() {
+            super.onDetachedFromWindow()
+        }
+    }
+    
     private fun openEditorForNote(note: NoteItem) {
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -1009,8 +1026,8 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ EDIT TEXT WITH NATIVE ANDROID SELECTION HANDLES
-        editText = EditText(this).apply {
+        // ✅ CRITICAL: Use custom OverlayEditText that forces selection handles
+        editText = OverlayEditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
             textSize = 15f
@@ -1029,11 +1046,11 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ NATIVE SELECTION HANDLES - Remove FLAG_NOT_FOCUSABLE for handles to work
+            // ✅ Enable text selection
             setTextIsSelectable(true)
             isLongClickable = true
             
-            // Keep default selection action mode for native copy/paste popup
+            // Let Android use its default selection action mode
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
@@ -1211,7 +1228,6 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
-        // ✅ CRITICAL FIX: Remove FLAG_NOT_FOCUSABLE to allow native selection handles
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
