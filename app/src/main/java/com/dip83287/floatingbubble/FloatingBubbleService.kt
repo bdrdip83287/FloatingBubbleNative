@@ -15,10 +15,6 @@ import android.graphics.PixelFormat
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.Drawable
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -165,10 +161,6 @@ class FloatingBubbleService : Service() {
                         lastFontScale = currentFontScale
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
-                        
-                        if (editText.hasSelection()) {
-                            updateActionBarPosition()
-                        }
                     }
                 } catch (e: Exception) {
                     EmergencyLog.logException(e, "Configuration check")
@@ -700,6 +692,7 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
+            // ✅ CRITICAL FIX: Remove FLAG_NOT_FOCUSABLE to allow native selection handles
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -784,7 +777,548 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Custom Floating Action Bar (Copy, Cut, Paste, Select All, Share, Chrome)
+    private fun createFullNotePad(): View {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
+            setPadding(16, 16, 16, 16)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
+        }
+
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnTouchListener(TitleBarDragListener())
+            setPadding(8, 12, 8, 12)
+            setBackgroundColor(Color.parseColor("#F9E79F"))
+        }
+
+        val dragHandle = TextView(this).apply {
+            text = "⋯"
+            textSize = 24f
+            setTextColor(Color.parseColor("#333333"))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        topBar.addView(dragHandle)
+
+        val titleText = TextView(this).apply {
+            text = NOTEPAD_TITLE
+            textSize = 16f
+            setTextColor(Color.parseColor("#333333"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER
+        }
+        topBar.addView(titleText)
+
+        val minimizeBtn = TextView(this).apply {
+            text = "−"
+            textSize = 28f
+            setTextColor(Color.parseColor("#C0392B"))
+            setPadding(16, 0, 8, 0)
+            setOnClickListener { 
+                collapseToBubble()
+            }
+        }
+        topBar.addView(minimizeBtn)
+        container.addView(topBar)
+
+        val noteCountText = TextView(this).apply {
+            text = "Note List (${notesList.size})"
+            textSize = 14f
+            setTextColor(Color.parseColor("#666666"))
+            setPadding(12, 16, 12, 8)
+        }
+        container.addView(noteCountText)
+
+        recyclerView = RecyclerView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+            layoutManager = LinearLayoutManager(this@FloatingBubbleService)
+            setPadding(8, 8, 8, 8)
+            setHasFixedSize(true)
+            itemAnimator = null
+            setItemViewCacheSize(20)
+        }
+        
+        notesAdapter = NoteAdapter(notesList,
+            onItemClick = { note ->
+                openEditorForNote(note)
+            },
+            onDeleteClick = { note ->
+                notesList.remove(note)
+                saveNotesToPrefs()
+                notesAdapter.updateList(notesList)
+                updateBubbleCount()
+                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
+            }
+        )
+        recyclerView.adapter = notesAdapter
+        container.addView(recyclerView)
+
+        val addButton = Button(this).apply {
+            text = "+ New Note"
+            setBackgroundColor(Color.parseColor("#F9E79F"))
+            setTextColor(Color.parseColor("#333333"))
+            setAllCaps(false)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 8
+                bottomMargin = 8
+            }
+            setOnClickListener {
+                createNewNote()
+            }
+        }
+        container.addView(addButton)
+
+        val resizeHandleView = TextView(this).apply {
+            text = "◢"
+            textSize = 18f
+            setTextColor(Color.parseColor("#999999"))
+            gravity = Gravity.END or Gravity.BOTTOM
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
+            lp.topMargin = 4
+            layoutParams = lp
+            setOnTouchListener(ResizeTouchListener())
+        }
+        container.addView(resizeHandleView)
+
+        return container
+    }
+
+    private fun createNewNote() {
+        val newNote = NoteItem(
+            id = System.currentTimeMillis(),
+            title = "Untitled Note",
+            content = ""
+        )
+        notesList.add(0, newNote)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+        openEditorForNote(newNote)
+    }
+
+    private fun openEditorForNote(note: NoteItem) {
+        val container = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
+        }
+        
+        val contentContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 16, 16, 16)
+        }
+
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnTouchListener(TitleBarDragListener())
+            setPadding(8, 12, 8, 12)
+            setBackgroundColor(Color.parseColor("#F9E79F"))
+        }
+
+        val backBtn = TextView(this).apply {
+            text = "←"
+            textSize = 24f
+            setTextColor(Color.parseColor("#333333"))
+            setPadding(8, 0, 16, 0)
+            setOnClickListener {
+                hideFloatingActionBar()
+                showNoteList()
+            }
+        }
+        topBar.addView(backBtn)
+
+        val editorTitle = TextView(this).apply {
+            text = "Edit Note"
+            textSize = 16f
+            setTextColor(Color.parseColor("#333333"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER
+        }
+        topBar.addView(editorTitle)
+
+        val minimizeBtn = TextView(this).apply {
+            text = "−"
+            textSize = 28f
+            setTextColor(Color.parseColor("#C0392B"))
+            setPadding(16, 0, 8, 0)
+            setOnClickListener { 
+                collapseToBubble()
+            }
+        }
+        topBar.addView(minimizeBtn)
+        contentContainer.addView(topBar)
+
+        titleInput = EditText(this).apply {
+            setText(note.title)
+            hint = "Title"
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(8, 16, 8, 8)
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            setTextIsSelectable(true)
+        }
+        contentContainer.addView(titleInput)
+
+        val divider = View(this).apply {
+            setBackgroundColor(Color.parseColor("#DDDDDD"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 2
+            )
+        }
+        contentContainer.addView(divider)
+
+        scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_ALWAYS
+            setPadding(0, 0, 0, 0)
+            isFocusable = false
+            isFocusableInTouchMode = false
+            
+            viewTreeObserver.addOnScrollChangedListener {
+                if (editText.hasSelection()) {
+                    temporarilyHideActionBar()
+                    scheduleActionBarShow()
+                }
+            }
+        }
+        
+        // ✅ EDIT TEXT WITH NATIVE ANDROID SELECTION HANDLES
+        editText = EditText(this).apply {
+            setText(note.content)
+            hint = "Write your note here..."
+            textSize = 15f
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(18, 18, 18, 18)
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            
+            setLineSpacing(0f, 1.15f)
+            setHorizontallyScrolling(false)
+            maxLines = Int.MAX_VALUE
+            minHeight = 400
+            
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            
+            // ✅ NATIVE SELECTION HANDLES - Remove FLAG_NOT_FOCUSABLE for handles to work
+            setTextIsSelectable(true)
+            isLongClickable = true
+            
+            // Keep default selection action mode for native copy/paste popup
+            customInsertionActionModeCallback = null
+            customSelectionActionModeCallback = null
+            
+            isClickable = true
+            isCursorVisible = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            
+            movementMethod = ArrowKeyMovementMethod.getInstance()
+            
+            // Long press listener for word selection
+            setOnLongClickListener {
+                val text = this@apply.text.toString()
+                val cursorPos = this@apply.selectionStart
+                if (cursorPos >= 0 && cursorPos <= text.length) {
+                    var start = cursorPos
+                    var end = cursorPos
+                    while (start > 0 && text[start - 1].isLetterOrDigit()) start--
+                    while (end < text.length && text[end].isLetterOrDigit()) end++
+                    
+                    if (start < end) {
+                        this@apply.setSelection(start, end)
+                        val selected = text.substring(start, end)
+                        currentSelectedText = selected
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selected)
+                    }
+                }
+                true
+            }
+            
+            // Touch listener
+            setOnTouchListener(object : View.OnTouchListener {
+                private var lastTouchTime = 0L
+                private var lastTouchX = 0f
+                private var lastTouchY = 0f
+                
+                override fun onTouch(v: View, event: MotionEvent): Boolean {
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            val currentTime = System.currentTimeMillis()
+                            val x = event.x
+                            val y = event.y
+                            
+                            if (currentTime - lastTouchTime < 300 && 
+                                Math.abs(x - lastTouchX) < 50 && 
+                                Math.abs(y - lastTouchY) < 50) {
+                                // Double tap - select word
+                                selectWordAtPosition(this@apply, x, y)
+                            }
+                            
+                            lastTouchTime = currentTime
+                            lastTouchX = x
+                            lastTouchY = y
+                            v.parent.requestDisallowInterceptTouchEvent(false)
+                        }
+                        
+                        MotionEvent.ACTION_UP -> {
+                            if (!this@apply.hasSelection()) {
+                                hideFloatingActionBar()
+                            }
+                        }
+                    }
+                    return false
+                }
+            })
+            
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (!this@apply.hasSelection()) {
+                        hideFloatingActionBar()
+                    } else {
+                        val selected = s?.substring(selectionStart, selectionEnd) ?: ""
+                        if (selected.isNotEmpty()) {
+                            currentSelectedText = selected
+                            showFloatingActionBar(selected)
+                        }
+                    }
+                    
+                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
+                    val runnable = Runnable {
+                        val index = notesList.indexOfFirst { it.id == note.id }
+                        if (index != -1) {
+                            val updatedNote = notesList[index].copy(
+                                content = text.toString(),
+                                title = titleInput.text.toString(),
+                                lastEdited = System.currentTimeMillis()
+                            )
+                            notesList[index] = updatedNote
+                            saveNotesToPrefs()
+                        }
+                    }
+                    saveRunnable = runnable
+                    saveHandler.postDelayed(runnable, 600)
+                }
+                
+                override fun afterTextChanged(s: Editable?) {}
+            })
+        }
+        
+        scrollView.addView(editText)
+        contentContainer.addView(scrollView)
+
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 16
+            }
+        }
+
+        val saveBtn = Button(this).apply {
+            text = "Save"
+            setBackgroundColor(Color.parseColor("#4CAF50"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
+            setOnClickListener {
+                saveCurrentNote(note.id)
+            }
+        }
+        buttonRow.addView(saveBtn)
+
+        val deleteBtn = Button(this).apply {
+            text = "Delete"
+            setBackgroundColor(Color.parseColor("#E74C3C"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                notesList.removeAll { it.id == note.id }
+                saveNotesToPrefs()
+                notesAdapter.updateList(notesList)
+                updateBubbleCount()
+                hideFloatingActionBar()
+                showNoteList()
+                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
+            }
+        }
+        buttonRow.addView(deleteBtn)
+        contentContainer.addView(buttonRow)
+
+        val shareBtn = Button(this).apply {
+            text = "Share Note"
+            setBackgroundColor(Color.parseColor("#2196F3"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 8
+            }
+            setOnClickListener {
+                shareLargeText("${titleInput.text}\n\n${editText.text}")
+            }
+        }
+        contentContainer.addView(shareBtn)
+
+        val resizeHandleView = TextView(this).apply {
+            text = "◢"
+            textSize = 18f
+            setTextColor(Color.parseColor("#999999"))
+            gravity = Gravity.END or Gravity.BOTTOM
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
+            lp.topMargin = 8
+            layoutParams = lp
+            setOnTouchListener(ResizeTouchListener())
+        }
+        contentContainer.addView(resizeHandleView)
+        
+        container.addView(contentContainer)
+        
+        noteView?.let { windowManager.removeView(it) }
+        noteView = container
+        
+        // ✅ CRITICAL FIX: Remove FLAG_NOT_FOCUSABLE to allow native selection handles
+        val params = WindowManager.LayoutParams(
+            currentNotepadWidth, currentNotepadHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = notepadPosX
+        params.y = notepadPosY
+        
+        windowManager.addView(noteView, params)
+        
+        scrollView.postDelayed({
+            editText.isFocusable = true
+            editText.isFocusableInTouchMode = true
+            editText.requestFocus()
+            
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
+        }, 300)
+    }
+
+    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
+        try {
+            val layout = editText.layout
+            if (layout != null) {
+                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = layout.getOffsetForHorizontal(line, x)
+                
+                val text = editText.text.toString()
+                if (offset >= 0 && offset <= text.length) {
+                    var wordStart = offset
+                    var wordEnd = offset
+                    
+                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
+                        wordStart--
+                    }
+                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
+                        wordEnd++
+                    }
+                    
+                    if (wordStart < wordEnd) {
+                        editText.setSelection(wordStart, wordEnd)
+                        val selectedWord = text.substring(wordStart, wordEnd)
+                        currentSelectedText = selectedWord
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selectedWord)
+                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "selectWordAtPosition")
+        }
+    }
+
+    private fun EditText.hasSelection(): Boolean {
+        return selectionStart != selectionEnd
+    }
+
+    private fun saveCurrentNote(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index != -1) {
+            val updatedNote = notesList[index].copy(
+                title = titleInput.text.toString().ifEmpty { "Untitled Note" },
+                content = editText.text.toString(),
+                lastEdited = System.currentTimeMillis()
+            )
+            notesList[index] = updatedNote
+            saveNotesToPrefs()
+            notesAdapter.updateList(notesList)
+            updateBubbleCount()
+            Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+            hideFloatingActionBar()
+            showNoteList()
+        }
+    }
+
+    private fun showNoteList() {
+        hideFloatingActionBar()
+        val container = createFullNotePad()
+        noteView?.let { windowManager.removeView(it) }
+        noteView = container
+        
+        val params = WindowManager.LayoutParams(
+            currentNotepadWidth, currentNotepadHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = notepadPosX
+        params.y = notepadPosY
+        
+        windowManager.addView(noteView, params)
+    }
+
+    private fun updateBubbleCount() {
+        val countView = (bubbleView as? LinearLayout)?.getChildAt(1) as? TextView
+        countView?.text = notesList.size.toString()
+        countView?.visibility = if (notesList.size > 0) View.VISIBLE else View.GONE
+    }
+
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -945,30 +1479,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    private fun updateActionBarPosition() {
-        if (!isActionBarVisible) return
-        
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
-        
-        val layout = editText.layout
-        if (layout != null && floatingActionBar != null) {
-            val start = editText.selectionStart
-            val startLine = layout.getLineForOffset(start)
-            val x = layout.getPrimaryHorizontal(start) + location[0]
-            val y = layout.getLineTop(startLine) + location[1]
-            
-            val params = floatingActionBar?.layoutParams as? WindowManager.LayoutParams
-            if (params != null) {
-                params.x = x.toInt() - 50
-                params.y = (y - 55).toInt()
-                try {
-                    actionBarWindowManager?.updateViewLayout(floatingActionBar, params)
-                } catch (e: Exception) { }
-            }
-        }
-    }
-    
     private fun shareLargeText(text: String) {
         try {
             if (text.length > 500000) {
@@ -1060,550 +1570,6 @@ class FloatingBubbleService : Service() {
     
     private fun getSelection(): Pair<Int, Int> {
         return Pair(editText.selectionStart, editText.selectionEnd)
-    }
-
-    private fun createFullNotePad(): View {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            setPadding(16, 16, 16, 16)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
-        }
-
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            setOnTouchListener(TitleBarDragListener())
-            setPadding(8, 12, 8, 12)
-            setBackgroundColor(Color.parseColor("#F9E79F"))
-        }
-
-        val dragHandle = TextView(this).apply {
-            text = "⋯"
-            textSize = 24f
-            setTextColor(Color.parseColor("#333333"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        topBar.addView(dragHandle)
-
-        val titleText = TextView(this).apply {
-            text = NOTEPAD_TITLE
-            textSize = 16f
-            setTextColor(Color.parseColor("#333333"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            gravity = Gravity.CENTER
-        }
-        topBar.addView(titleText)
-
-        val minimizeBtn = TextView(this).apply {
-            text = "−"
-            textSize = 28f
-            setTextColor(Color.parseColor("#C0392B"))
-            setPadding(16, 0, 8, 0)
-            setOnClickListener { 
-                collapseToBubble()
-            }
-        }
-        topBar.addView(minimizeBtn)
-        container.addView(topBar)
-
-        val noteCountText = TextView(this).apply {
-            text = "Note List (${notesList.size})"
-            textSize = 14f
-            setTextColor(Color.parseColor("#666666"))
-            setPadding(12, 16, 12, 8)
-        }
-        container.addView(noteCountText)
-
-        recyclerView = RecyclerView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-            layoutManager = LinearLayoutManager(this@FloatingBubbleService)
-            setPadding(8, 8, 8, 8)
-            setHasFixedSize(true)
-            itemAnimator = null
-            setItemViewCacheSize(20)
-        }
-        
-        notesAdapter = NoteAdapter(notesList,
-            onItemClick = { note ->
-                openEditorForNote(note)
-            },
-            onDeleteClick = { note ->
-                notesList.remove(note)
-                saveNotesToPrefs()
-                notesAdapter.updateList(notesList)
-                updateBubbleCount()
-                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
-            }
-        )
-        recyclerView.adapter = notesAdapter
-        container.addView(recyclerView)
-
-        val addButton = Button(this).apply {
-            text = "+ New Note"
-            setBackgroundColor(Color.parseColor("#F9E79F"))
-            setTextColor(Color.parseColor("#333333"))
-            setAllCaps(false)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 8
-                bottomMargin = 8
-            }
-            setOnClickListener {
-                createNewNote()
-            }
-        }
-        container.addView(addButton)
-
-        val resizeHandleView = TextView(this).apply {
-            text = "◢"
-            textSize = 18f
-            setTextColor(Color.parseColor("#999999"))
-            gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
-            lp.topMargin = 4
-            layoutParams = lp
-            setOnTouchListener(ResizeTouchListener())
-        }
-        container.addView(resizeHandleView)
-
-        return container
-    }
-
-    private fun createNewNote() {
-        val newNote = NoteItem(
-            id = System.currentTimeMillis(),
-            title = "Untitled Note",
-            content = ""
-        )
-        notesList.add(0, newNote)
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        updateBubbleCount()
-        openEditorForNote(newNote)
-    }
-
-    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
-        try {
-            val layout = editText.layout
-            if (layout != null) {
-                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
-                val offset = layout.getOffsetForHorizontal(line, x)
-                
-                val text = editText.text.toString()
-                if (offset >= 0 && offset <= text.length) {
-                    var wordStart = offset
-                    var wordEnd = offset
-                    
-                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
-                        wordStart--
-                    }
-                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
-                        wordEnd++
-                    }
-                    
-                    if (wordStart < wordEnd) {
-                        editText.setSelection(wordStart, wordEnd)
-                        val selectedWord = text.substring(wordStart, wordEnd)
-                        currentSelectedText = selectedWord
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selectedWord)
-                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "selectWordAtPosition")
-        }
-    }
-
-    private fun openEditorForNote(note: NoteItem) {
-        val container = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-        }
-        
-        val contentContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(16, 16, 16, 16)
-        }
-
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            setOnTouchListener(TitleBarDragListener())
-            setPadding(8, 12, 8, 12)
-            setBackgroundColor(Color.parseColor("#F9E79F"))
-        }
-
-        val backBtn = TextView(this).apply {
-            text = "←"
-            textSize = 24f
-            setTextColor(Color.parseColor("#333333"))
-            setPadding(8, 0, 16, 0)
-            setOnClickListener {
-                hideFloatingActionBar()
-                showNoteList()
-            }
-        }
-        topBar.addView(backBtn)
-
-        val editorTitle = TextView(this).apply {
-            text = "Edit Note"
-            textSize = 16f
-            setTextColor(Color.parseColor("#333333"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            gravity = Gravity.CENTER
-        }
-        topBar.addView(editorTitle)
-
-        val minimizeBtn = TextView(this).apply {
-            text = "−"
-            textSize = 28f
-            setTextColor(Color.parseColor("#C0392B"))
-            setPadding(16, 0, 8, 0)
-            setOnClickListener { 
-                collapseToBubble()
-            }
-        }
-        topBar.addView(minimizeBtn)
-        contentContainer.addView(topBar)
-
-        titleInput = EditText(this).apply {
-            setText(note.title)
-            hint = "Title"
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(8, 16, 8, 8)
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            setTextIsSelectable(true)
-        }
-        contentContainer.addView(titleInput)
-
-        val divider = View(this).apply {
-            setBackgroundColor(Color.parseColor("#DDDDDD"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 2
-            )
-        }
-        contentContainer.addView(divider)
-
-        scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_ALWAYS
-            setPadding(0, 0, 0, 0)
-            isFocusable = false
-            isFocusableInTouchMode = false
-            
-            viewTreeObserver.addOnScrollChangedListener {
-                if (editText.hasSelection()) {
-                    temporarilyHideActionBar()
-                    scheduleActionBarShow()
-                }
-                updateActionBarPosition()
-            }
-        }
-        
-        // ✅ EDIT TEXT WITH NATIVE ANDROID SELECTION HANDLES
-        editText = EditText(this).apply {
-            setText(note.content)
-            hint = "Write your note here..."
-            textSize = 15f
-            gravity = Gravity.TOP or Gravity.START
-            setPadding(18, 18, 18, 18)
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
-            
-            setLineSpacing(0f, 1.15f)
-            setHorizontallyScrolling(false)
-            maxLines = Int.MAX_VALUE
-            minHeight = 400
-            
-            inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
-            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            
-            // ✅ NATIVE SELECTION HANDLES - Android's default behavior
-            setTextIsSelectable(true)
-            isLongClickable = true
-            
-            // Set to null to let Android use its default selection action mode
-            customInsertionActionModeCallback = null
-            customSelectionActionModeCallback = null
-            
-            isClickable = true
-            isCursorVisible = true
-            isFocusable = true
-            isFocusableInTouchMode = true
-            
-            // Set movement method for cursor navigation
-            movementMethod = ArrowKeyMovementMethod.getInstance()
-            
-            // Long press listener for word selection
-            setOnLongClickListener {
-                val text = this@apply.text.toString()
-                val cursorPos = this@apply.selectionStart
-                if (cursorPos >= 0 && cursorPos <= text.length) {
-                    var start = cursorPos
-                    var end = cursorPos
-                    while (start > 0 && text[start - 1].isLetterOrDigit()) start--
-                    while (end < text.length && text[end].isLetterOrDigit()) end++
-                    
-                    if (start < end) {
-                        this@apply.setSelection(start, end)
-                        val selected = text.substring(start, end)
-                        currentSelectedText = selected
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selected)
-                    }
-                }
-                true
-            }
-            
-            // Touch listener for single tap to hide action bar
-            setOnTouchListener(object : View.OnTouchListener {
-                private var lastTouchTime = 0L
-                private var lastTouchX = 0f
-                private var lastTouchY = 0f
-                
-                override fun onTouch(v: View, event: MotionEvent): Boolean {
-                    when (event.action) {
-                        MotionEvent.ACTION_DOWN -> {
-                            val currentTime = System.currentTimeMillis()
-                            val x = event.x
-                            val y = event.y
-                            
-                            if (currentTime - lastTouchTime < 300 && 
-                                Math.abs(x - lastTouchX) < 50 && 
-                                Math.abs(y - lastTouchY) < 50) {
-                                // Double tap - select word
-                                selectWordAtPosition(this@apply, x, y)
-                            }
-                            
-                            lastTouchTime = currentTime
-                            lastTouchX = x
-                            lastTouchY = y
-                            v.parent.requestDisallowInterceptTouchEvent(false)
-                        }
-                        
-                        MotionEvent.ACTION_UP -> {
-                            if (!this@apply.hasSelection()) {
-                                hideFloatingActionBar()
-                            }
-                        }
-                    }
-                    return false
-                }
-            })
-            
-            // Text change listener
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!this@apply.hasSelection()) {
-                        hideFloatingActionBar()
-                    } else {
-                        val selected = s?.substring(selectionStart, selectionEnd) ?: ""
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            showFloatingActionBar(selected)
-                        }
-                    }
-                    
-                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
-                    val runnable = Runnable {
-                        val index = notesList.indexOfFirst { it.id == note.id }
-                        if (index != -1) {
-                            val updatedNote = notesList[index].copy(
-                                content = text.toString(),
-                                title = titleInput.text.toString(),
-                                lastEdited = System.currentTimeMillis()
-                            )
-                            notesList[index] = updatedNote
-                            saveNotesToPrefs()
-                        }
-                    }
-                    saveRunnable = runnable
-                    saveHandler.postDelayed(runnable, 600)
-                }
-                
-                override fun afterTextChanged(s: Editable?) {}
-            })
-        }
-        
-        scrollView.addView(editText)
-        contentContainer.addView(scrollView)
-
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 16
-            }
-        }
-
-        val saveBtn = Button(this).apply {
-            text = "Save"
-            setBackgroundColor(Color.parseColor("#4CAF50"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
-            setOnClickListener {
-                saveCurrentNote(note.id)
-            }
-        }
-        buttonRow.addView(saveBtn)
-
-        val deleteBtn = Button(this).apply {
-            text = "Delete"
-            setBackgroundColor(Color.parseColor("#E74C3C"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setOnClickListener {
-                notesList.removeAll { it.id == note.id }
-                saveNotesToPrefs()
-                notesAdapter.updateList(notesList)
-                updateBubbleCount()
-                hideFloatingActionBar()
-                showNoteList()
-                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
-            }
-        }
-        buttonRow.addView(deleteBtn)
-        contentContainer.addView(buttonRow)
-
-        val shareBtn = Button(this).apply {
-            text = "Share Note"
-            setBackgroundColor(Color.parseColor("#2196F3"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 8
-            }
-            setOnClickListener {
-                shareLargeText("${titleInput.text}\n\n${editText.text}")
-            }
-        }
-        contentContainer.addView(shareBtn)
-
-        val resizeHandleView = TextView(this).apply {
-            text = "◢"
-            textSize = 18f
-            setTextColor(Color.parseColor("#999999"))
-            gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
-            lp.topMargin = 8
-            layoutParams = lp
-            setOnTouchListener(ResizeTouchListener())
-        }
-        contentContainer.addView(resizeHandleView)
-        
-        container.addView(contentContainer)
-        
-        noteView?.let { windowManager.removeView(it) }
-        noteView = container
-        
-        val params = WindowManager.LayoutParams(
-            currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = notepadPosX
-        params.y = notepadPosY
-        
-        windowManager.addView(noteView, params)
-        
-        scrollView.postDelayed({
-            editText.isFocusable = true
-            editText.isFocusableInTouchMode = true
-            editText.requestFocus()
-            
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
-        }, 300)
-    }
-
-    private fun EditText.hasSelection(): Boolean {
-        return selectionStart != selectionEnd
-    }
-
-    private fun saveCurrentNote(noteId: Long) {
-        val index = notesList.indexOfFirst { it.id == noteId }
-        if (index != -1) {
-            val updatedNote = notesList[index].copy(
-                title = titleInput.text.toString().ifEmpty { "Untitled Note" },
-                content = editText.text.toString(),
-                lastEdited = System.currentTimeMillis()
-            )
-            notesList[index] = updatedNote
-            saveNotesToPrefs()
-            notesAdapter.updateList(notesList)
-            updateBubbleCount()
-            Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
-            hideFloatingActionBar()
-            showNoteList()
-        }
-    }
-
-    private fun showNoteList() {
-        hideFloatingActionBar()
-        val container = createFullNotePad()
-        noteView?.let { windowManager.removeView(it) }
-        noteView = container
-        
-        val params = WindowManager.LayoutParams(
-            currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = notepadPosX
-        params.y = notepadPosY
-        
-        windowManager.addView(noteView, params)
-    }
-
-    private fun updateBubbleCount() {
-        val countView = (bubbleView as? LinearLayout)?.getChildAt(1) as? TextView
-        countView?.text = notesList.size.toString()
-        countView?.visibility = if (notesList.size > 0) View.VISIBLE else View.GONE
     }
 
     inner class NoteAdapter(
