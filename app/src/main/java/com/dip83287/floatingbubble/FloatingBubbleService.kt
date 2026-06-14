@@ -935,6 +935,7 @@ class FloatingBubbleService : Service() {
     }
     
     // ✅ SIMPLE FIX: Hide handles when selection is outside visible area
+        // ✅ SIMPLIFIED: Only update handle positions, no visibility toggling here
     private fun updateHandlePositions() {
         try {
             val layout = editText.layout ?: return
@@ -944,7 +945,6 @@ class FloatingBubbleService : Service() {
             val end = editText.selectionEnd
             
             if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-                hideSelectionHandles()
                 return
             }
 
@@ -954,44 +954,11 @@ class FloatingBubbleService : Service() {
             val editScreenX = editLocation[0]
             val editScreenY = editLocation[1]
 
-            // Get ScrollView's visible area bounds
-            val scrollLocation = IntArray(2)
-            scrollView.getLocationOnScreen(scrollLocation)
-            val notepadVisibleTop = scrollLocation[1]
-            val notepadVisibleBottom = scrollLocation[1] + scrollView.height
-
-            // Get line numbers and their screen positions
+            // Get line numbers
             val startLine = layout.getLineForOffset(start)
             val endLine = layout.getLineForOffset(end)
             
-            // Get the line's top and bottom screen positions
-            val startLineTop = layout.getLineTop(startLine)
-            val startLineBottom = layout.getLineBottom(startLine)
-            val endLineTop = layout.getLineTop(endLine)
-            val endLineBottom = layout.getLineBottom(endLine)
-            
-            // Convert to screen coordinates
-            val scrollY = editText.scrollY
-            val paddingTop = editText.paddingTop
-            
-            val startLineScreenTop = editScreenY + startLineTop - scrollY + paddingTop
-            val startLineScreenBottom = editScreenY + startLineBottom - scrollY + paddingTop
-            val endLineScreenTop = editScreenY + endLineTop - scrollY + paddingTop
-            val endLineScreenBottom = editScreenY + endLineBottom - scrollY + paddingTop
-            
-            // Check if ANY part of the selected lines is visible in the viewport
-            val isStartLineVisible = (startLineScreenBottom > notepadVisibleTop && startLineScreenTop < notepadVisibleBottom)
-            val isEndLineVisible = (endLineScreenBottom > notepadVisibleTop && endLineScreenTop < notepadVisibleBottom)
-            
-            // If neither the start nor end line is visible, hide handles
-            if (!isStartLineVisible && !isEndLineVisible) {
-                if (leftHandleView != null || rightHandleView != null) {
-                    hideSelectionHandles()
-                }
-                return
-            }
-            
-            // Get X positions
+            // Get X coordinates
             val startXRaw = layout.getPrimaryHorizontal(start)
             val endXRaw = layout.getPrimaryHorizontal(end)
             val scrollX = editText.scrollX
@@ -1000,12 +967,14 @@ class FloatingBubbleService : Service() {
             val startX = startXRaw - scrollX + paddingLeft
             val endX = endXRaw - scrollX + paddingLeft
             
-            // Calculate Y positions (attach handle to the visible line)
-            val targetStartY = if (isStartLineVisible) startLineTop else endLineTop
-            val targetEndY = if (isEndLineVisible) endLineTop else startLineTop
+            // Get Y coordinates (top of line)
+            val startYRaw = layout.getLineTop(startLine)
+            val endYRaw = layout.getLineTop(endLine)
+            val scrollY = editText.scrollY
+            val paddingTop = editText.paddingTop
             
-            val finalStartY = targetStartY - scrollY + paddingTop
-            val finalEndY = targetEndY - scrollY + paddingTop
+            val startY = startYRaw - scrollY + paddingTop
+            val endY = endYRaw - scrollY + paddingTop
 
             val handleSize = 40
             val halfHandle = handleSize / 2
@@ -1013,34 +982,34 @@ class FloatingBubbleService : Service() {
 
             // Calculate handle screen positions
             val leftHandleScreenX = editScreenX + startX - halfHandle
-            val leftHandleScreenY = editScreenY + finalStartY - handleSize - upwardShift
+            val leftHandleScreenY = editScreenY + startY - handleSize - upwardShift
             val rightHandleScreenX = editScreenX + endX - halfHandle
-            val rightHandleScreenY = editScreenY + finalEndY - handleSize - upwardShift
+            val rightHandleScreenY = editScreenY + endY - handleSize - upwardShift
 
-            // Update left handle
-            if (leftHandleView != null) {
-                val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-                leftParams.x = leftHandleScreenX.toInt()
-                leftParams.y = leftHandleScreenY.toInt()
+            // Update left handle (if exists)
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as WindowManager.LayoutParams
+                params.x = leftHandleScreenX.toInt()
+                params.y = leftHandleScreenY.toInt()
                 try {
-                    if (leftHandleView?.parent == null) {
-                        actionBarWindowManager?.addView(leftHandleView, leftParams)
+                    if (handle.parent == null) {
+                        actionBarWindowManager?.addView(handle, params)
                     } else {
-                        actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
+                        actionBarWindowManager?.updateViewLayout(handle, params)
                     }
                 } catch (e: Exception) { }
             }
 
-            // Update right handle
-            if (rightHandleView != null) {
-                val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-                rightParams.x = rightHandleScreenX.toInt()
-                rightParams.y = rightHandleScreenY.toInt()
+            // Update right handle (if exists)
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as WindowManager.LayoutParams
+                params.x = rightHandleScreenX.toInt()
+                params.y = rightHandleScreenY.toInt()
                 try {
-                    if (rightHandleView?.parent == null) {
-                        actionBarWindowManager?.addView(rightHandleView, rightParams)
+                    if (handle.parent == null) {
+                        actionBarWindowManager?.addView(handle, params)
                     } else {
-                        actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
+                        actionBarWindowManager?.updateViewLayout(handle, params)
                     }
                 } catch (e: Exception) { }
             }
@@ -1662,26 +1631,7 @@ class FloatingBubbleService : Service() {
         }
         contentContainer.addView(divider)
 
-        scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_ALWAYS
-            setPadding(0, 0, 0, 0)
-            isFocusable = false
-            isFocusableInTouchMode = false
-            
-            setOnScrollChangeListener { _, _, _, _, _ ->
-                isScrolling = true
-                scrollStopHandler?.removeCallbacksAndMessages(null)
-                scrollStopHandler?.postDelayed({
-                    isScrolling = false
-                    updateHandlePositionsSafe()
-                }, SCROLL_STOP_DELAY)
-            }
+        scrollView = ScrollView(this).apply
             
             viewTreeObserver.addOnScrollChangedListener {
                 if (editText.hasSelection()) {
