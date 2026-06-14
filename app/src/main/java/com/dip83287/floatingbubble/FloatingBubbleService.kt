@@ -864,16 +864,16 @@ class FloatingBubbleService : Service() {
                     }
                     lastUpdateTime = currentTime
                     
-                    val layout = editText.layout
+                    val currentLayout = editText.layout
                     
-                    if (layout != null) {
+                    if (currentLayout != null) {
                         val location = IntArray(2)
                         editText.getLocationOnScreen(location)
                         val textX = event.rawX - location[0]
                         val textY = event.rawY - location[1] + editText.scrollY
                         
-                        val line = layout.getLineForVertical(textY.toInt().coerceIn(0, layout.height - 1))
-                        val offset = layout.getOffsetForHorizontal(line, textX)
+                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
                         if (isLeft) {
@@ -933,22 +933,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Check if handle is within visible viewport
-    private fun isHandleInViewport(handleScreenY: Int, handleSize: Int): Boolean {
-        val scrollLocation = IntArray(2)
-        scrollView.getLocationOnScreen(scrollLocation)
-        val viewportTop = scrollLocation[1]
-        val viewportBottom = scrollLocation[1] + scrollView.height
-        
-        val handleTop = handleScreenY
-        val handleBottom = handleScreenY + handleSize
-        
-        return (handleBottom > viewportTop && handleTop < viewportBottom)
-    }
-    
-        private fun updateHandlePositions() {
+    private fun updateHandlePositions() {
         try {
-            val editTextLayout = editText.layout ?: return
+            val currentLayout = editText.layout ?: return
             if (leftHandleView == null || rightHandleView == null) return
 
             val start = editText.selectionStart
@@ -964,19 +951,19 @@ class FloatingBubbleService : Service() {
             val editScreenX = editLocation[0]
             val editScreenY = editLocation[1]
 
-            val startLine = editTextLayout.getLineForOffset(start)
-            val endLine = editTextLayout.getLineForOffset(end)
+            val startLine = currentLayout.getLineForOffset(start)
+            val endLine = currentLayout.getLineForOffset(end)
             
-            val startXRaw = editTextLayout.getPrimaryHorizontal(start)
-            val endXRaw = editTextLayout.getPrimaryHorizontal(end)
+            val startXRaw = currentLayout.getPrimaryHorizontal(start)
+            val endXRaw = currentLayout.getPrimaryHorizontal(end)
             val scrollX = editText.scrollX
             val paddingLeft = editText.paddingLeft
             
             val startX = startXRaw - scrollX + paddingLeft
             val endX = endXRaw - scrollX + paddingLeft
             
-            val startYRaw = editTextLayout.getLineTop(startLine)
-            val endYRaw = editTextLayout.getLineTop(endLine)
+            val startYRaw = currentLayout.getLineTop(startLine)
+            val endYRaw = currentLayout.getLineTop(endLine)
             val scrollY = editText.scrollY
             val paddingTop = editText.paddingTop
             
@@ -1077,8 +1064,70 @@ class FloatingBubbleService : Service() {
     }
     
     private fun showSelectionHandles() {
-        // Handles are shown via updateHandlePositions based on viewport visibility
-        updateHandlePositionsSafe()
+        try {
+            val (start, end) = getSelection()
+            if (start == end || start < 0 || end < 0) return
+            
+            if (leftHandleView == null || rightHandleView == null) {
+                val handles = createSelectionHandles()
+                leftHandleView = handles.first
+                rightHandleView = handles.second
+            }
+            
+            val currentLayout = editText.layout
+            if (currentLayout == null) return
+            
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
+            
+            val handleSize = 40
+            val halfHandle = handleSize / 2
+            val upwardShift = dpToPx(15)
+            
+            val startLine = currentLayout.getLineForOffset(start)
+            val startX = currentLayout.getPrimaryHorizontal(start) + location[0]
+            val startY = currentLayout.getLineBottom(startLine) + location[1]
+            
+            val endLine = currentLayout.getLineForOffset(end)
+            val endX = currentLayout.getPrimaryHorizontal(end) + location[0]
+            val endY = currentLayout.getLineBottom(endLine) + location[1]
+            
+            if (leftHandleView?.parent == null && !isScrolling) {
+                val leftParams = WindowManager.LayoutParams(
+                    handleSize, handleSize,
+                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                )
+                leftParams.gravity = Gravity.TOP or Gravity.START
+                leftParams.x = (startX - halfHandle).toInt()
+                leftParams.y = (startY - halfHandle - upwardShift).toInt()
+                try {
+                    actionBarWindowManager?.addView(leftHandleView, leftParams)
+                } catch (e: Exception) { }
+            }
+            
+            if (rightHandleView?.parent == null && !isScrolling) {
+                val rightParams = WindowManager.LayoutParams(
+                    handleSize, handleSize,
+                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                )
+                rightParams.gravity = Gravity.TOP or Gravity.START
+                rightParams.x = (endX - halfHandle).toInt()
+                rightParams.y = (endY - halfHandle - upwardShift).toInt()
+                try {
+                    actionBarWindowManager?.addView(rightHandleView, rightParams)
+                } catch (e: Exception) { }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "showSelectionHandles")
+        }
     }
     
     private fun hideSelectionHandles() {
@@ -1097,27 +1146,6 @@ class FloatingBubbleService : Service() {
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
-        
-        // Check if action bar should be shown based on viewport
-        val scrollLocation = IntArray(2)
-        scrollView.getLocationOnScreen(scrollLocation)
-        val viewportTop = scrollLocation[1]
-        val viewportBottom = scrollLocation[1] + scrollView.height
-        
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
-        
-        val layout = editText.layout
-        if (layout != null) {
-            val start = editText.selectionStart
-            val startLine = layout.getLineForOffset(start)
-            val y = layout.getLineTop(startLine) + editLocation[1]
-            
-            // Only show action bar if selection is within viewport
-            if (y < viewportTop || y > viewportBottom) {
-                return
-            }
-        }
         
         hideFloatingActionBar()
         
@@ -1251,12 +1279,12 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        val layout = editText.layout
-        if (layout != null) {
+        val currentLayout = editText.layout
+        if (currentLayout != null) {
             val start = editText.selectionStart
-            val startLine = layout.getLineForOffset(start)
-            val x = layout.getPrimaryHorizontal(start) + location[0]
-            val y = layout.getLineTop(startLine) + location[1]
+            val startLine = currentLayout.getLineForOffset(start)
+            val x = currentLayout.getPrimaryHorizontal(start) + location[0]
+            val y = currentLayout.getLineTop(startLine) + location[1]
             
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -1357,7 +1385,6 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selected
                         isActionBarTemporarilyHidden = false
                         showFloatingActionBar(selected)
-                        showSelectionHandles()
                     }
                 } else {
                     isActionBarTemporarilyHidden = false
@@ -1505,10 +1532,10 @@ class FloatingBubbleService : Service() {
 
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
-            val layout = editText.layout
-            if (layout != null) {
-                val line = layout.getLineForVertical(editText.scrollY + y.toInt())
-                val offset = layout.getOffsetForHorizontal(line, x)
+            val currentLayout = editText.layout
+            if (currentLayout != null) {
+                val line = currentLayout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = currentLayout.getOffsetForHorizontal(line, x)
                 
                 val text = editText.text.toString()
                 if (offset >= 0 && offset <= text.length) {
