@@ -1647,7 +1647,7 @@ class FloatingBubbleService : Service() {
         }
         contentContainer.addView(divider)
 
-        scrollView = ScrollView(this).apply {
+                scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
@@ -1659,8 +1659,11 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
+            // ✅ FIX: Scroll handling without toggling
             setOnScrollChangeListener { _, _, _, _, _ ->
-                if (editText.hasSelection()) {
+                // Only hide handles when scroll starts, don't toggle during scroll
+                if (editText.hasSelection() && !isScrolling) {
+                    // Hide handles and action bar immediately on scroll start
                     if (leftHandleView != null || rightHandleView != null) {
                         hideSelectionHandles()
                     }
@@ -1668,14 +1671,16 @@ class FloatingBubbleService : Service() {
                         hideFloatingActionBar()
                         isActionBarTemporarilyHidden = true
                     }
+                    isScrolling = true
                 }
                 
-                isScrolling = true
+                // Clear any pending restore
                 scrollStopHandler?.removeCallbacksAndMessages(null)
                 
+                // Schedule restore after scrolling stops
                 scrollStopHandler?.postDelayed({
-                    isScrolling = false
                     if (editText.hasSelection()) {
+                        // Update positions and show again
                         updateHandlePositionsSafe()
                         val (start, end) = getSelection()
                         if (start != end) {
@@ -1688,6 +1693,7 @@ class FloatingBubbleService : Service() {
                             }
                         }
                     }
+                    isScrolling = false
                 }, SCROLL_STOP_DELAY)
             }
         }
