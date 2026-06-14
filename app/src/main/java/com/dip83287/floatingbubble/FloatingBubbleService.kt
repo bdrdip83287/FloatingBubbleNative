@@ -1567,7 +1567,7 @@ class FloatingBubbleService : Service() {
         }
         contentContainer.addView(divider)
 
-        scrollView = ScrollView(this).apply {
+                scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
@@ -1579,10 +1579,11 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // ✅ Smooth scroll handling - no jitter
+            // ✅ FIX: Scroll handling without toggling
             setOnScrollChangeListener { _, _, _, _, _ ->
-                // When scrolling starts, immediately hide handles and action bar
-                if (editText.hasSelection()) {
+                // Only hide handles when scroll starts, don't toggle during scroll
+                if (editText.hasSelection() && !isScrolling) {
+                    // Hide handles and action bar immediately on scroll start
                     if (leftHandleView != null || rightHandleView != null) {
                         hideSelectionHandles()
                     }
@@ -1590,29 +1591,29 @@ class FloatingBubbleService : Service() {
                         hideFloatingActionBar()
                         isActionBarTemporarilyHidden = true
                     }
+                    isScrolling = true
                 }
                 
-                // Set scrolling flag
-                isScrolling = true
-                
-                // Cancel any pending update
+                // Clear any pending restore
                 scrollStopHandler?.removeCallbacksAndMessages(null)
                 
                 // Schedule restore after scrolling stops
                 scrollStopHandler?.postDelayed({
-                    isScrolling = false
                     if (editText.hasSelection()) {
+                        // Update positions and show again
+                        updateHandlePositionsSafe()
                         val (start, end) = getSelection()
-                        if (start != end && start >= 0 && end <= editText.text.length) {
+                        if (start != end) {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
                                 currentSelectedText = selected
                                 isActionBarTemporarilyHidden = false
-                                updateHandlePositions()
                                 showFloatingActionBar(selected)
+                                showSelectionHandles()
                             }
                         }
                     }
+                    isScrolling = false
                 }, SCROLL_STOP_DELAY)
             }
         }
