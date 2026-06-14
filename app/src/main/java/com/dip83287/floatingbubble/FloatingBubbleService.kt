@@ -946,9 +946,9 @@ class FloatingBubbleService : Service() {
         return (handleBottom > viewportTop && handleTop < viewportBottom)
     }
     
-    private fun updateHandlePositions() {
+        private fun updateHandlePositions() {
         try {
-            val layout = editText.layout ?: return
+            val editTextLayout = editText.layout ?: return
             if (leftHandleView == null || rightHandleView == null) return
 
             val start = editText.selectionStart
@@ -964,19 +964,19 @@ class FloatingBubbleService : Service() {
             val editScreenX = editLocation[0]
             val editScreenY = editLocation[1]
 
-            val startLine = layout.getLineForOffset(start)
-            val endLine = layout.getLineForOffset(end)
+            val startLine = editTextLayout.getLineForOffset(start)
+            val endLine = editTextLayout.getLineForOffset(end)
             
-            val startXRaw = layout.getPrimaryHorizontal(start)
-            val endXRaw = layout.getPrimaryHorizontal(end)
+            val startXRaw = editTextLayout.getPrimaryHorizontal(start)
+            val endXRaw = editTextLayout.getPrimaryHorizontal(end)
             val scrollX = editText.scrollX
             val paddingLeft = editText.paddingLeft
             
             val startX = startXRaw - scrollX + paddingLeft
             val endX = endXRaw - scrollX + paddingLeft
             
-            val startYRaw = layout.getLineTop(startLine)
-            val endYRaw = layout.getLineTop(endLine)
+            val startYRaw = editTextLayout.getLineTop(startLine)
+            val endYRaw = editTextLayout.getLineTop(endLine)
             val scrollY = editText.scrollY
             val paddingTop = editText.paddingTop
             
@@ -992,9 +992,14 @@ class FloatingBubbleService : Service() {
             val rightHandleScreenX = editScreenX + endX - halfHandle
             val rightHandleScreenY = editScreenY + endY - handleSize - upwardShift
             
-            // ✅ Check if handles are within viewport
-            val isLeftInViewport = isHandleInViewport(leftHandleScreenY, handleSize)
-            val isRightInViewport = isHandleInViewport(rightHandleScreenY, handleSize)
+            // Check if handles are within viewport
+            val scrollLocation = IntArray(2)
+            scrollView.getLocationOnScreen(scrollLocation)
+            val viewportTop = scrollLocation[1]
+            val viewportBottom = scrollLocation[1] + scrollView.height
+            
+            val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
+            val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
 
             // Update left handle if in viewport
             if (isLeftInViewport && !isScrolling) {
