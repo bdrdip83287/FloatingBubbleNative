@@ -1063,11 +1063,15 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
-    private fun showSelectionHandles() {
+        private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
             if (start == end || start < 0 || end < 0) return
             
+            // Don't show handles if scrolling
+            if (isScrolling) return
+            
+            // Create handles if needed
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
@@ -1092,39 +1096,46 @@ class FloatingBubbleService : Service() {
             val endX = currentLayout.getPrimaryHorizontal(end) + location[0]
             val endY = currentLayout.getLineBottom(endLine) + location[1]
             
-            if (leftHandleView?.parent == null && !isScrolling) {
-                val leftParams = WindowManager.LayoutParams(
-                    handleSize, handleSize,
-                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    else WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT
-                )
-                leftParams.gravity = Gravity.TOP or Gravity.START
-                leftParams.x = (startX - halfHandle).toInt()
-                leftParams.y = (startY - halfHandle - upwardShift).toInt()
-                try {
-                    actionBarWindowManager?.addView(leftHandleView, leftParams)
-                } catch (e: Exception) { }
+            // ✅ Always remove existing views before adding to ensure fresh state
+            leftHandleView?.let { 
+                try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
+            }
+            rightHandleView?.let { 
+                try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
             }
             
-            if (rightHandleView?.parent == null && !isScrolling) {
-                val rightParams = WindowManager.LayoutParams(
-                    handleSize, handleSize,
-                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    else WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT
-                )
-                rightParams.gravity = Gravity.TOP or Gravity.START
-                rightParams.x = (endX - halfHandle).toInt()
-                rightParams.y = (endY - halfHandle - upwardShift).toInt()
-                try {
-                    actionBarWindowManager?.addView(rightHandleView, rightParams)
-                } catch (e: Exception) { }
-            }
+            // Add left handle
+            val leftParams = WindowManager.LayoutParams(
+                handleSize, handleSize,
+                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT
+            )
+            leftParams.gravity = Gravity.TOP or Gravity.START
+            leftParams.x = (startX - halfHandle).toInt()
+            leftParams.y = (startY - halfHandle - upwardShift).toInt()
+            try {
+                actionBarWindowManager?.addView(leftHandleView, leftParams)
+            } catch (e: Exception) { }
+            
+            // Add right handle
+            val rightParams = WindowManager.LayoutParams(
+                handleSize, handleSize,
+                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT
+            )
+            rightParams.gravity = Gravity.TOP or Gravity.START
+            rightParams.x = (endX - halfHandle).toInt()
+            rightParams.y = (endY - halfHandle - upwardShift).toInt()
+            try {
+                actionBarWindowManager?.addView(rightHandleView, rightParams)
+            } catch (e: Exception) { }
+            
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
         }
@@ -1702,7 +1713,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        editText = EditText(this).apply {
+                editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
             textSize = 15f
@@ -1734,6 +1745,12 @@ class FloatingBubbleService : Service() {
             setOnSelectionChangedListener { _, _ ->
                 if (!isScrolling) {
                     updateHandlePositionsSafe()
+                    // ✅ Show handles when selection changes
+                    if (hasSelection()) {
+                        showSelectionHandles()
+                    } else {
+                        hideSelectionHandles()
+                    }
                 }
             }
             
@@ -1741,6 +1758,10 @@ class FloatingBubbleService : Service() {
                 override fun afterTextChanged(s: Editable?) {
                     if (!isScrolling) {
                         updateHandlePositionsSafe()
+                        // ✅ Show handles when text changes and has selection
+                        if (hasSelection()) {
+                            showSelectionHandles()
+                        }
                     }
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -1767,12 +1788,22 @@ class FloatingBubbleService : Service() {
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
+                                // Double tap - select word
                                 isSelecting = true
                                 selectWordAtPosition(this@apply, x, y, true)
+                                // ✅ Show handles after double tap selection
+                                if (hasSelection()) {
+                                    showSelectionHandles()
+                                }
                             } else {
+                                // Long press preparation
                                 val runnable = Runnable {
                                     isSelecting = true
                                     selectWordAtPosition(this@apply, x, y, true)
+                                    // ✅ Show handles after long press selection
+                                    if (hasSelection()) {
+                                        showSelectionHandles()
+                                    }
                                 }
                                 longPressRunnable = runnable
                                 longPressHandler.postDelayed(runnable, 300)
@@ -1793,6 +1824,7 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
+                                    // ✅ Show handles when selection is made
                                     showSelectionHandles()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
@@ -1809,6 +1841,10 @@ class FloatingBubbleService : Service() {
                                 cancelLongPress()
                                 if (this@apply.hasSelection() && !isScrolling) {
                                     updateHandlePositionsSafe()
+                                    // ✅ Keep handles visible while dragging to extend selection
+                                    if (hasSelection()) {
+                                        showSelectionHandles()
+                                    }
                                 }
                             }
                         }
@@ -1837,6 +1873,7 @@ class FloatingBubbleService : Service() {
                         if (selected.isNotEmpty()) {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
+                            // ✅ Show handles when text changes
                             showSelectionHandles()
                         }
                     }
