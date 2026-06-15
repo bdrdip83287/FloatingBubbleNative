@@ -1647,7 +1647,7 @@ class FloatingBubbleService : Service() {
         }
         contentContainer.addView(divider)
 
-        scrollView = ScrollView(this).apply {
+                scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
@@ -1659,7 +1659,9 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
+            // ✅ FIXED: No toggling during scroll - only hide on scroll start, show after scroll stops
             setOnScrollChangeListener { _, _, _, _, _ ->
+                // Only hide handles and action bar when scroll starts (if they are visible)
                 if (editText.hasSelection()) {
                     if (leftHandleView != null || rightHandleView != null) {
                         hideSelectionHandles()
@@ -1670,21 +1672,29 @@ class FloatingBubbleService : Service() {
                     }
                 }
                 
+                // Set scrolling flag
                 isScrolling = true
+                
+                // Clear any pending restore
                 scrollStopHandler?.removeCallbacksAndMessages(null)
                 
+                // Schedule restore after scrolling stops (only once)
                 scrollStopHandler?.postDelayed({
                     isScrolling = false
+                    // Restore handles and action bar if selection still exists and is in viewport
                     if (editText.hasSelection()) {
-                        updateHandlePositionsSafe()
                         val (start, end) = getSelection()
-                        if (start != end) {
+                        if (start != end && start >= 0 && end <= editText.text.length) {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
                                 currentSelectedText = selected
                                 isActionBarTemporarilyHidden = false
+                                // Update handle positions
+                                updateHandlePositionsSafe()
+                                // Show handles if they are in viewport
+                                updateHandlePositionsSafe()
+                                // Show action bar
                                 showFloatingActionBar(selected)
-                                showSelectionHandles()
                             }
                         }
                     }
