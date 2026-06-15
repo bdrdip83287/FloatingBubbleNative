@@ -1063,16 +1063,10 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
-        private fun showSelectionHandles() {
+    private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
             if (start == end || start < 0 || end < 0) return
-            
-            // Don't show handles if scrolling
-            if (isScrolling) {
-                EmergencyLog.log("Skipping show handles - scrolling in progress")
-                return
-            }
             
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
@@ -1653,7 +1647,7 @@ class FloatingBubbleService : Service() {
         }
         contentContainer.addView(divider)
 
-                        scrollView = ScrollView(this).apply {
+        scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
@@ -1665,11 +1659,8 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // ✅ FIX: Proper scroll handling with correct state management
             setOnScrollChangeListener { _, _, _, _, _ ->
-                // When scroll starts, hide handles if selection exists
-                if (editText.hasSelection() && !isScrolling) {
-                    // Hide handles
+                if (editText.hasSelection()) {
                     if (leftHandleView != null || rightHandleView != null) {
                         hideSelectionHandles()
                     }
@@ -1677,32 +1668,23 @@ class FloatingBubbleService : Service() {
                         hideFloatingActionBar()
                         isActionBarTemporarilyHidden = true
                     }
-                    isScrolling = true
-                    
-                    // Clear any pending restore
-                    scrollStopHandler?.removeCallbacksAndMessages(null)
                 }
                 
-                // Schedule restore after scrolling stops
+                isScrolling = true
+                scrollStopHandler?.removeCallbacksAndMessages(null)
+                
                 scrollStopHandler?.postDelayed({
-                    // First mark scrolling as stopped
                     isScrolling = false
-                    
-                    // Then restore handles if selection still exists
                     if (editText.hasSelection()) {
+                        updateHandlePositionsSafe()
                         val (start, end) = getSelection()
-                        if (start != end && start >= 0 && end <= editText.text.length) {
+                        if (start != end) {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
                                 currentSelectedText = selected
                                 isActionBarTemporarilyHidden = false
-                                // Update handle positions first
-                                updateHandlePositionsSafe()
-                                // Show action bar
                                 showFloatingActionBar(selected)
-                                // Show selection handles
                                 showSelectionHandles()
-                                EmergencyLog.log("Scroll stopped - handles restored")
                             }
                         }
                     }
