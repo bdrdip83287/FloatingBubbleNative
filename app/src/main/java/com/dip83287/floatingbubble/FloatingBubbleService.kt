@@ -40,8 +40,6 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
-import kotlin.math.min
-import kotlin.math.max
 
 class FloatingBubbleService : Service() {
 
@@ -100,7 +98,6 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -114,6 +111,7 @@ class FloatingBubbleService : Service() {
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
     private var handleUpdatePending = false
     
+    // ✅ Scrolling state tracking
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
@@ -180,7 +178,8 @@ class FloatingBubbleService : Service() {
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
                         
-                        if (editText.hasSelection()) {
+                        // Only update if not scrolling
+                        if (!isScrolling && editText.hasSelection()) {
                             updateHandlePositionsSafe()
                         }
                     }
@@ -893,8 +892,10 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // Update handle positions while dragging
-                        updateHandlePositionsSafe()
+                        // ✅ Only update if not scrolling
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
                         
                         val (start, end) = getSelection()
                         if (start != end && start >= 0 && end <= editText.text.length) {
@@ -917,12 +918,16 @@ class FloatingBubbleService : Service() {
         }
     }
     
+    // ✅ Debounced handle update with scroll check
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
         handleUpdatePending = true
         handleUpdateDebounceHandler.post {
             try {
-                updateHandlePositions()
+                // ✅ Skip update if scrolling
+                if (!isScrolling) {
+                    updateHandlePositions()
+                }
             } finally {
                 handleUpdatePending = false
             }
@@ -933,27 +938,20 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // Check if position is within viewport
-    private fun isPositionInViewport(y: Int, height: Int): Boolean {
-        val scrollLocation = IntArray(2)
-        scrollView.getLocationOnScreen(scrollLocation)
-        val viewportTop = scrollLocation[1]
-        val viewportBottom = scrollLocation[1] + scrollView.height
-        
-        return (y + height > viewportTop && y < viewportBottom)
-    }
-    
+    // ✅ updateHandlePositions - First line checks if scrolling
     private fun updateHandlePositions() {
+        // ✅ Prevent handle updates during scrolling
+        if (isScrolling) return
+        
         try {
             val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) return
 
             val start = editText.selectionStart
             val end = editText.selectionEnd
             
             if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-                if (leftHandleView != null || rightHandleView != null) {
-                    hideSelectionHandles()
-                }
+                hideSelectionHandles()
                 return
             }
 
@@ -990,49 +988,51 @@ class FloatingBubbleService : Service() {
             val rightHandleScreenX = editScreenX + endX - halfHandle
             val rightHandleScreenY = editScreenY + endY - handleSize - upwardShift
             
-            // Create handles if they don't exist
-            if (leftHandleView == null || rightHandleView == null) {
-                val handles = createSelectionHandles()
-                leftHandleView = handles.first
-                rightHandleView = handles.second
-            }
-            
             // Check if handles are within viewport
-            val leftInViewport = isPositionInViewport(leftHandleScreenY, handleSize)
-            val rightInViewport = isPositionInViewport(rightHandleScreenY, handleSize)
+            val scrollLocation = IntArray(2)
+            scrollView.getLocationOnScreen(scrollLocation)
+            val viewportTop = scrollLocation[1]
+            val viewportBottom = scrollLocation[1] + scrollView.height
             
-            // Update or hide left handle
-            if (leftInViewport && !isScrolling) {
-                val leftParams = leftHandleView!!.layoutParams as WindowManager.LayoutParams
-                leftParams.x = leftHandleScreenX.toInt()
-                leftParams.y = leftHandleScreenY.toInt()
-                try {
-                    if (leftHandleView?.parent == null) {
-                        actionBarWindowManager?.addView(leftHandleView, leftParams)
-                    } else {
-                        actionBarWindowManager?.updateViewLayout(leftHandleView, leftParams)
-                    }
-                } catch (e: Exception) { }
-            } else if (!leftInViewport) {
+            val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
+            val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
+
+            // Update left handle if in viewport and not scrolling
+            if (isLeftInViewport && !isScrolling) {
+                leftHandleView?.let { handle ->
+                    val params = handle.layoutParams as WindowManager.LayoutParams
+                    params.x = leftHandleScreenX.toInt()
+                    params.y = leftHandleScreenY.toInt()
+                    try {
+                        if (handle.parent == null) {
+                            actionBarWindowManager?.addView(handle, params)
+                        } else {
+                            actionBarWindowManager?.updateViewLayout(handle, params)
+                        }
+                    } catch (e: Exception) { }
+                }
+            } else if (!isLeftInViewport) {
                 leftHandleView?.let {
                     try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
                     leftHandleView = null
                 }
             }
-            
-            // Update or hide right handle
-            if (rightInViewport && !isScrolling) {
-                val rightParams = rightHandleView!!.layoutParams as WindowManager.LayoutParams
-                rightParams.x = rightHandleScreenX.toInt()
-                rightParams.y = rightHandleScreenY.toInt()
-                try {
-                    if (rightHandleView?.parent == null) {
-                        actionBarWindowManager?.addView(rightHandleView, rightParams)
-                    } else {
-                        actionBarWindowManager?.updateViewLayout(rightHandleView, rightParams)
-                    }
-                } catch (e: Exception) { }
-            } else if (!rightInViewport) {
+
+            // Update right handle if in viewport and not scrolling
+            if (isRightInViewport && !isScrolling) {
+                rightHandleView?.let { handle ->
+                    val params = handle.layoutParams as WindowManager.LayoutParams
+                    params.x = rightHandleScreenX.toInt()
+                    params.y = rightHandleScreenY.toInt()
+                    try {
+                        if (handle.parent == null) {
+                            actionBarWindowManager?.addView(handle, params)
+                        } else {
+                            actionBarWindowManager?.updateViewLayout(handle, params)
+                        }
+                    } catch (e: Exception) { }
+                }
+            } else if (!isRightInViewport) {
                 rightHandleView?.let {
                     try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
                     rightHandleView = null
@@ -1073,7 +1073,70 @@ class FloatingBubbleService : Service() {
     }
     
     private fun showSelectionHandles() {
-        updateHandlePositionsSafe()
+        try {
+            val (start, end) = getSelection()
+            if (start == end || start < 0 || end < 0) return
+            
+            if (leftHandleView == null || rightHandleView == null) {
+                val handles = createSelectionHandles()
+                leftHandleView = handles.first
+                rightHandleView = handles.second
+            }
+            
+            val currentLayout = editText.layout
+            if (currentLayout == null) return
+            
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
+            
+            val handleSize = 40
+            val halfHandle = handleSize / 2
+            val upwardShift = dpToPx(15)
+            
+            val startLine = currentLayout.getLineForOffset(start)
+            val startX = currentLayout.getPrimaryHorizontal(start) + location[0]
+            val startY = currentLayout.getLineBottom(startLine) + location[1]
+            
+            val endLine = currentLayout.getLineForOffset(end)
+            val endX = currentLayout.getPrimaryHorizontal(end) + location[0]
+            val endY = currentLayout.getLineBottom(endLine) + location[1]
+            
+            if (leftHandleView?.parent == null && !isScrolling) {
+                val leftParams = WindowManager.LayoutParams(
+                    handleSize, handleSize,
+                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                )
+                leftParams.gravity = Gravity.TOP or Gravity.START
+                leftParams.x = (startX - halfHandle).toInt()
+                leftParams.y = (startY - halfHandle - upwardShift).toInt()
+                try {
+                    actionBarWindowManager?.addView(leftHandleView, leftParams)
+                } catch (e: Exception) { }
+            }
+            
+            if (rightHandleView?.parent == null && !isScrolling) {
+                val rightParams = WindowManager.LayoutParams(
+                    handleSize, handleSize,
+                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                )
+                rightParams.gravity = Gravity.TOP or Gravity.START
+                rightParams.x = (endX - halfHandle).toInt()
+                rightParams.y = (endY - halfHandle - upwardShift).toInt()
+                try {
+                    actionBarWindowManager?.addView(rightHandleView, rightParams)
+                } catch (e: Exception) { }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "showSelectionHandles")
+        }
     }
     
     private fun hideSelectionHandles() {
@@ -1092,25 +1155,6 @@ class FloatingBubbleService : Service() {
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
-        
-        // Check if selection is in viewport
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
-        val currentLayout = editText.layout
-        if (currentLayout != null) {
-            val start = editText.selectionStart
-            val startLine = currentLayout.getLineForOffset(start)
-            val y = currentLayout.getLineTop(startLine) + editLocation[1]
-            
-            val scrollLocation = IntArray(2)
-            scrollView.getLocationOnScreen(scrollLocation)
-            val viewportTop = scrollLocation[1]
-            val viewportBottom = scrollLocation[1] + scrollView.height
-            
-            if (y < viewportTop || y > viewportBottom) {
-                return
-            }
-        }
         
         hideFloatingActionBar()
         
@@ -1244,12 +1288,12 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
-        val currentLayout2 = editText.layout
-        if (currentLayout2 != null) {
+        val currentLayout = editText.layout
+        if (currentLayout != null) {
             val start = editText.selectionStart
-            val startLine = currentLayout2.getLineForOffset(start)
-            val x = currentLayout2.getPrimaryHorizontal(start) + location[0]
-            val y = currentLayout2.getLineTop(startLine) + location[1]
+            val startLine = currentLayout.getLineForOffset(start)
+            val x = currentLayout.getPrimaryHorizontal(start) + location[0]
+            val y = currentLayout.getLineTop(startLine) + location[1]
             
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -1350,7 +1394,6 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selected
                         isActionBarTemporarilyHidden = false
                         showFloatingActionBar(selected)
-                        showSelectionHandles()
                     }
                 } else {
                     isActionBarTemporarilyHidden = false
@@ -1613,6 +1656,7 @@ class FloatingBubbleService : Service() {
         }
         contentContainer.addView(divider)
 
+        // ✅ Updated ScrollView with proper scroll listener to prevent toggling
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1625,9 +1669,9 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // ✅ Fixed scroll listener - no toggling during scroll
+            // ✅ Scroll listener that prevents toggling during scroll
             setOnScrollChangeListener { _, _, _, _, _ ->
-                // Only hide when scroll starts
+                // Only hide handles and action bar when scroll starts
                 if (editText.hasSelection()) {
                     if (leftHandleView != null || rightHandleView != null) {
                         hideSelectionHandles()
@@ -1638,26 +1682,27 @@ class FloatingBubbleService : Service() {
                     }
                 }
                 
-                // Set scrolling flag
+                // Set scrolling flag to prevent updates during scroll
                 isScrolling = true
                 
-                // Clear any pending restore
+                // Cancel any pending restore
                 scrollStopHandler?.removeCallbacksAndMessages(null)
                 
-                // Schedule restore after scroll stops
+                // Schedule restore after scrolling stops
                 scrollStopHandler?.postDelayed({
                     isScrolling = false
                     // Restore handles and action bar if selection still exists
                     if (editText.hasSelection()) {
-                        updateHandlePositionsSafe()
                         val (start, end) = getSelection()
-                        if (start != end) {
+                        if (start != end && start >= 0 && end <= editText.text.length) {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
                                 currentSelectedText = selected
                                 isActionBarTemporarilyHidden = false
+                                // Update handle positions
+                                updateHandlePositionsSafe()
+                                // Show action bar
                                 showFloatingActionBar(selected)
-                                showSelectionHandles()
                             }
                         }
                     }
@@ -1695,12 +1740,16 @@ class FloatingBubbleService : Service() {
             isFocusableInTouchMode = true
             
             setOnSelectionChangedListener { _, _ ->
-                updateHandlePositionsSafe()
+                if (!isScrolling) {
+                    updateHandlePositionsSafe()
+                }
             }
             
             addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
-                    updateHandlePositionsSafe()
+                    if (!isScrolling) {
+                        updateHandlePositionsSafe()
+                    }
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -1766,7 +1815,7 @@ class FloatingBubbleService : Service() {
                             val dy = Math.abs(event.y - lastTouchY)
                             if (dx > 20 || dy > 20) {
                                 cancelLongPress()
-                                if (this@apply.hasSelection()) {
+                                if (this@apply.hasSelection() && !isScrolling) {
                                     updateHandlePositionsSafe()
                                 }
                             }
