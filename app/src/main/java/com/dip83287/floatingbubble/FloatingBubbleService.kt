@@ -102,6 +102,7 @@ class FloatingBubbleService : Service() {
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
+    private var areHandlesVisible = false
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -111,16 +112,15 @@ class FloatingBubbleService : Service() {
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
     private var handleUpdatePending = false
     
-    // ✅ Scroll state tracking
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
-    private val SCROLL_STOP_DELAY = 500L
+    private val SCROLL_STOP_DELAY = 400L
     private var lastScrollTime = 0L
     
-    // ✅ Instant selection update tracking
-    private var isSelectionChanging = false
-    private var pendingSelectionUpdate = false
-    
+    // ✅ Handle visibility state for smooth transition
+    private var handlesWereVisibleBeforeScroll = false
+    private var handleFadeAnimator: ValueAnimator? = null
+
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
     private var lastScreenHeight = 0
@@ -896,16 +896,15 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // ✅ Instant selection update - even during scroll
-                        updateHandlePositionsSafe()
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
                         
                         val (start, end) = getSelection()
                         if (start != end && start >= 0 && end <= editText.text.length) {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
                                 currentSelectedText = selected
-                                // ✅ Show action bar immediately on selection change
-                                isActionBarTemporarilyHidden = false
                                 showFloatingActionBar(selected)
                             }
                         }
@@ -938,10 +937,10 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Main handle position update - Skips during scroll, but selection change triggers instant update
+    // ✅ Enhanced updateHandlePositions with smooth transition
     private fun updateHandlePositions() {
-        // ✅ Skip only if scrolling AND not actively selecting
-        if (isScrolling && !isSelectionChanging) {
+        if (isScrolling) {
+            EmergencyLog.log("updateHandlePositions skipped - scrolling active")
             return
         }
         
@@ -989,7 +988,6 @@ class FloatingBubbleService : Service() {
             val rightHandleScreenX = editScreenX + endX - halfHandle
             val rightHandleScreenY = editScreenY + endY - handleSize - upwardShift
             
-            // Check if handles are within viewport
             val scrollLocation = IntArray(2)
             scrollView.getLocationOnScreen(scrollLocation)
             val viewportTop = scrollLocation[1]
@@ -998,45 +996,84 @@ class FloatingBubbleService : Service() {
             val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
             val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
 
-            // Update left handle position
-            if (isLeftInViewport) {
-                leftHandleView?.let { handle ->
-                    val params = handle.layoutParams as WindowManager.LayoutParams
-                    params.x = leftHandleScreenX.toInt()
-                    params.y = leftHandleScreenY.toInt()
-                    try {
-                        if (handle.parent == null) {
-                            actionBarWindowManager?.addView(handle, params)
-                        } else {
-                            actionBarWindowManager?.updateViewLayout(handle, params)
-                        }
-                    } catch (e: Exception) { }
+            // ✅ Smooth fade-in when handles become visible
+            val shouldShowLeft = isLeftInViewport && !isScrolling
+            val shouldShowRight = isRightInViewport && !isScrolling
+
+            // Left handle
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as WindowManager.LayoutParams
+                params.x = leftHandleScreenX.toInt()
+                params.y = leftHandleScreenY.toInt()
+                
+                if (shouldShowLeft) {
+                    if (handle.parent == null) {
+                        handle.alpha = 0f
+                        actionBarWindowManager?.addView(handle, params)
+                        handle.animate()
+                            .alpha(1f)
+                            .setDuration(200)
+                            .setInterpolator(DecelerateInterpolator())
+                            .start()
+                        EmergencyLog.log("Left handle shown with fade-in")
+                    } else {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    }
+                } else if (handle.parent != null) {
+                    // Smooth fade-out when going out of viewport
+                    if (areHandlesVisible) {
+                        handle.animate()
+                            .alpha(0f)
+                            .setDuration(150)
+                            .setInterpolator(DecelerateInterpolator())
+                            .withEndAction {
+                                try { actionBarWindowManager?.removeView(handle) } catch (e: Exception) { }
+                            }
+                            .start()
+                        EmergencyLog.log("Left handle fading out")
+                    } else {
+                        try { actionBarWindowManager?.removeView(handle) } catch (e: Exception) { }
+                    }
                 }
-            } else if (leftHandleView?.parent != null) {
-                leftHandleView?.let {
-                    try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
+            }
+
+            // Right handle
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as WindowManager.LayoutParams
+                params.x = rightHandleScreenX.toInt()
+                params.y = rightHandleScreenY.toInt()
+                
+                if (shouldShowRight) {
+                    if (handle.parent == null) {
+                        handle.alpha = 0f
+                        actionBarWindowManager?.addView(handle, params)
+                        handle.animate()
+                            .alpha(1f)
+                            .setDuration(200)
+                            .setInterpolator(DecelerateInterpolator())
+                            .start()
+                        EmergencyLog.log("Right handle shown with fade-in")
+                    } else {
+                        actionBarWindowManager?.updateViewLayout(handle, params)
+                    }
+                } else if (handle.parent != null) {
+                    if (areHandlesVisible) {
+                        handle.animate()
+                            .alpha(0f)
+                            .setDuration(150)
+                            .setInterpolator(DecelerateInterpolator())
+                            .withEndAction {
+                                try { actionBarWindowManager?.removeView(handle) } catch (e: Exception) { }
+                            }
+                            .start()
+                        EmergencyLog.log("Right handle fading out")
+                    } else {
+                        try { actionBarWindowManager?.removeView(handle) } catch (e: Exception) { }
+                    }
                 }
             }
             
-            // Update right handle position
-            if (isRightInViewport) {
-                rightHandleView?.let { handle ->
-                    val params = handle.layoutParams as WindowManager.LayoutParams
-                    params.x = rightHandleScreenX.toInt()
-                    params.y = rightHandleScreenY.toInt()
-                    try {
-                        if (handle.parent == null) {
-                            actionBarWindowManager?.addView(handle, params)
-                        } else {
-                            actionBarWindowManager?.updateViewLayout(handle, params)
-                        }
-                    } catch (e: Exception) { }
-                }
-            } else if (rightHandleView?.parent != null) {
-                rightHandleView?.let {
-                    try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
-                }
-            }
+            areHandlesVisible = shouldShowLeft || shouldShowRight
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
@@ -1074,7 +1111,9 @@ class FloatingBubbleService : Service() {
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
-            if (start == end || start < 0 || end < 0) return
+            if (start == end || start < 0 || end < 0 || isScrolling) {
+                return
+            }
             
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
@@ -1100,7 +1139,6 @@ class FloatingBubbleService : Service() {
             val endX = currentLayout.getPrimaryHorizontal(end) + location[0]
             val endY = currentLayout.getLineBottom(endLine) + location[1]
             
-            // Check viewport visibility before adding
             val scrollLocation = IntArray(2)
             scrollView.getLocationOnScreen(scrollLocation)
             val viewportTop = scrollLocation[1]
@@ -1112,7 +1150,8 @@ class FloatingBubbleService : Service() {
             val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
             val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
             
-            if (leftHandleView?.parent == null && isLeftInViewport) {
+            // Show handles with fade-in if not scrolling
+            if (leftHandleView?.parent == null && isLeftInViewport && !isScrolling) {
                 val leftParams = WindowManager.LayoutParams(
                     handleSize, handleSize,
                     if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -1124,12 +1163,16 @@ class FloatingBubbleService : Service() {
                 leftParams.gravity = Gravity.TOP or Gravity.START
                 leftParams.x = (startX - halfHandle).toInt()
                 leftParams.y = (startY - halfHandle - upwardShift).toInt()
-                try {
-                    actionBarWindowManager?.addView(leftHandleView, leftParams)
-                } catch (e: Exception) { }
+                leftHandleView?.alpha = 0f
+                actionBarWindowManager?.addView(leftHandleView, leftParams)
+                leftHandleView?.animate()
+                    ?.alpha(1f)
+                    ?.setDuration(200)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.start()
             }
             
-            if (rightHandleView?.parent == null && isRightInViewport) {
+            if (rightHandleView?.parent == null && isRightInViewport && !isScrolling) {
                 val rightParams = WindowManager.LayoutParams(
                     handleSize, handleSize,
                     if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -1141,36 +1184,57 @@ class FloatingBubbleService : Service() {
                 rightParams.gravity = Gravity.TOP or Gravity.START
                 rightParams.x = (endX - halfHandle).toInt()
                 rightParams.y = (endY - halfHandle - upwardShift).toInt()
-                try {
-                    actionBarWindowManager?.addView(rightHandleView, rightParams)
-                } catch (e: Exception) { }
+                rightHandleView?.alpha = 0f
+                actionBarWindowManager?.addView(rightHandleView, rightParams)
+                rightHandleView?.animate()
+                    ?.alpha(1f)
+                    ?.setDuration(200)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.start()
             }
+            
+            areHandlesVisible = true
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
         }
     }
     
+    // ✅ Enhanced hide with smooth fade-out
     private fun hideSelectionHandles() {
         try {
-            leftHandleView?.let {
-                if (it.parent != null) {
-                    actionBarWindowManager?.removeView(it)
+            leftHandleView?.let { handle ->
+                if (handle.parent != null) {
+                    handle.animate()
+                        .alpha(0f)
+                        .setDuration(150)
+                        .setInterpolator(DecelerateInterpolator())
+                        .withEndAction {
+                            try { actionBarWindowManager?.removeView(handle) } catch (e: Exception) { }
+                        }
+                        .start()
                 }
                 leftHandleView = null
             }
-            rightHandleView?.let {
-                if (it.parent != null) {
-                    actionBarWindowManager?.removeView(it)
+            rightHandleView?.let { handle ->
+                if (handle.parent != null) {
+                    handle.animate()
+                        .alpha(0f)
+                        .setDuration(150)
+                        .setInterpolator(DecelerateInterpolator())
+                        .withEndAction {
+                            try { actionBarWindowManager?.removeView(handle) } catch (e: Exception) { }
+                        }
+                        .start()
                 }
                 rightHandleView = null
             }
+            areHandlesVisible = false
         } catch (e: Exception) { }
     }
 
-    // ✅ Improved showFloatingActionBar with smooth transition
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
-        if (isActionBarTemporarilyHidden && !isSelectionChanging) return
+        if (isActionBarTemporarilyHidden) return
         
         hideFloatingActionBar()
         
@@ -1395,7 +1459,6 @@ class FloatingBubbleService : Service() {
         if (isActionBarVisible && !isActionBarTemporarilyHidden) {
             isActionBarTemporarilyHidden = true
             hideFloatingActionBar()
-            EmergencyLog.log("Action bar hidden during scroll")
         }
     }
     
@@ -1411,7 +1474,6 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selected
                         isActionBarTemporarilyHidden = false
                         showFloatingActionBar(selected)
-                        EmergencyLog.log("Action bar shown after scroll stop")
                     }
                 } else {
                     isActionBarTemporarilyHidden = false
@@ -1419,7 +1481,7 @@ class FloatingBubbleService : Service() {
             }
         }
         scrollHideRunnable = runnable
-        scrollHideHandler?.postDelayed(runnable, SCROLL_STOP_DELAY)
+        scrollHideHandler?.postDelayed(runnable, 2000)
     }
     
     private fun getSelection(): Pair<Int, Int> {
@@ -1577,7 +1639,6 @@ class FloatingBubbleService : Service() {
                     }
                     
                     if (wordStart < wordEnd) {
-                        // ✅ Set selection immediately
                         editText.setSelection(wordStart, wordEnd)
                         val selectedWord = text.substring(wordStart, wordEnd)
                         currentSelectedText = selectedWord
@@ -1675,6 +1736,7 @@ class FloatingBubbleService : Service() {
         }
         contentContainer.addView(divider)
 
+        // ✅ Enhanced scroll listener with smooth handle fade
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1687,37 +1749,64 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // ✅ Enhanced scroll listener - instant hide, delayed show
             setOnScrollChangeListener { _, _, _, _, _ ->
                 val currentTime = System.currentTimeMillis()
                 lastScrollTime = currentTime
                 
-                if (!isScrolling) {
+                if (editText.hasSelection()) {
+                    // ✅ Hide handles immediately when scrolling starts
+                    if (!isScrolling && areHandlesVisible) {
+                        handlesWereVisibleBeforeScroll = true
+                        // Fade out handles with animation
+                        leftHandleView?.let { handle ->
+                            if (handle.parent != null) {
+                                handle.animate()
+                                    .alpha(0f)
+                                    .setDuration(150)
+                                    .setInterpolator(DecelerateInterpolator())
+                                    .start()
+                            }
+                        }
+                        rightHandleView?.let { handle ->
+                            if (handle.parent != null) {
+                                handle.animate()
+                                    .alpha(0f)
+                                    .setDuration(150)
+                                    .setInterpolator(DecelerateInterpolator())
+                                    .start()
+                            }
+                        }
+                        EmergencyLog.log("Handles fading out on scroll start")
+                    }
+                    
                     isScrolling = true
-                    isSelectionChanging = false
-                    EmergencyLog.log("Scrolling started")
-                }
-                
-                // ✅ INSTANT hide action bar
-                if (editText.hasSelection() && isActionBarVisible) {
-                    hideFloatingActionBar()
-                    isActionBarTemporarilyHidden = true
-                    EmergencyLog.log("Action bar hidden instantly")
+                    
+                    // Hide action bar during scroll
+                    if (isActionBarVisible) {
+                        hideFloatingActionBar()
+                        isActionBarTemporarilyHidden = true
+                    }
                 }
                 
                 // Cancel previous stop handler
                 scrollStopHandler?.removeCallbacksAndMessages(null)
                 
-                // Set new stop handler with smooth transition
+                // Set new stop handler
                 scrollStopHandler?.postDelayed({
-                    // Only reset if no new scroll event occurred
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped, updating handles")
+                        EmergencyLog.log("Scrolling stopped, updating handles with smooth transition")
                         
-                        // ✅ Update handles after scroll stops
                         if (editText.hasSelection()) {
+                            // Update handle positions
                             updateHandlePositionsSafe()
+                            
+                            // Show handles with fade-in animation
+                            if (handlesWereVisibleBeforeScroll || areHandlesVisible) {
+                                showSelectionHandles()
+                                handlesWereVisibleBeforeScroll = false
+                            }
+                            
                             val (start, end) = getSelection()
                             if (start != end) {
                                 val selected = editText.text.substring(start, end)
@@ -1725,8 +1814,6 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                    EmergencyLog.log("Action bar shown after scroll stop")
                                 }
                             }
                         }
@@ -1764,13 +1851,10 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Selection change listener - instant update
             setOnSelectionChangedListener { _, _ ->
-                isSelectionChanging = true
                 if (!isScrolling) {
                     updateHandlePositionsSafe()
                 }
-                isSelectionChanging = false
             }
             
             addTextChangedListener(object : TextWatcher {
@@ -2189,6 +2273,7 @@ class FloatingBubbleService : Service() {
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
         configCheckRunnable?.let { configCheckHandler.removeCallbacks(it) }
+        handleFadeAnimator?.cancel()
         EmergencyLog.log("FloatingBubbleService destroyed")
     }
 
