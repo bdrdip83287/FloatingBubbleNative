@@ -893,9 +893,8 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        if (!isScrolling) {
-                            updateHandlePositionsSafe()
-                        }
+                        // ✅ Update handles immediately during drag (force update)
+                        forceUpdateHandlePositions()
                         
                         val (start, end) = getSelection()
                         if (start != end && start >= 0 && end <= editText.text.length) {
@@ -915,6 +914,123 @@ class FloatingBubbleService : Service() {
                 }
             }
             return false
+        }
+    }
+    
+    // ✅ Force update handle positions (bypasses scroll check and debounce)
+    private fun forceUpdateHandlePositions() {
+        try {
+            if (handleUpdatePending) return
+            handleUpdatePending = true
+            // Force update immediately on UI thread
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    forceUpdateHandlePositionsInternal()
+                } finally {
+                    handleUpdatePending = false
+                }
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "forceUpdateHandlePositions")
+            handleUpdatePending = false
+        }
+    }
+    
+    private fun forceUpdateHandlePositionsInternal() {
+        try {
+            val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) return
+
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+            
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+                return
+            }
+
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            val editScreenX = editLocation[0]
+            val editScreenY = editLocation[1]
+
+            val startLine = currentLayout.getLineForOffset(start)
+            val endLine = currentLayout.getLineForOffset(end)
+            
+            val startXRaw = currentLayout.getPrimaryHorizontal(start)
+            val endXRaw = currentLayout.getPrimaryHorizontal(end)
+            val scrollX = editText.scrollX
+            val paddingLeft = editText.paddingLeft
+            
+            val startX = startXRaw - scrollX + paddingLeft
+            val endX = endXRaw - scrollX + paddingLeft
+            
+            val startYRaw = currentLayout.getLineTop(startLine)
+            val endYRaw = currentLayout.getLineTop(endLine)
+            val scrollY = editText.scrollY
+            val paddingTop = editText.paddingTop
+            
+            val startY = startYRaw - scrollY + paddingTop
+            val endY = endYRaw - scrollY + paddingTop
+
+            val handleSize = 40
+            val halfHandle = handleSize / 2
+            val upwardShift = dpToPx(15)
+
+            val leftHandleScreenX = editScreenX + startX - halfHandle
+            val leftHandleScreenY = editScreenY + startY - handleSize - upwardShift
+            val rightHandleScreenX = editScreenX + endX - halfHandle
+            val rightHandleScreenY = editScreenY + endY - handleSize - upwardShift
+            
+            val scrollLocation = IntArray(2)
+            scrollView.getLocationOnScreen(scrollLocation)
+            val viewportTop = scrollLocation[1]
+            val viewportBottom = scrollLocation[1] + scrollView.height
+            
+            val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
+            val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
+
+            // Force update left handle
+            if (isLeftInViewport) {
+                leftHandleView?.let { handle ->
+                    val params = handle.layoutParams as WindowManager.LayoutParams
+                    params.x = leftHandleScreenX.toInt()
+                    params.y = leftHandleScreenY.toInt()
+                    try {
+                        if (handle.parent == null) {
+                            actionBarWindowManager?.addView(handle, params)
+                        } else {
+                            actionBarWindowManager?.updateViewLayout(handle, params)
+                        }
+                    } catch (e: Exception) { }
+                }
+            } else if (leftHandleView?.parent != null) {
+                leftHandleView?.let {
+                    try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
+                }
+            }
+            
+            // Force update right handle
+            if (isRightInViewport) {
+                rightHandleView?.let { handle ->
+                    val params = handle.layoutParams as WindowManager.LayoutParams
+                    params.x = rightHandleScreenX.toInt()
+                    params.y = rightHandleScreenY.toInt()
+                    try {
+                        if (handle.parent == null) {
+                            actionBarWindowManager?.addView(handle, params)
+                        } else {
+                            actionBarWindowManager?.updateViewLayout(handle, params)
+                        }
+                    } catch (e: Exception) { }
+                }
+            } else if (rightHandleView?.parent != null) {
+                rightHandleView?.let {
+                    try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
+                }
+            }
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "forceUpdateHandlePositionsInternal")
         }
     }
     
@@ -1118,7 +1234,6 @@ class FloatingBubbleService : Service() {
                 leftParams.y = (startY - halfHandle - upwardShift).toInt()
                 try {
                     actionBarWindowManager?.addView(leftHandleView, leftParams)
-                    // ✅ Smooth alpha animation
                     leftHandleView?.animate()?.alpha(1f)?.setDuration(150)?.start()
                 } catch (e: Exception) { }
             }
@@ -1137,7 +1252,6 @@ class FloatingBubbleService : Service() {
                 rightParams.y = (endY - halfHandle - upwardShift).toInt()
                 try {
                     actionBarWindowManager?.addView(rightHandleView, rightParams)
-                    // ✅ Smooth alpha animation
                     rightHandleView?.animate()?.alpha(1f)?.setDuration(150)?.start()
                 } catch (e: Exception) { }
             }
@@ -1281,6 +1395,8 @@ class FloatingBubbleService : Service() {
                 val allText = editText.text.toString()
                 currentSelectedText = allText
                 showFloatingActionBar(allText)
+                // ✅ Force immediate handle update after select all
+                forceUpdateHandlePositions()
                 showSelectionHandles()
             }
         }
@@ -1587,6 +1703,8 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         showFloatingActionBar(selectedWord)
+                        // ✅ Force immediate handle update after word selection
+                        forceUpdateHandlePositions()
                         showSelectionHandles()
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
@@ -1725,7 +1843,6 @@ class FloatingBubbleService : Service() {
                         
                         // Update handles and show with smooth animation
                         if (editText.hasSelection()) {
-                            updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
                                 val selected = editText.text.substring(start, end)
@@ -1734,6 +1851,7 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     // ✅ Show handles with smooth transition
+                                    forceUpdateHandlePositions()
                                     showSelectionHandles()
                                 }
                             }
@@ -1773,7 +1891,12 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
+            // ✅ Selection change listener - force update on selection change
             setOnSelectionChangedListener { _, _ ->
+                if (editText.hasSelection()) {
+                    // ✅ Force immediate handle update when selection changes
+                    forceUpdateHandlePositions()
+                }
                 if (!isScrolling) {
                     updateHandlePositionsSafe()
                 }
@@ -1835,6 +1958,8 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
+                                    // ✅ Force immediate handle update after selection
+                                    forceUpdateHandlePositions()
                                     showSelectionHandles()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
@@ -1879,6 +2004,8 @@ class FloatingBubbleService : Service() {
                         if (selected.isNotEmpty()) {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
+                            // ✅ Force immediate handle update on text change
+                            forceUpdateHandlePositions()
                             showSelectionHandles()
                         }
                     }
