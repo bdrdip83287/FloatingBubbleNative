@@ -104,6 +104,9 @@ class FloatingBubbleService : Service() {
     private var isDraggingRightHandle = false
     private var areHandlesVisible = false
     private var handlesHiddenByScroll = false
+    
+    // ✅ isSelecting কে class-level variable বানানো হলো
+    private var isSelecting = false
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -1801,7 +1804,7 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Selection Change Listener - isSelecting ভেরিয়েবল ব্যবহার না করে সরাসরি চেক
+            // ✅ Selection Change Listener - isSelecting এখন class-level variable
             setOnSelectionChangedListener { selStart, selEnd ->
                 try {
                     val textLength = text?.length ?: 0
@@ -1852,14 +1855,13 @@ class FloatingBubbleService : Service() {
                 override fun afterTextChanged(s: Editable?) {}
             })
             
-            // ✅ Long Press এবং Double Tap ইভেন্ট হ্যান্ডলার
+            // ✅ Long Press এবং Double Tap ইভেন্ট হ্যান্ডলার - isSelecting class-level variable
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
                 private var lastTouchY = 0f
                 private var longPressRunnable: Runnable? = null
                 private val longPressHandler = Handler(Looper.getMainLooper())
-                private var isSelecting = false
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     if (event.action == MotionEvent.ACTION_DOWN) {
