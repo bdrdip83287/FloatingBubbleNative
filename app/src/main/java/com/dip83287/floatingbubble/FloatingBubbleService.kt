@@ -837,7 +837,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ ৫. Selection Handle Drag with Magnifier
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -1053,7 +1052,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ ৬. Selection Change Listener [সম্পূর্ণ ফিক্সড]
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
         this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
             override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
@@ -1287,7 +1285,6 @@ class FloatingBubbleService : Service() {
         
         actionBarView.addView(createDivider())
         
-        // ✅ ৪. Select All (সম্পূর্ণ ফিক্সড)
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -1594,7 +1591,6 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ ৩. শব্দ সিলেক্ট করার মূল ফাংশন (নিখুঁত কোঅর্ডিনেট ক্যালকুলেশন সহ)
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout ?: return
@@ -1805,7 +1801,7 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ ৬. Selection Change Listener [সম্পূর্ণ ফিক্সড]
+            // ✅ Selection Change Listener - isSelecting ভেরিয়েবল ব্যবহার না করে সরাসরি চেক
             setOnSelectionChangedListener { selStart, selEnd ->
                 try {
                     val textLength = text?.length ?: 0
@@ -1814,6 +1810,7 @@ class FloatingBubbleService : Service() {
                             updateHandlePositionsSafe()
                         }
                     } else {
+                        // সিলেকশন রিমুভ হয়ে গেলে হ্যান্ডেল ও অ্যাকশন বার হাইড করা
                         if (!isSelecting) {
                             hideSelectionHandles()
                             hideFloatingActionBar()
@@ -1824,7 +1821,6 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ ৭. Text Change Listener [সম্পূর্ণ ফিক্সড]
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 
@@ -1856,7 +1852,7 @@ class FloatingBubbleService : Service() {
                 override fun afterTextChanged(s: Editable?) {}
             })
             
-            // ✅ ১ ও ২. Long Press এবং Double Tap ইভেন্ট হ্যান্ডলার
+            // ✅ Long Press এবং Double Tap ইভেন্ট হ্যান্ডলার
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
