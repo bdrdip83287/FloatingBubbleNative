@@ -893,7 +893,7 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // ✅ During drag, always update handles instantly (ignore scrolling state for drag)
+                        // During drag, update handles instantly
                         updateHandlePositionsInstant()
                         
                         val (start, end) = getSelection()
@@ -917,11 +917,16 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ INSTANT handle update - ignores scrolling state (for selection changes)
+    // ✅ INSTANT handle update - ignores scrolling state
     private fun updateHandlePositionsInstant() {
         try {
-            // Force update regardless of scrolling state
-            // This ensures handles update instantly when selection changes
+            // Ensure handles exist first
+            if (leftHandleView == null || rightHandleView == null) {
+                val handles = createSelectionHandles()
+                leftHandleView = handles.first
+                rightHandleView = handles.second
+                areHandlesVisible = true
+            }
             performHandleUpdate()
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositionsInstant")
@@ -933,7 +938,6 @@ class FloatingBubbleService : Service() {
         handleUpdatePending = true
         handleUpdateDebounceHandler.post {
             try {
-                // ✅ Only update if not scrolling (for scroll events)
                 if (!isScrolling) {
                     performHandleUpdate()
                 }
@@ -947,7 +951,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Main handle position update logic (separated for instant and safe calls)
+    // ✅ Main handle position update logic
     private fun performHandleUpdate() {
         try {
             val currentLayout = editText.layout ?: return
@@ -1063,7 +1067,7 @@ class FloatingBubbleService : Service() {
                 if (start != prevStart || end != prevEnd) {
                     prevStart = start
                     prevEnd = end
-                    // ✅ INSTANT update on selection change
+                    // ✅ Instant update on selection change
                     updateHandlePositionsInstant()
                     callback(start, end)
                 }
@@ -1079,6 +1083,7 @@ class FloatingBubbleService : Service() {
             val (start, end) = getSelection()
             if (start == end || start < 0 || end < 0) return
             
+            // Create handles if needed
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
@@ -1086,7 +1091,7 @@ class FloatingBubbleService : Service() {
                 areHandlesVisible = true
             }
             
-            // ✅ Instant show - no scroll check
+            // Update position instantly
             updateHandlePositionsInstant()
             
             // Fade in animation
@@ -1537,7 +1542,6 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         showFloatingActionBar(selectedWord)
-                        // ✅ Instant show handles on selection
                         showSelectionHandles()
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
@@ -1669,7 +1673,6 @@ class FloatingBubbleService : Service() {
                         EmergencyLog.log("Scrolling stopped - showing handles with smooth transition")
                         
                         if (editText.hasSelection()) {
-                            // ✅ Update handles after scroll
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
@@ -1717,15 +1720,12 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Selection change triggers INSTANT handle update
             setOnSelectionChangedListener { _, _ ->
-                // Instant update regardless of scroll state
                 updateHandlePositionsInstant()
             }
             
             addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
-                    // ✅ Text change triggers INSTANT handle update
                     updateHandlePositionsInstant()
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
