@@ -931,14 +931,28 @@ class FloatingBubbleService : Service() {
         }
     }
     
+    // ✅ NEW: Force update handles - bypasses isScrolling check for instant updates
+    private fun forceUpdateHandlePositions() {
+        try {
+            EmergencyLog.log("forceUpdateHandlePositions called - forcing instant handle update")
+            updateHandlePositionsInternal(force = true)
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "forceUpdateHandlePositions")
+        }
+    }
+    
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // Main handle position update - Skip if scrolling
+    // ✅ Updated: Main handle position update with force option
     private fun updateHandlePositions() {
-        // Skip if scrolling is active
-        if (isScrolling) {
+        updateHandlePositionsInternal(force = false)
+    }
+    
+    private fun updateHandlePositionsInternal(force: Boolean) {
+        // Skip if scrolling is active (unless force is true)
+        if (isScrolling && !force) {
             EmergencyLog.log("updateHandlePositions skipped - scrolling active")
             return
         }
@@ -1008,6 +1022,9 @@ class FloatingBubbleService : Service() {
                         } else {
                             actionBarWindowManager?.updateViewLayout(handle, params)
                         }
+                        if (force) {
+                            EmergencyLog.log("Left handle force updated to: x=${params.x}, y=${params.y}")
+                        }
                     } catch (e: Exception) { }
                 }
             } else if (leftHandleView?.parent != null) {
@@ -1028,6 +1045,9 @@ class FloatingBubbleService : Service() {
                         } else {
                             actionBarWindowManager?.updateViewLayout(handle, params)
                         }
+                        if (force) {
+                            EmergencyLog.log("Right handle force updated to: x=${params.x}, y=${params.y}")
+                        }
                     } catch (e: Exception) { }
                 }
             } else if (rightHandleView?.parent != null) {
@@ -1037,7 +1057,7 @@ class FloatingBubbleService : Service() {
             }
             
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositions")
+            EmergencyLog.logException(e, "updateHandlePositionsInternal")
         }
     }
     
@@ -1309,6 +1329,7 @@ class FloatingBubbleService : Service() {
                 currentSelectedText = allText
                 showFloatingActionBar(allText)
                 // Instant handle show after select all
+                forceUpdateHandlePositions()
                 showSelectionHandles()
             }
         }
@@ -1590,7 +1611,7 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ CRITICAL FIX: selectWordAtPosition now calls updateHandlePositionsSafe() and showSelectionHandles()
+    // ✅ CRITICAL FIX: selectWordAtPosition now uses forceUpdateHandlePositions()
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1616,16 +1637,16 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // ✅ CRITICAL: Show action bar immediately
+                        // Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ CRITICAL FIX: Update handle positions immediately
-                        updateHandlePositionsSafe()
+                        // ✅ CRITICAL FIX: Force update handle positions immediately (bypass isScrolling check)
+                        forceUpdateHandlePositions()
                         
-                        // ✅ CRITICAL FIX: Show handles immediately
+                        // Show handles immediately
                         showSelectionHandles()
                         
-                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles updated immediately")
+                        EmergencyLog.log("Selected word: '$selectedWord' - handles force updated")
                     }
                 }
             }
@@ -1871,8 +1892,8 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
-                                    // ✅ Update handles and show immediately
-                                    updateHandlePositionsSafe()
+                                    // ✅ Force update handles immediately
+                                    forceUpdateHandlePositions()
                                     showSelectionHandles()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
@@ -1917,8 +1938,8 @@ class FloatingBubbleService : Service() {
                         if (selected.isNotEmpty()) {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
-                            // ✅ Update handles and show immediately on text change
-                            updateHandlePositionsSafe()
+                            // ✅ Force update handles immediately
+                            forceUpdateHandlePositions()
                             showSelectionHandles()
                         }
                     }
