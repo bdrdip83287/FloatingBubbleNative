@@ -117,10 +117,6 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
-    
-    // ✅ For smooth handle show animation
-    private var handleShowAnimator: ValueAnimator? = null
-    private var handleFadeAnimator: ValueAnimator? = null
 
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
@@ -1073,7 +1069,7 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
-    // ✅ Instant handle show (no animation, immediate positioning)
+    // ✅ Show handles with INSTANT positioning - calls updateHandlePositions immediately
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1081,6 +1077,7 @@ class FloatingBubbleService : Service() {
                 return
             }
             
+            // ✅ FIRST: Create handles if they don't exist
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
@@ -1088,81 +1085,21 @@ class FloatingBubbleService : Service() {
                 areHandlesVisible = true
             }
             
-            val currentLayout = editText.layout
-            if (currentLayout == null) return
+            // ✅ SECOND: Immediately update handle positions
+            updateHandlePositions()
             
-            val location = IntArray(2)
-            editText.getLocationOnScreen(location)
+            // ✅ THIRD: Ensure handles are visible with correct alpha
+            leftHandleView?.alpha = 1f
+            rightHandleView?.alpha = 1f
             
-            val handleSize = 40
-            val halfHandle = handleSize / 2
-            val upwardShift = dpToPx(15)
+            EmergencyLog.log("showSelectionHandles - handles positioned instantly")
             
-            val startLine = currentLayout.getLineForOffset(start)
-            val startX = currentLayout.getPrimaryHorizontal(start) + location[0]
-            val startY = currentLayout.getLineBottom(startLine) + location[1]
-            
-            val endLine = currentLayout.getLineForOffset(end)
-            val endX = currentLayout.getPrimaryHorizontal(end) + location[0]
-            val endY = currentLayout.getLineBottom(endLine) + location[1]
-            
-            // Check viewport visibility before adding
-            val scrollLocation = IntArray(2)
-            scrollView.getLocationOnScreen(scrollLocation)
-            val viewportTop = scrollLocation[1]
-            val viewportBottom = scrollLocation[1] + scrollView.height
-            
-            val leftHandleScreenY = startY - halfHandle - upwardShift
-            val rightHandleScreenY = endY - halfHandle - upwardShift
-            
-            val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
-            val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
-            
-            // ✅ INSTANT: Add left handle immediately (no animation)
-            if (leftHandleView?.parent == null && isLeftInViewport) {
-                val leftParams = WindowManager.LayoutParams(
-                    handleSize, handleSize,
-                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    else WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT
-                )
-                leftParams.gravity = Gravity.TOP or Gravity.START
-                leftParams.x = (startX - halfHandle).toInt()
-                leftParams.y = (startY - halfHandle - upwardShift).toInt()
-                try {
-                    // ✅ No animation - instant positioning
-                    leftHandleView?.alpha = 1f
-                    actionBarWindowManager?.addView(leftHandleView, leftParams)
-                } catch (e: Exception) { }
-            }
-            
-            // ✅ INSTANT: Add right handle immediately (no animation)
-            if (rightHandleView?.parent == null && isRightInViewport) {
-                val rightParams = WindowManager.LayoutParams(
-                    handleSize, handleSize,
-                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    else WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT
-                )
-                rightParams.gravity = Gravity.TOP or Gravity.START
-                rightParams.x = (endX - halfHandle).toInt()
-                rightParams.y = (endY - halfHandle - upwardShift).toInt()
-                try {
-                    // ✅ No animation - instant positioning
-                    rightHandleView?.alpha = 1f
-                    actionBarWindowManager?.addView(rightHandleView, rightParams)
-                } catch (e: Exception) { }
-            }
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
         }
     }
     
-    // ✅ Hide handles with smooth fade-out (keeps the smooth feel)
+    // ✅ Hide handles with smooth fade-out
     private fun hideSelectionHandles() {
         try {
             leftHandleView?.let { handle ->
@@ -1312,7 +1249,7 @@ class FloatingBubbleService : Service() {
                 val allText = editText.text.toString()
                 currentSelectedText = allText
                 showFloatingActionBar(allText)
-                // ✅ Instant handle show after select all
+                // ✅ INSTANT: Show handles immediately after select all
                 showSelectionHandles()
             }
         }
