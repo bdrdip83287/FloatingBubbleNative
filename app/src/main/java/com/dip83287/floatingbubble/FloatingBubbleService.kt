@@ -97,15 +97,26 @@ class FloatingBubbleService : Service() {
     private var floatingActionBar: View? = null
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
-
-    // ✅ Native selection handles - removed custom handles
+    
+    // ✅ Fixed: Custom selection handles with improved positioning
+    private var leftHandleView: View? = null
+    private var rightHandleView: View? = null
+    private var isDraggingLeftHandle = false
+    private var isDraggingRightHandle = false
     private var areHandlesVisible = false
+    
+    private var handleContainer: FrameLayout? = null
+    
+    private val HANDLE_SIZE = 40
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
+    private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
+    private var handleUpdatePending = false
+    
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
@@ -172,6 +183,10 @@ class FloatingBubbleService : Service() {
                         lastFontScale = currentFontScale
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
+                        
+                        if (editText.hasSelection() && !isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
                     }
                 } catch (e: Exception) {
                     EmergencyLog.logException(e, "Configuration check")
@@ -688,6 +703,8 @@ class FloatingBubbleService : Service() {
 
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
+                        
+                        resetHandleReferences()
                     }
                     .start()
             }
@@ -702,6 +719,17 @@ class FloatingBubbleService : Service() {
         try {
             val container = createFullNotePad()
             noteView = container
+            
+            handleContainer = FrameLayout(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                isClickable = false
+                isFocusable = false
+            }
+            
+            (noteView as? ViewGroup)?.addView(handleContainer)
             
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
@@ -721,10 +749,18 @@ class FloatingBubbleService : Service() {
             EmergencyLog.logException(e, "createAndShowNotePad")
         }
     }
+    
+    private fun resetHandleReferences() {
+        leftHandleView = null
+        rightHandleView = null
+        areHandlesVisible = false
+        EmergencyLog.log("Handle references reset")
+    }
 
     private fun collapseToBubble() {
         if (!isExpanded) return
 
+        hideSelectionHandles()
         hideFloatingActionBar()
 
         try {
@@ -779,6 +815,8 @@ class FloatingBubbleService : Service() {
 
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
+                        
+                        resetHandleReferences()
                     }
                     .start()
             }
@@ -787,7 +825,311 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Native selection handles - EditText handles everything automatically
+    private fun createCircleHandleDrawable(): Drawable {
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#2196F3")
+                style = Paint.Style.FILL
+            }
+            override fun draw(canvas: Canvas) {
+                val cx = bounds.width() / 2f
+                val cy = bounds.height() / 2f
+                val radius = bounds.width().coerceAtMost(bounds.height()) / 2f
+                canvas.drawCircle(cx, cy, radius, paint)
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+        }
+    }
+    
+    private fun createSelectionHandles(): Pair<View, View> {
+        val leftHandle = ImageView(this).apply {
+            setImageDrawable(createCircleHandleDrawable())
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(0, 0, 0, 0)
+            setOnTouchListener(HandleTouchListener(isLeft = true))
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE)
+        }
+        
+        val rightHandle = ImageView(this).apply {
+            setImageDrawable(createCircleHandleDrawable())
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(0, 0, 0, 0)
+            setOnTouchListener(HandleTouchListener(isLeft = false))
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE)
+        }
+        
+        return Pair(leftHandle, rightHandle)
+    }
+    
+    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
+        private var initialTouchX = 0f
+        private var initialSelectionStart = 0
+        private var initialSelectionEnd = 0
+        private var lastUpdateTime = 0L
+        
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialTouchX = event.rawX
+                    initialSelectionStart = editText.selectionStart
+                    initialSelectionEnd = editText.selectionEnd
+                    lastUpdateTime = System.currentTimeMillis()
+                    
+                    if (isLeft) {
+                        isDraggingLeftHandle = true
+                    } else {
+                        isDraggingRightHandle = true
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastUpdateTime < 16) {
+                        return true
+                    }
+                    lastUpdateTime = currentTime
+                    
+                    val currentLayout = editText.layout
+                    
+                    if (currentLayout != null) {
+                        val editLocation = IntArray(2)
+                        editText.getLocationOnScreen(editLocation)
+                        
+                        val textX = event.rawX - editLocation[0] + editText.scrollX
+                        val textY = event.rawY - editLocation[1] + editText.scrollY
+                        
+                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
+                        val newOffset = offset.coerceIn(0, editText.text.length)
+                        
+                        if (isLeft) {
+                            if (newOffset < initialSelectionEnd) {
+                                editText.setSelection(newOffset, initialSelectionEnd)
+                            } else {
+                                editText.setSelection(initialSelectionEnd, newOffset)
+                            }
+                        } else {
+                            if (newOffset > initialSelectionStart) {
+                                editText.setSelection(initialSelectionStart, newOffset)
+                            } else {
+                                editText.setSelection(newOffset, initialSelectionStart)
+                            }
+                        }
+                        
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
+                        
+                        val (start, end) = getSelection()
+                        if (start != end && start >= 0 && end <= editText.text.length) {
+                            val selected = editText.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
+                            }
+                        }
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    return true
+                }
+            }
+            return false
+        }
+    }
+    
+    private fun updateHandlePositionsSafe() {
+        if (handleUpdatePending) return
+        handleUpdatePending = true
+        handleUpdateDebounceHandler.post {
+            try {
+                updateHandlePositions()
+            } finally {
+                handleUpdatePending = false
+            }
+        }
+    }
+    
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
+    }
+    
+    // ✅ Fixed: Correct handle positioning - tight to selection box
+    private fun updateHandlePositions() {
+        if (isScrolling) return
+        
+        try {
+            val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) {
+                recreateHandlesIfNeeded()
+                return
+            }
+
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+            
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+                return
+            }
+
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            
+            val containerLocation = IntArray(2)
+            handleContainer?.getLocationOnScreen(containerLocation) ?: return
+            
+            val relativeX = editLocation[0] - containerLocation[0]
+            val relativeY = editLocation[1] - containerLocation[1]
+
+            val startLine = currentLayout.getLineForOffset(start)
+            val endLine = currentLayout.getLineForOffset(end)
+            
+            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
+            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
+            
+            val startY = currentLayout.getLineBottom(startLine) + relativeY
+            val endY = currentLayout.getLineBottom(endLine) + relativeY
+
+            val halfHandle = HANDLE_SIZE / 2
+
+            // Left handle - tight to selection box left boundary, bottom aligned
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    params.leftMargin = (startX - halfHandle).toInt()
+                    params.topMargin = (startY - HANDLE_SIZE).toInt()
+                    handle.layoutParams = params
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
+                }
+            }
+            
+            // Right handle - tight to selection box right boundary, bottom aligned
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    params.leftMargin = (endX - halfHandle).toInt()
+                    params.topMargin = (endY - HANDLE_SIZE).toInt()
+                    handle.layoutParams = params
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
+                }
+            }
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
+        }
+    }
+    
+    private fun recreateHandlesIfNeeded() {
+        if (leftHandleView == null || rightHandleView == null) {
+            val handles = createSelectionHandles()
+            leftHandleView = handles.first
+            rightHandleView = handles.second
+            
+            handleContainer?.removeAllViews()
+            
+            handleContainer?.addView(leftHandleView)
+            handleContainer?.addView(rightHandleView)
+            areHandlesVisible = true
+            EmergencyLog.log("Handles recreated")
+            
+            updateHandlePositionsSafe()
+        }
+    }
+    
+    private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
+        this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
+            override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
+                return true
+            }
+            override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?) = false
+            override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?) = false
+            override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
+        })
+        
+        val watcher = object : TextWatcher {
+            private var prevStart = 0
+            private var prevEnd = 0
+            override fun afterTextChanged(s: Editable?) {
+                val start = selectionStart
+                val end = selectionEnd
+                if (start != prevStart || end != prevEnd) {
+                    prevStart = start
+                    prevEnd = end
+                    callback(start, end)
+                }
+            }
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        }
+        addTextChangedListener(watcher)
+    }
+    
+    private fun showSelectionHandles() {
+        try {
+            val (start, end) = getSelection()
+            if (start == end || start < 0 || end < 0) {
+                hideSelectionHandles()
+                return
+            }
+            
+            if (leftHandleView == null || rightHandleView == null) {
+                val handles = createSelectionHandles()
+                leftHandleView = handles.first
+                rightHandleView = handles.second
+                
+                handleContainer?.removeAllViews()
+                handleContainer?.addView(leftHandleView)
+                handleContainer?.addView(rightHandleView)
+                areHandlesVisible = true
+                EmergencyLog.log("Handles created and added to container")
+            }
+            
+            updateHandlePositionsSafe()
+            
+            leftHandleView?.visibility = View.VISIBLE
+            leftHandleView?.alpha = 1f
+            rightHandleView?.visibility = View.VISIBLE
+            rightHandleView?.alpha = 1f
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "showSelectionHandles")
+        }
+    }
+    
+    private fun hideSelectionHandles() {
+        try {
+            leftHandleView?.let { handle ->
+                handle.animate()
+                    ?.alpha(0f)
+                    ?.setDuration(150)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.withEndAction {
+                        handle.visibility = View.GONE
+                    }
+                    ?.start()
+            }
+            rightHandleView?.let { handle ->
+                handle.animate()
+                    ?.alpha(0f)
+                    ?.setDuration(150)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.withEndAction {
+                        handle.visibility = View.GONE
+                    }
+                    ?.start()
+            }
+            areHandlesVisible = false
+        } catch (e: Exception) { }
+    }
 
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
@@ -831,14 +1173,14 @@ class FloatingBubbleService : Service() {
             setTextColor(Color.WHITE)
             setPadding(14, 8, 14, 8)
             setOnClickListener {
-                val start = editText.selectionStart
-                val end = editText.selectionEnd
+                val (start, end) = getSelection()
                 if (start != end) {
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     val clip = android.content.ClipData.newPlainText("text", selectedText)
                     clipboard.setPrimaryClip(clip)
                     editText.text.delete(start, end)
                     hideFloatingActionBar()
+                    hideSelectionHandles()
                     Toast.makeText(this@FloatingBubbleService, "Cut", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -874,8 +1216,7 @@ class FloatingBubbleService : Service() {
                 val clip = clipboard.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val pastedText = clip.getItemAt(0).text.toString()
-                    val start = editText.selectionStart
-                    val end = editText.selectionEnd
+                    val (start, end) = getSelection()
                     editText.text.replace(start, end, pastedText)
                     hideFloatingActionBar()
                     Toast.makeText(this@FloatingBubbleService, "Pasted", Toast.LENGTH_SHORT).show()
@@ -896,6 +1237,7 @@ class FloatingBubbleService : Service() {
                 val allText = editText.text.toString()
                 currentSelectedText = allText
                 showFloatingActionBar(allText)
+                showSelectionHandles()
             }
         }
         actionBarView.addView(selectAllBtn)
@@ -909,6 +1251,7 @@ class FloatingBubbleService : Service() {
             setPadding(14, 8, 14, 8)
             setOnClickListener {
                 hideFloatingActionBar()
+                hideSelectionHandles()
                 shareLargeText(selectedText)
                 Handler(Looper.getMainLooper()).postDelayed({
                     if (isExpanded) {
@@ -1023,8 +1366,7 @@ class FloatingBubbleService : Service() {
         
         val runnable = Runnable {
             if (isActionBarTemporarilyHidden && editText.hasSelection()) {
-                val start = editText.selectionStart
-                val end = editText.selectionEnd
+                val (start, end) = getSelection()
                 if (start != end) {
                     val selected = editText.text.substring(start, end)
                     if (selected.isNotEmpty()) {
@@ -1168,6 +1510,18 @@ class FloatingBubbleService : Service() {
         contentContainer.addView(resizeHandleView)
         
         container.addView(contentContainer)
+        
+        // ✅ Create handle container
+        handleContainer = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            isClickable = false
+            isFocusable = false
+            bringToFront()
+        }
+        container.addView(handleContainer)
 
         return container
     }
@@ -1210,6 +1564,7 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         showFloatingActionBar(selectedWord)
+                        showSelectionHandles()
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
                 }
@@ -1250,6 +1605,7 @@ class FloatingBubbleService : Service() {
             setTextColor(Color.parseColor("#333333"))
             setPadding(8, 0, 16, 0)
             setOnClickListener {
+                hideSelectionHandles()
                 hideFloatingActionBar()
                 showNoteList()
             }
@@ -1318,7 +1674,11 @@ class FloatingBubbleService : Service() {
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started - hiding action bar")
+                    EmergencyLog.log("Scrolling started - hiding handles and action bar")
+                    
+                    if (areHandlesVisible) {
+                        hideSelectionHandles()
+                    }
                     
                     if (editText.hasSelection() && isActionBarVisible) {
                         hideFloatingActionBar()
@@ -1331,17 +1691,17 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped - showing action bar")
+                        EmergencyLog.log("Scrolling stopped - showing handles and action bar")
                         
                         if (editText.hasSelection()) {
-                            val start = editText.selectionStart
-                            val end = editText.selectionEnd
+                            val (start, end) = getSelection()
                             if (start != end) {
                                 val selected = editText.text.substring(start, end)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
+                                    showSelectionHandles()
                                 }
                             }
                         }
@@ -1350,7 +1710,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ EditText with native selection handles - Android handles everything!
+        // ✅ EditText with proper configuration for overlay
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1370,10 +1730,9 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ KEY: Enable native selection handles
+            // ✅ Enable native selection but overlay might not show handles
             setTextIsSelectable(true)
             isLongClickable = true
-            // Allow system to show selection action mode
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
             
@@ -1382,7 +1741,7 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // Selection change listener for action bar
+            // Selection change listener
             addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {}
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -1393,9 +1752,11 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             if (!isScrolling) {
                                 showFloatingActionBar(selected)
+                                showSelectionHandles()
                             }
                         }
                     } else {
+                        hideSelectionHandles()
                         hideFloatingActionBar()
                     }
                     
@@ -1417,6 +1778,7 @@ class FloatingBubbleService : Service() {
                 }
             })
             
+            // Touch listener for double tap and long press
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1439,7 +1801,7 @@ class FloatingBubbleService : Service() {
                                 // Double tap - select word
                                 selectWordAtPosition(this@apply, x, y)
                             } else {
-                                // Long press will be handled by system
+                                // Long press handler
                                 val runnable = Runnable {
                                     selectWordAtPosition(this@apply, x, y)
                                 }
@@ -1462,6 +1824,7 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     if (!isScrolling) {
                                         showFloatingActionBar(selected)
+                                        showSelectionHandles()
                                     }
                                 }
                             }
@@ -1522,6 +1885,7 @@ class FloatingBubbleService : Service() {
                 saveNotesToPrefs()
                 notesAdapter.updateList(notesList)
                 updateBubbleCount()
+                hideSelectionHandles()
                 hideFloatingActionBar()
                 showNoteList()
                 Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
@@ -1559,6 +1923,18 @@ class FloatingBubbleService : Service() {
         contentContainer.addView(resizeHandleView)
         
         container.addView(contentContainer)
+        
+        // ✅ Create handle container
+        handleContainer = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            isClickable = false
+            isFocusable = false
+            bringToFront()
+        }
+        container.addView(handleContainer)
         
         noteView?.let { windowManager.removeView(it) }
         noteView = container
@@ -1604,12 +1980,14 @@ class FloatingBubbleService : Service() {
             notesAdapter.updateList(notesList)
             updateBubbleCount()
             Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+            hideSelectionHandles()
             hideFloatingActionBar()
             showNoteList()
         }
     }
 
     private fun showNoteList() {
+        hideSelectionHandles()
         hideFloatingActionBar()
         val container = createFullNotePad()
         noteView?.let { windowManager.removeView(it) }
@@ -1771,6 +2149,7 @@ class FloatingBubbleService : Service() {
         bubbleView?.let { windowManager.removeView(it) }
         noteView?.let { windowManager.removeView(it) }
         deleteZoneView?.let { windowManager.removeView(it) }
+        hideSelectionHandles()
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
