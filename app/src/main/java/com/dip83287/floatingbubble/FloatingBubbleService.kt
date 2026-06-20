@@ -18,6 +18,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -98,7 +99,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // ✅ Fixed: Custom selection handles with improved positioning
+    // ✅ Native-style selection handles (teardrop/circle with dot)
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -107,7 +108,7 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
-    private val HANDLE_SIZE = 40
+    private val HANDLE_SIZE = 48
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -825,18 +826,59 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun createCircleHandleDrawable(): Drawable {
+    // ✅ Native-style teardrop handle drawable
+    private fun createNativeHandleDrawable(isLeft: Boolean): Drawable {
         return object : Drawable() {
-            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
-            override fun draw(canvas: Canvas) {
-                val cx = bounds.width() / 2f
-                val cy = bounds.height() / 2f
-                val radius = bounds.width().coerceAtMost(bounds.height()) / 2f
-                canvas.drawCircle(cx, cy, radius, paint)
+            private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 2.5f
             }
+            private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.FILL
+            }
+            private val path = Path()
+            
+            override fun draw(canvas: Canvas) {
+                val w = bounds.width().toFloat()
+                val h = bounds.height().toFloat()
+                
+                path.reset()
+                
+                if (isLeft) {
+                    // Left handle - pointing left (teardrop shape)
+                    path.moveTo(w * 0.9f, h * 0.2f)
+                    path.cubicTo(w * 0.6f, h * 0.15f, w * 0.3f, h * 0.3f, w * 0.15f, h * 0.45f)
+                    path.cubicTo(w * 0.05f, h * 0.5f, w * 0.05f, h * 0.5f, w * 0.15f, h * 0.55f)
+                    path.cubicTo(w * 0.3f, h * 0.7f, w * 0.6f, h * 0.85f, w * 0.9f, h * 0.8f)
+                    path.cubicTo(w * 0.8f, h * 0.65f, w * 0.7f, h * 0.5f, w * 0.7f, h * 0.5f)
+                    path.cubicTo(w * 0.7f, h * 0.5f, w * 0.8f, h * 0.35f, w * 0.9f, h * 0.2f)
+                } else {
+                    // Right handle - pointing right
+                    path.moveTo(w * 0.1f, h * 0.2f)
+                    path.cubicTo(w * 0.4f, h * 0.15f, w * 0.7f, h * 0.3f, w * 0.85f, h * 0.45f)
+                    path.cubicTo(w * 0.95f, h * 0.5f, w * 0.95f, h * 0.5f, w * 0.85f, h * 0.55f)
+                    path.cubicTo(w * 0.7f, h * 0.7f, w * 0.4f, h * 0.85f, w * 0.1f, h * 0.8f)
+                    path.cubicTo(w * 0.2f, h * 0.65f, w * 0.3f, h * 0.5f, w * 0.3f, h * 0.5f)
+                    path.cubicTo(w * 0.3f, h * 0.5f, w * 0.2f, h * 0.35f, w * 0.1f, h * 0.2f)
+                }
+                
+                path.close()
+                canvas.drawPath(path, fillPaint)
+                canvas.drawPath(path, borderPaint)
+                
+                // Draw center dot
+                val dotRadius = w * 0.08f
+                val cx = w * 0.5f
+                val cy = h * 0.5f
+                canvas.drawCircle(cx, cy, dotRadius, dotPaint)
+            }
+            
             override fun setAlpha(alpha: Int) {}
             override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
             override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
@@ -845,7 +887,7 @@ class FloatingBubbleService : Service() {
     
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createCircleHandleDrawable())
+            setImageDrawable(createNativeHandleDrawable(true))
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
@@ -854,7 +896,7 @@ class FloatingBubbleService : Service() {
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createCircleHandleDrawable())
+            setImageDrawable(createNativeHandleDrawable(false))
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -928,8 +970,7 @@ class FloatingBubbleService : Service() {
                         if (start != end && start >= 0 && end <= editText.text.length) {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                showFloatingActionBar(selected)
+                                currentSelectedText = selected                                showFloatingActionBar(selected)
                             }
                         }
                     }
@@ -961,7 +1002,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Fixed: Correct handle positioning - tight to selection box
+    // ✅ Update handle positions - tight to selection box
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -999,7 +1040,7 @@ class FloatingBubbleService : Service() {
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // Left handle - tight to selection box left boundary, bottom aligned
+            // Left handle
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1011,7 +1052,7 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // Right handle - tight to selection box right boundary, bottom aligned
+            // Right handle
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1131,6 +1172,7 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
+    // ✅ Custom Action Bar
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -1151,6 +1193,7 @@ class FloatingBubbleService : Service() {
             background = shape
         }
         
+        // Google Search Button
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -1164,9 +1207,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(chromeBtn)
-        
         actionBarView.addView(createDivider())
         
+        // Cut Button
         val cutBtn = TextView(this).apply {
             text = "Cut"
             textSize = 13f
@@ -1186,9 +1229,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(cutBtn)
-        
         actionBarView.addView(createDivider())
         
+        // Copy Button
         val copyBtn = TextView(this).apply {
             text = "Copy"
             textSize = 13f
@@ -1203,9 +1246,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(copyBtn)
-        
         actionBarView.addView(createDivider())
         
+        // Paste Button
         val pasteBtn = TextView(this).apply {
             text = "Paste"
             textSize = 13f
@@ -1224,9 +1267,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(pasteBtn)
-        
         actionBarView.addView(createDivider())
         
+        // Select All Button
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -1241,9 +1284,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(selectAllBtn)
-        
         actionBarView.addView(createDivider())
         
+        // Share Button
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1511,7 +1554,6 @@ class FloatingBubbleService : Service() {
         
         container.addView(contentContainer)
         
-        // ✅ Create handle container
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1710,7 +1752,7 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ EditText with proper configuration for overlay
+        // ✅ EditText with native-style handles
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1730,7 +1772,7 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // ✅ Enable native selection but overlay might not show handles
+            // Enable native selection
             setTextIsSelectable(true)
             isLongClickable = true
             customInsertionActionModeCallback = null
@@ -1924,7 +1966,6 @@ class FloatingBubbleService : Service() {
         
         container.addView(contentContainer)
         
-        // ✅ Create handle container
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
