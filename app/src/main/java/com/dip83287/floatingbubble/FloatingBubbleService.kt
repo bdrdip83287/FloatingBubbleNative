@@ -864,9 +864,9 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
+    // ✅ FIXED: HandleTouchListener - both left and right handles work properly
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
-        private var initialTouchY = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
@@ -875,7 +875,6 @@ class FloatingBubbleService : Service() {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialTouchX = event.rawX
-                    initialTouchY = event.rawY
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
@@ -897,9 +896,6 @@ class FloatingBubbleService : Service() {
                     val currentLayout = editText.layout
                     
                     if (currentLayout != null) {
-                        val containerLocation = IntArray(2)
-                        handleContainer?.getLocationOnScreen(containerLocation) ?: return true
-                        
                         val editLocation = IntArray(2)
                         editText.getLocationOnScreen(editLocation)
                         
@@ -911,12 +907,14 @@ class FloatingBubbleService : Service() {
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
                         if (isLeft) {
+                            // Left handle - adjust start of selection
                             if (newOffset < initialSelectionEnd) {
                                 editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
                                 editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
+                            // Right handle - adjust end of selection
                             if (newOffset > initialSelectionStart) {
                                 editText.setSelection(initialSelectionStart, newOffset)
                             } else {
@@ -965,6 +963,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
+    // ✅ FIXED: Correct handle positioning - zero gap, tight to selection box
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -994,20 +993,22 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
+            // ✅ Get exact selection boundary positions with scroll offset
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
+            // ✅ Use line bottom for exact bottom of selection box
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
-            val upwardShift = dpToPx(12)
 
+            // ✅ Left handle - tight to left boundary, bottom aligned
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (startX - halfHandle).toInt()
-                    params.topMargin = (startY - HANDLE_SIZE - upwardShift).toInt()
+                    params.topMargin = (startY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
                     if (handle.visibility != View.VISIBLE) {
                         handle.visibility = View.VISIBLE
@@ -1016,11 +1017,12 @@ class FloatingBubbleService : Service() {
                 }
             }
             
+            // ✅ Right handle - tight to right boundary, bottom aligned
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (endX - halfHandle).toInt()
-                    params.topMargin = (endY - HANDLE_SIZE - upwardShift).toInt()
+                    params.topMargin = (endY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
                     if (handle.visibility != View.VISIBLE) {
                         handle.visibility = View.VISIBLE
