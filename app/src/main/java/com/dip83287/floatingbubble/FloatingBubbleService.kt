@@ -18,7 +18,6 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -99,7 +98,6 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // ✅ Native-style selection handles (teardrop/circle with dot)
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -108,7 +106,7 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
-    private val HANDLE_SIZE = 48
+    private val HANDLE_SIZE = 40
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -826,59 +824,18 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Native-style teardrop handle drawable
-    private fun createNativeHandleDrawable(isLeft: Boolean): Drawable {
+    private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
-            private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
-            private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                style = Paint.Style.STROKE
-                strokeWidth = 2.5f
-            }
-            private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                style = Paint.Style.FILL
-            }
-            private val path = Path()
-            
             override fun draw(canvas: Canvas) {
-                val w = bounds.width().toFloat()
-                val h = bounds.height().toFloat()
-                
-                path.reset()
-                
-                if (isLeft) {
-                    // Left handle - pointing left (teardrop shape)
-                    path.moveTo(w * 0.9f, h * 0.2f)
-                    path.cubicTo(w * 0.6f, h * 0.15f, w * 0.3f, h * 0.3f, w * 0.15f, h * 0.45f)
-                    path.cubicTo(w * 0.05f, h * 0.5f, w * 0.05f, h * 0.5f, w * 0.15f, h * 0.55f)
-                    path.cubicTo(w * 0.3f, h * 0.7f, w * 0.6f, h * 0.85f, w * 0.9f, h * 0.8f)
-                    path.cubicTo(w * 0.8f, h * 0.65f, w * 0.7f, h * 0.5f, w * 0.7f, h * 0.5f)
-                    path.cubicTo(w * 0.7f, h * 0.5f, w * 0.8f, h * 0.35f, w * 0.9f, h * 0.2f)
-                } else {
-                    // Right handle - pointing right
-                    path.moveTo(w * 0.1f, h * 0.2f)
-                    path.cubicTo(w * 0.4f, h * 0.15f, w * 0.7f, h * 0.3f, w * 0.85f, h * 0.45f)
-                    path.cubicTo(w * 0.95f, h * 0.5f, w * 0.95f, h * 0.5f, w * 0.85f, h * 0.55f)
-                    path.cubicTo(w * 0.7f, h * 0.7f, w * 0.4f, h * 0.85f, w * 0.1f, h * 0.8f)
-                    path.cubicTo(w * 0.2f, h * 0.65f, w * 0.3f, h * 0.5f, w * 0.3f, h * 0.5f)
-                    path.cubicTo(w * 0.3f, h * 0.5f, w * 0.2f, h * 0.35f, w * 0.1f, h * 0.2f)
-                }
-                
-                path.close()
-                canvas.drawPath(path, fillPaint)
-                canvas.drawPath(path, borderPaint)
-                
-                // Draw center dot
-                val dotRadius = w * 0.08f
-                val cx = w * 0.5f
-                val cy = h * 0.5f
-                canvas.drawCircle(cx, cy, dotRadius, dotPaint)
+                val cx = bounds.width() / 2f
+                val cy = bounds.height() / 2f
+                val radius = bounds.width().coerceAtMost(bounds.height()) / 2f
+                canvas.drawCircle(cx, cy, radius, paint)
             }
-            
             override fun setAlpha(alpha: Int) {}
             override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
             override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
@@ -887,7 +844,7 @@ class FloatingBubbleService : Service() {
     
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
-            setImageDrawable(createNativeHandleDrawable(true))
+            setImageDrawable(createCircleHandleDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
@@ -896,7 +853,7 @@ class FloatingBubbleService : Service() {
         }
         
         val rightHandle = ImageView(this).apply {
-            setImageDrawable(createNativeHandleDrawable(false))
+            setImageDrawable(createCircleHandleDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
@@ -970,7 +927,8 @@ class FloatingBubbleService : Service() {
                         if (start != end && start >= 0 && end <= editText.text.length) {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
-                                currentSelectedText = selected                                showFloatingActionBar(selected)
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
                             }
                         }
                     }
@@ -998,11 +956,19 @@ class FloatingBubbleService : Service() {
         }
     }
     
+    // ✅ Force immediate handle position update without debounce
+    private fun updateHandlePositionsImmediate() {
+        try {
+            updateHandlePositions()
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositionsImmediate")
+        }
+    }
+    
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Update handle positions - tight to selection box
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1040,7 +1006,6 @@ class FloatingBubbleService : Service() {
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // Left handle
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1052,7 +1017,6 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // Right handle
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1082,7 +1046,7 @@ class FloatingBubbleService : Service() {
             areHandlesVisible = true
             EmergencyLog.log("Handles recreated")
             
-            updateHandlePositionsSafe()
+            updateHandlePositionsImmediate()
         }
     }
     
@@ -1134,7 +1098,8 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            updateHandlePositionsSafe()
+            // ✅ Force immediate position update
+            updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
@@ -1172,7 +1137,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
 
-    // ✅ Custom Action Bar
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
@@ -1193,7 +1157,6 @@ class FloatingBubbleService : Service() {
             background = shape
         }
         
-        // Google Search Button
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -1207,9 +1170,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(chromeBtn)
+        
         actionBarView.addView(createDivider())
         
-        // Cut Button
         val cutBtn = TextView(this).apply {
             text = "Cut"
             textSize = 13f
@@ -1229,9 +1192,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(cutBtn)
+        
         actionBarView.addView(createDivider())
         
-        // Copy Button
         val copyBtn = TextView(this).apply {
             text = "Copy"
             textSize = 13f
@@ -1246,9 +1209,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(copyBtn)
+        
         actionBarView.addView(createDivider())
         
-        // Paste Button
         val pasteBtn = TextView(this).apply {
             text = "Paste"
             textSize = 13f
@@ -1267,9 +1230,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(pasteBtn)
+        
         actionBarView.addView(createDivider())
         
-        // Select All Button
         val selectAllBtn = TextView(this).apply {
             text = "Select all"
             textSize = 13f
@@ -1284,9 +1247,9 @@ class FloatingBubbleService : Service() {
             }
         }
         actionBarView.addView(selectAllBtn)
+        
         actionBarView.addView(createDivider())
         
-        // Share Button
         val shareBtn = TextView(this).apply {
             text = "Share"
             textSize = 13f
@@ -1581,7 +1544,8 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
+    // ✅ FIXED: selectWordAtPosition with immediate handle positioning
+    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
             if (currentLayout != null) {
@@ -1605,9 +1569,15 @@ class FloatingBubbleService : Service() {
                         val selectedWord = text.substring(wordStart, wordEnd)
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
+                        
+                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
+                        
+                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
-                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
+                        updateHandlePositionsImmediate()
+                        
+                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned immediately")
                     }
                 }
             }
@@ -1716,7 +1686,7 @@ class FloatingBubbleService : Service() {
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started - hiding handles and action bar")
+                    EmergencyLog.log("Scrolling started - hiding handles")
                     
                     if (areHandlesVisible) {
                         hideSelectionHandles()
@@ -1733,9 +1703,10 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped - showing handles and action bar")
+                        EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
                         if (editText.hasSelection()) {
+                            updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
                                 val selected = editText.text.substring(start, end)
@@ -1752,7 +1723,6 @@ class FloatingBubbleService : Service() {
             }
         }
         
-        // ✅ EditText with native-style handles
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
@@ -1772,7 +1742,6 @@ class FloatingBubbleService : Service() {
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            // Enable native selection
             setTextIsSelectable(true)
             isLongClickable = true
             customInsertionActionModeCallback = null
@@ -1783,23 +1752,118 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // Selection change listener
+            setOnSelectionChangedListener { _, _ ->
+                if (!isScrolling) {
+                    updateHandlePositionsSafe()
+                }
+            }
+            
             addTextChangedListener(object : TextWatcher {
-                override fun afterTextChanged(s: Editable?) {}
+                override fun afterTextChanged(s: Editable?) {
+                    if (!isScrolling) {
+                        updateHandlePositionsSafe()
+                    }
+                }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            })
+            
+            setOnTouchListener(object : View.OnTouchListener {
+                private var lastTouchTime = 0L
+                private var lastTouchX = 0f
+                private var lastTouchY = 0f
+                private var longPressRunnable: Runnable? = null
+                private val longPressHandler = Handler(Looper.getMainLooper())
+                private var isSelecting = false
+                
+                override fun onTouch(v: View, event: MotionEvent): Boolean {
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            val currentTime = System.currentTimeMillis()
+                            val x = event.x
+                            val y = event.y
+                            
+                            cancelLongPress()
+                            
+                            if (currentTime - lastTouchTime < 300 && 
+                                Math.abs(x - lastTouchX) < 50 && 
+                                Math.abs(y - lastTouchY) < 50) {
+                                isSelecting = true
+                                selectWordAtPosition(this@apply, x, y, true)
+                            } else {
+                                val runnable = Runnable {
+                                    isSelecting = true
+                                    selectWordAtPosition(this@apply, x, y, true)
+                                }
+                                longPressRunnable = runnable
+                                longPressHandler.postDelayed(runnable, 300)
+                            }
+                            
+                            lastTouchTime = currentTime
+                            lastTouchX = x
+                            lastTouchY = y
+                            v.parent.requestDisallowInterceptTouchEvent(false)
+                        }
+                        
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            cancelLongPress()
+                            
+                            if (!isSelecting && this@apply.hasSelection()) {
+                                val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
+                                if (selected.isNotEmpty()) {
+                                    currentSelectedText = selected
+                                    isActionBarTemporarilyHidden = false
+                                    showFloatingActionBar(selected)
+                                    showSelectionHandles()
+                                    // ✅ Force immediate position update on touch release
+                                    updateHandlePositionsImmediate()
+                                }
+                            } else if (!isSelecting && !this@apply.hasSelection()) {
+                                hideSelectionHandles()
+                                hideFloatingActionBar()
+                            }
+                            isSelecting = false
+                        }
+                        
+                        MotionEvent.ACTION_MOVE -> {
+                            val dx = Math.abs(event.x - lastTouchX)
+                            val dy = Math.abs(event.y - lastTouchY)
+                            if (dx > 20 || dy > 20) {
+                                cancelLongPress()
+                                if (this@apply.hasSelection() && !isScrolling) {
+                                    updateHandlePositionsSafe()
+                                }
+                            }
+                        }
+                    }
+                    return false
+                }
+                
+                private fun cancelLongPress() {
+                    val runnable = longPressRunnable
+                    if (runnable != null) {
+                        longPressHandler.removeCallbacks(runnable)
+                        longPressRunnable = null
+                    }
+                }
+            })
+            
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (this@apply.hasSelection()) {
+                    if (!this@apply.hasSelection()) {
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
+                    } else {
                         val selected = s?.substring(selectionStart, selectionEnd) ?: ""
                         if (selected.isNotEmpty()) {
                             currentSelectedText = selected
-                            if (!isScrolling) {
-                                showFloatingActionBar(selected)
-                                showSelectionHandles()
-                            }
+                            showFloatingActionBar(selected)
+                            showSelectionHandles()
+                            // ✅ Force immediate position update on text change
+                            updateHandlePositionsImmediate()
                         }
-                    } else {
-                        hideSelectionHandles()
-                        hideFloatingActionBar()
                     }
                     
                     saveRunnable?.let { saveHandler.removeCallbacks(it) }
@@ -1818,78 +1882,8 @@ class FloatingBubbleService : Service() {
                     saveRunnable = runnable
                     saveHandler.postDelayed(runnable, 600)
                 }
-            })
-            
-            // Touch listener for double tap and long press
-            setOnTouchListener(object : View.OnTouchListener {
-                private var lastTouchTime = 0L
-                private var lastTouchX = 0f
-                private var lastTouchY = 0f
-                private var longPressRunnable: Runnable? = null
-                private val longPressHandler = Handler(Looper.getMainLooper())
                 
-                override fun onTouch(v: View, event: MotionEvent): Boolean {
-                    when (event.action) {
-                        MotionEvent.ACTION_DOWN -> {
-                            val currentTime = System.currentTimeMillis()
-                            val x = event.x
-                            val y = event.y
-                            
-                            cancelLongPress()
-                            
-                            if (currentTime - lastTouchTime < 300 && 
-                                Math.abs(x - lastTouchX) < 50 && 
-                                Math.abs(y - lastTouchY) < 50) {
-                                // Double tap - select word
-                                selectWordAtPosition(this@apply, x, y)
-                            } else {
-                                // Long press handler
-                                val runnable = Runnable {
-                                    selectWordAtPosition(this@apply, x, y)
-                                }
-                                longPressRunnable = runnable
-                                longPressHandler.postDelayed(runnable, 300)
-                            }
-                            
-                            lastTouchTime = currentTime
-                            lastTouchX = x
-                            lastTouchY = y
-                            v.parent.requestDisallowInterceptTouchEvent(false)
-                        }
-                        
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            cancelLongPress()
-                            
-                            if (this@apply.hasSelection()) {
-                                val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
-                                    if (!isScrolling) {
-                                        showFloatingActionBar(selected)
-                                        showSelectionHandles()
-                                    }
-                                }
-                            }
-                        }
-                        
-                        MotionEvent.ACTION_MOVE -> {
-                            val dx = Math.abs(event.x - lastTouchX)
-                            val dy = Math.abs(event.y - lastTouchY)
-                            if (dx > 20 || dy > 20) {
-                                cancelLongPress()
-                            }
-                        }
-                    }
-                    return false
-                }
-                
-                private fun cancelLongPress() {
-                    val runnable = longPressRunnable
-                    if (runnable != null) {
-                        longPressHandler.removeCallbacks(runnable)
-                        longPressRunnable = null
-                    }
-                }
+                override fun afterTextChanged(s: Editable?) {}
             })
         }
         
