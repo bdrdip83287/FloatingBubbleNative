@@ -989,16 +989,25 @@ class FloatingBubbleService : Service() {
         
         try {
             val currentLayout = editText.layout ?: return
-            if (leftHandleView == null || rightHandleView == null) {
-                recreateHandlesIfNeeded()
-                return
-            }
-
+            
             val start = editText.selectionStart
             val end = editText.selectionEnd
             
             if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
                 return
+            }
+            
+            // ✅ CRITICAL FIX: If handles are null, we need to create them first
+            if (leftHandleView == null || rightHandleView == null) {
+                val handles = createSelectionHandles()
+                leftHandleView = handles.first
+                rightHandleView = handles.second
+                
+                handleContainer?.removeAllViews()
+                handleContainer?.addView(leftHandleView)
+                handleContainer?.addView(rightHandleView)
+                areHandlesVisible = true
+                EmergencyLog.log("Handles created inside updateHandlePositions")
             }
 
             val editLocation = IntArray(2)
@@ -1045,24 +1054,6 @@ class FloatingBubbleService : Service() {
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
-        }
-    }
-    
-    private fun recreateHandlesIfNeeded() {
-        if (leftHandleView == null || rightHandleView == null) {
-            val handles = createSelectionHandles()
-            leftHandleView = handles.first
-            rightHandleView = handles.second
-            
-            handleContainer?.removeAllViews()
-            
-            handleContainer?.addView(leftHandleView)
-            handleContainer?.addView(rightHandleView)
-            areHandlesVisible = true
-            EmergencyLog.log("Handles recreated")
-            
-            // Force update after recreation
-            forceUpdateHandlePositions()
         }
     }
     
@@ -1589,10 +1580,8 @@ class FloatingBubbleService : Service() {
                         // Show action bar
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ Show handles
+                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
-                        
-                        // ✅ FORCE immediate position update - bypasses all checks
                         forceUpdateHandlePositions()
                         
                         EmergencyLog.log("Selected word: '$selectedWord' - force updated handles")
