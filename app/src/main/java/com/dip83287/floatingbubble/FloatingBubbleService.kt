@@ -864,7 +864,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ Improved HandleTouchListener with smooth dragging
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -901,7 +900,6 @@ class FloatingBubbleService : Service() {
                         val containerLocation = IntArray(2)
                         handleContainer?.getLocationOnScreen(containerLocation) ?: return true
                         
-                        // Get touch position relative to EditText
                         val editLocation = IntArray(2)
                         editText.getLocationOnScreen(editLocation)
                         
@@ -967,7 +965,6 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ CORRECTED handle positioning - tight to selection box
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -997,18 +994,15 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            // ✅ Get exact selection boundary positions
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // ✅ Use line bottom for exact bottom of selection
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
-            val upwardShift = dpToPx(12) // Slightly less shift for tighter fit
+            val upwardShift = dpToPx(12)
 
-            // ✅ Left handle - at start of selection, bottom-aligned
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1022,7 +1016,6 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ Right handle - at end of selection, bottom-aligned
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1758,7 +1751,7 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            addTextChangedListener(object : TextWatcher) {
+            addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
                     if (!isScrolling) {
                         updateHandlePositionsSafe()
@@ -1766,7 +1759,7 @@ class FloatingBubbleService : Service() {
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            }
+            })
             
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
