@@ -864,7 +864,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ FIXED: HandleTouchListener - both left and right handles work properly
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -907,14 +906,12 @@ class FloatingBubbleService : Service() {
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
                         if (isLeft) {
-                            // Left handle - adjust start of selection
                             if (newOffset < initialSelectionEnd) {
                                 editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
                                 editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
-                            // Right handle - adjust end of selection
                             if (newOffset > initialSelectionStart) {
                                 editText.setSelection(initialSelectionStart, newOffset)
                             } else {
@@ -963,7 +960,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FIXED: Correct handle positioning - zero gap, tight to selection box
+    // ✅ CORRECTED: Zero-gap handle positioning with exact selection box alignment
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -993,41 +990,37 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            // ✅ Get exact selection boundary positions with scroll offset
+            // ✅ Exact selection boundary positions
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // ✅ Use line bottom for exact bottom of selection box
+            // ✅ Line bottom for exact selection box bottom
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ Left handle - tight to left boundary, bottom aligned
+            // ✅ Left handle - zero gap, tight to selection box left boundary
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (startX - halfHandle).toInt()
                     params.topMargin = (startY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
-                    if (handle.visibility != View.VISIBLE) {
-                        handle.visibility = View.VISIBLE
-                        handle.alpha = 1f
-                    }
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
                 }
             }
             
-            // ✅ Right handle - tight to right boundary, bottom aligned
+            // ✅ Right handle - zero gap, tight to selection box right boundary
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (endX - halfHandle).toInt()
                     params.topMargin = (endY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
-                    if (handle.visibility != View.VISIBLE) {
-                        handle.visibility = View.VISIBLE
-                        handle.alpha = 1f
-                    }
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
                 }
             }
             
@@ -1081,6 +1074,7 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
+    // ✅ FIXED: Show handles with immediate correct positioning
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1089,6 +1083,7 @@ class FloatingBubbleService : Service() {
                 return
             }
             
+            // Create handles if they don't exist
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
@@ -1101,8 +1096,10 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
+            // ✅ Force immediate position update
             updateHandlePositionsSafe()
             
+            // Make visible
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
             rightHandleView?.visibility = View.VISIBLE
@@ -1571,7 +1568,10 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         showFloatingActionBar(selectedWord)
+                        // ✅ Immediately show handles with correct position
                         showSelectionHandles()
+                        // ✅ Force immediate position update
+                        updateHandlePositionsSafe()
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
                 }
@@ -1810,6 +1810,8 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    // ✅ Force position update after selection
+                                    updateHandlePositionsSafe()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
@@ -1854,6 +1856,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            updateHandlePositionsSafe()
                         }
                     }
                     
