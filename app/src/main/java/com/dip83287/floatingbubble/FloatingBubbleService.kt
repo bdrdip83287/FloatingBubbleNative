@@ -704,6 +704,9 @@ class FloatingBubbleService : Service() {
 
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
+                        
+                        // ✅ Reset handle references when note is fully expanded
+                        resetHandleReferences()
                     }
                     .start()
             }
@@ -749,11 +752,19 @@ class FloatingBubbleService : Service() {
             EmergencyLog.logException(e, "createAndShowNotePad")
         }
     }
+    
+    // ✅ Reset handle references when note is recreated
+    private fun resetHandleReferences() {
+        leftHandleView = null
+        rightHandleView = null
+        areHandlesVisible = false
+        EmergencyLog.log("Handle references reset")
+    }
 
     private fun collapseToBubble() {
         if (!isExpanded) return
 
-        // Ensure handles are hidden before collapse
+        // Hide handles before collapse
         hideSelectionHandles()
         hideFloatingActionBar()
 
@@ -809,6 +820,9 @@ class FloatingBubbleService : Service() {
 
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
+                        
+                        // ✅ Reset handle references after collapse
+                        resetHandleReferences()
                     }
                     .start()
             }
@@ -843,7 +857,6 @@ class FloatingBubbleService : Service() {
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
             visibility = View.GONE
-            // Ensure proper layout params
             layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE)
         }
         
@@ -960,7 +973,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Update handle positions - CORRECTED
+    // ✅ Update handle positions
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1022,8 +1035,7 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // Update right handle
-            rightHandleView?.let { handle ->
+            // Update right handle            rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (endX - halfHandle).toInt()
@@ -1048,9 +1060,13 @@ class FloatingBubbleService : Service() {
             leftHandleView = handles.first
             rightHandleView = handles.second
             
+            // Remove old handles if they exist in container
+            handleContainer?.removeAllViews()
+            
             handleContainer?.addView(leftHandleView)
             handleContainer?.addView(rightHandleView)
             areHandlesVisible = true
+            EmergencyLog.log("Handles recreated")
             
             // Update positions
             updateHandlePositionsSafe()
@@ -1100,9 +1116,12 @@ class FloatingBubbleService : Service() {
                 leftHandleView = handles.first
                 rightHandleView = handles.second
                 
+                // Clear container and add new handles
+                handleContainer?.removeAllViews()
                 handleContainer?.addView(leftHandleView)
                 handleContainer?.addView(rightHandleView)
                 areHandlesVisible = true
+                EmergencyLog.log("Handles created and added to container")
             }
             
             // Update positions and make visible
@@ -1278,7 +1297,7 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
-        // Action bar position - still uses overlay window manager
+        // Action bar position
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
