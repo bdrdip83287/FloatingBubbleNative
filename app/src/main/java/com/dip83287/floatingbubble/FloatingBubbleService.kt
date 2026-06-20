@@ -98,11 +98,15 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
+    // ✅ Selection handles as child views of notepad
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
     private var areHandlesVisible = false
+    
+    // Container for handles (inside noteView)
+    private var handleContainer: FrameLayout? = null
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -112,15 +116,11 @@ class FloatingBubbleService : Service() {
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
     private var handleUpdatePending = false
     
-    // ✅ Scroll state tracking with handle visibility
+    // ✅ Scroll state tracking
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
-    
-    // ✅ For smooth handle show animation
-    private var handleShowAnimator: ValueAnimator? = null
-    private var handleFadeAnimator: ValueAnimator? = null
 
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
@@ -718,6 +718,19 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
+            // ✅ Create handle container as child of noteView
+            handleContainer = FrameLayout(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                // Make it click-through
+                isClickable = false
+                isFocusable = false
+            }
+            
+            (noteView as? ViewGroup)?.addView(handleContainer)
+            
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -821,6 +834,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
+    // ✅ Create selection handles as child views (not overlay)
     private fun createSelectionHandles(): Pair<View, View> {
         val handleSize = 40
         
@@ -829,6 +843,7 @@ class FloatingBubbleService : Service() {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
+            visibility = View.GONE
         }
         
         val rightHandle = ImageView(this).apply {
@@ -836,11 +851,13 @@ class FloatingBubbleService : Service() {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = false))
+            visibility = View.GONE
         }
         
         return Pair(leftHandle, rightHandle)
     }
     
+    // Handle Touch Listener
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -874,10 +891,13 @@ class FloatingBubbleService : Service() {
                     val currentLayout = editText.layout
                     
                     if (currentLayout != null) {
-                        val location = IntArray(2)
-                        editText.getLocationOnScreen(location)
-                        val textX = event.rawX - location[0]
-                        val textY = event.rawY - location[1] + editText.scrollY
+                        // Get location of handle container (notepad)
+                        val containerLocation = IntArray(2)
+                        handleContainer?.getLocationOnScreen(containerLocation) ?: return true
+                        
+                        // Convert touch coordinates relative to handle container
+                        val textX = event.rawX - containerLocation[0]
+                        val textY = event.rawY - containerLocation[1] + editText.scrollY
                         
                         val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
                         val offset = currentLayout.getOffsetForHorizontal(line, textX)
@@ -897,7 +917,6 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // ✅ Only update if not scrolling
                         if (!isScrolling) {
                             updateHandlePositionsSafe()
                         }
@@ -939,13 +958,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Main handle position update - Skip if scrolling
+    // ✅ Update handle positions within the notepad container
     private fun updateHandlePositions() {
-        // ✅ Skip if scrolling is active
-        if (isScrolling) {
-            EmergencyLog.log("updateHandlePositions skipped - scrolling active")
-            return
-        }
+        if (isScrolling) return
         
         try {
             val currentLayout = editText.layout ?: return
@@ -958,10 +973,16 @@ class FloatingBubbleService : Service() {
                 return
             }
 
+            // Get EditText position within handle container
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
-            val editScreenX = editLocation[0]
-            val editScreenY = editLocation[1]
+            
+            val containerLocation = IntArray(2)
+            handleContainer?.getLocationOnScreen(containerLocation) ?: return
+            
+            // Calculate position relative to container
+            val relativeX = editLocation[0] - containerLocation[0]
+            val relativeY = editLocation[1] - containerLocation[1]
 
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
@@ -971,72 +992,38 @@ class FloatingBubbleService : Service() {
             val scrollX = editText.scrollX
             val paddingLeft = editText.paddingLeft
             
-            val startX = startXRaw - scrollX + paddingLeft
-            val endX = endXRaw - scrollX + paddingLeft
+            val startX = startXRaw - scrollX + paddingLeft + relativeX
+            val endX = endXRaw - scrollX + paddingLeft + relativeX
             
             val startYRaw = currentLayout.getLineTop(startLine)
             val endYRaw = currentLayout.getLineTop(endLine)
             val scrollY = editText.scrollY
             val paddingTop = editText.paddingTop
             
-            val startY = startYRaw - scrollY + paddingTop
-            val endY = endYRaw - scrollY + paddingTop
+            val startY = startYRaw - scrollY + paddingTop + relativeY
+            val endY = endYRaw - scrollY + paddingTop + relativeY
 
             val handleSize = 40
             val halfHandle = handleSize / 2
             val upwardShift = dpToPx(15)
 
-            val leftHandleScreenX = editScreenX + startX - halfHandle
-            val leftHandleScreenY = editScreenY + startY - handleSize - upwardShift
-            val rightHandleScreenX = editScreenX + endX - halfHandle
-            val rightHandleScreenY = editScreenY + endY - handleSize - upwardShift
-            
-            // Check if handles are within viewport
-            val scrollLocation = IntArray(2)
-            scrollView.getLocationOnScreen(scrollLocation)
-            val viewportTop = scrollLocation[1]
-            val viewportBottom = scrollLocation[1] + scrollView.height
-            
-            val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
-            val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
-
-            // Update left handle position
-            if (isLeftInViewport) {
-                leftHandleView?.let { handle ->
-                    val params = handle.layoutParams as WindowManager.LayoutParams
-                    params.x = leftHandleScreenX.toInt()
-                    params.y = leftHandleScreenY.toInt()
-                    try {
-                        if (handle.parent == null) {
-                            actionBarWindowManager?.addView(handle, params)
-                        } else {
-                            actionBarWindowManager?.updateViewLayout(handle, params)
-                        }
-                    } catch (e: Exception) { }
-                }
-            } else if (leftHandleView?.parent != null) {
-                leftHandleView?.let {
-                    try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
+            // Update left handle within container
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    params.leftMargin = (startX - halfHandle).toInt()
+                    params.topMargin = (startY - handleSize - upwardShift).toInt()
+                    handle.layoutParams = params
                 }
             }
             
-            // Update right handle position
-            if (isRightInViewport) {
-                rightHandleView?.let { handle ->
-                    val params = handle.layoutParams as WindowManager.LayoutParams
-                    params.x = rightHandleScreenX.toInt()
-                    params.y = rightHandleScreenY.toInt()
-                    try {
-                        if (handle.parent == null) {
-                            actionBarWindowManager?.addView(handle, params)
-                        } else {
-                            actionBarWindowManager?.updateViewLayout(handle, params)
-                        }
-                    } catch (e: Exception) { }
-                }
-            } else if (rightHandleView?.parent != null) {
-                rightHandleView?.let {
-                    try { actionBarWindowManager?.removeView(it) } catch (e: Exception) { }
+            // Update right handle within container
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    params.leftMargin = (endX - halfHandle).toInt()
+                    params.topMargin = (endY - handleSize - upwardShift).toInt()
+                    handle.layoutParams = params
                 }
             }
             
@@ -1073,7 +1060,7 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
-    // ✅ Show handles with smooth fade-in animation
+    // ✅ Show handles as children of handle container
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1085,132 +1072,54 @@ class FloatingBubbleService : Service() {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
                 rightHandleView = handles.second
+                
+                // Add handles to container
+                handleContainer?.addView(leftHandleView, FrameLayout.LayoutParams(
+                    handleSize, handleSize
+                ))
+                handleContainer?.addView(rightHandleView, FrameLayout.LayoutParams(
+                    handleSize, handleSize
+                ))
                 areHandlesVisible = true
             }
             
-            val currentLayout = editText.layout
-            if (currentLayout == null) return
+            // Update positions and make visible
+            updateHandlePositionsSafe()
             
-            val location = IntArray(2)
-            editText.getLocationOnScreen(location)
+            leftHandleView?.visibility = View.VISIBLE
+            leftHandleView?.alpha = 1f
+            rightHandleView?.visibility = View.VISIBLE
+            rightHandleView?.alpha = 1f
             
-            val handleSize = 40
-            val halfHandle = handleSize / 2
-            val upwardShift = dpToPx(15)
-            
-            val startLine = currentLayout.getLineForOffset(start)
-            val startX = currentLayout.getPrimaryHorizontal(start) + location[0]
-            val startY = currentLayout.getLineBottom(startLine) + location[1]
-            
-            val endLine = currentLayout.getLineForOffset(end)
-            val endX = currentLayout.getPrimaryHorizontal(end) + location[0]
-            val endY = currentLayout.getLineBottom(endLine) + location[1]
-            
-            // Check viewport visibility before adding
-            val scrollLocation = IntArray(2)
-            scrollView.getLocationOnScreen(scrollLocation)
-            val viewportTop = scrollLocation[1]
-            val viewportBottom = scrollLocation[1] + scrollView.height
-            
-            val leftHandleScreenY = startY - halfHandle - upwardShift
-            val rightHandleScreenY = endY - halfHandle - upwardShift
-            
-            val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
-            val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
-            
-            // Add left handle with fade-in
-            if (leftHandleView?.parent == null && isLeftInViewport) {
-                val leftParams = WindowManager.LayoutParams(
-                    handleSize, handleSize,
-                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    else WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT
-                )
-                leftParams.gravity = Gravity.TOP or Gravity.START
-                leftParams.x = (startX - halfHandle).toInt()
-                leftParams.y = (startY - halfHandle - upwardShift).toInt()
-                try {
-                    leftHandleView?.alpha = 0f
-                    actionBarWindowManager?.addView(leftHandleView, leftParams)
-                    leftHandleView?.animate()
-                        ?.alpha(1f)
-                        ?.setDuration(200)
-                        ?.setInterpolator(DecelerateInterpolator())
-                        ?.start()
-                } catch (e: Exception) { }
-            }
-            
-            // Add right handle with fade-in
-            if (rightHandleView?.parent == null && isRightInViewport) {
-                val rightParams = WindowManager.LayoutParams(
-                    handleSize, handleSize,
-                    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    else WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT
-                )
-                rightParams.gravity = Gravity.TOP or Gravity.START
-                rightParams.x = (endX - halfHandle).toInt()
-                rightParams.y = (endY - halfHandle - upwardShift).toInt()
-                try {
-                    rightHandleView?.alpha = 0f
-                    actionBarWindowManager?.addView(rightHandleView, rightParams)
-                    rightHandleView?.animate()
-                        ?.alpha(1f)
-                        ?.setDuration(200)
-                        ?.setInterpolator(DecelerateInterpolator())
-                        ?.start()
-                } catch (e: Exception) { }
-            }
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
         }
     }
     
-    // ✅ Hide handles with smooth fade-out animation
+    // ✅ Hide handles with fade-out
     private fun hideSelectionHandles() {
         try {
             leftHandleView?.let { handle ->
-                if (handle.parent != null) {
-                    handle.animate()
-                        ?.alpha(0f)
-                        ?.setDuration(150)
-                        ?.setInterpolator(DecelerateInterpolator())
-                        ?.withEndAction {
-                            try {
-                                if (handle.parent != null) {
-                                    actionBarWindowManager?.removeView(handle)
-                                }
-                            } catch (e: Exception) { }
-                        }
-                        ?.start()
-                }
+                handle.animate()
+                    ?.alpha(0f)
+                    ?.setDuration(150)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.withEndAction {
+                        handle.visibility = View.GONE
+                    }
+                    ?.start()
             }
             rightHandleView?.let { handle ->
-                if (handle.parent != null) {
-                    handle.animate()
-                        ?.alpha(0f)
-                        ?.setDuration(150)
-                        ?.setInterpolator(DecelerateInterpolator())
-                        ?.withEndAction {
-                            try {
-                                if (handle.parent != null) {
-                                    actionBarWindowManager?.removeView(handle)
-                                }
-                            } catch (e: Exception) { }
-                        }
-                        ?.start()
-                }
+                handle.animate()
+                    ?.alpha(0f)
+                    ?.setDuration(150)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.withEndAction {
+                        handle.visibility = View.GONE
+                    }
+                    ?.start()
             }
-            // Clear references after animation
-            Handler(Looper.getMainLooper()).postDelayed({
-                if (leftHandleView?.parent == null) leftHandleView = null
-                if (rightHandleView?.parent == null) rightHandleView = null
-                areHandlesVisible = false
-            }, 200)
+            areHandlesVisible = false
         } catch (e: Exception) { }
     }
 
@@ -1347,6 +1256,7 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
+        // Action bar position - still uses overlay window manager
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
@@ -1471,11 +1381,19 @@ class FloatingBubbleService : Service() {
     }
 
     private fun createFullNotePad(): View {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val container = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            setPadding(16, 16, 16, 16)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
+        }
+        
+        // Inner content
+        val contentContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 16, 16, 16)
         }
 
         val topBar = LinearLayout(this).apply {
@@ -1517,7 +1435,7 @@ class FloatingBubbleService : Service() {
             }
         }
         topBar.addView(minimizeBtn)
-        container.addView(topBar)
+        contentContainer.addView(topBar)
 
         val noteCountText = TextView(this).apply {
             text = "Note List (${notesList.size})"
@@ -1525,7 +1443,7 @@ class FloatingBubbleService : Service() {
             setTextColor(Color.parseColor("#666666"))
             setPadding(12, 16, 12, 8)
         }
-        container.addView(noteCountText)
+        contentContainer.addView(noteCountText)
 
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -1553,7 +1471,7 @@ class FloatingBubbleService : Service() {
             }
         )
         recyclerView.adapter = notesAdapter
-        container.addView(recyclerView)
+        contentContainer.addView(recyclerView)
 
         val addButton = Button(this).apply {
             text = "+ New Note"
@@ -1571,7 +1489,7 @@ class FloatingBubbleService : Service() {
                 createNewNote()
             }
         }
-        container.addView(addButton)
+        contentContainer.addView(addButton)
 
         val resizeHandleView = TextView(this).apply {
             text = "◢"
@@ -1583,7 +1501,22 @@ class FloatingBubbleService : Service() {
             layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
         }
-        container.addView(resizeHandleView)
+        contentContainer.addView(resizeHandleView)
+        
+        container.addView(contentContainer)
+        
+        // ✅ Create handle container as overlay on top of content
+        handleContainer = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            isClickable = false
+            isFocusable = false
+            // Put it on top
+            bringToFront()
+        }
+        container.addView(handleContainer)
 
         return container
     }
@@ -1730,7 +1663,6 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // ✅ Scroll listener: hide handles on scroll start, show with fade on stop
             setOnScrollChangeListener { _, _, _, _, _ ->
                 val currentTime = System.currentTimeMillis()
                 lastScrollTime = currentTime
@@ -1739,29 +1671,23 @@ class FloatingBubbleService : Service() {
                     isScrolling = true
                     EmergencyLog.log("Scrolling started - hiding handles")
                     
-                    // ✅ Hide handles immediately when scrolling starts
                     if (areHandlesVisible) {
                         hideSelectionHandles()
                     }
                     
-                    // Also hide action bar
                     if (editText.hasSelection() && isActionBarVisible) {
                         hideFloatingActionBar()
                         isActionBarTemporarilyHidden = true
                     }
                 }
                 
-                // Cancel previous stop handler
                 scrollStopHandler?.removeCallbacksAndMessages(null)
                 
-                // Set new stop handler
                 scrollStopHandler?.postDelayed({
-                    // Only reset if no new scroll event occurred
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
                         EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
-                        // Update handles and show with smooth transition
                         if (editText.hasSelection()) {
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
@@ -1771,7 +1697,6 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
-                                    // ✅ Show handles with smooth fade-in
                                     showSelectionHandles()
                                 }
                             }
@@ -2013,6 +1938,18 @@ class FloatingBubbleService : Service() {
         contentContainer.addView(resizeHandleView)
         
         container.addView(contentContainer)
+        
+        // ✅ Create handle container as overlay on top of content
+        handleContainer = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            isClickable = false
+            isFocusable = false
+            bringToFront()
+        }
+        container.addView(handleContainer)
         
         noteView?.let { windowManager.removeView(it) }
         noteView = container
