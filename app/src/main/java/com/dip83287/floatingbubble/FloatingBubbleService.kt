@@ -107,6 +107,9 @@ class FloatingBubbleService : Service() {
     
     // Container for handles (inside noteView)
     private var handleContainer: FrameLayout? = null
+    
+    // Handle size constant
+    private val HANDLE_SIZE = 40
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -836,8 +839,6 @@ class FloatingBubbleService : Service() {
     
     // ✅ Create selection handles as child views (not overlay)
     private fun createSelectionHandles(): Pair<View, View> {
-        val handleSize = 40
-        
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createCircleHandleDrawable())
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -1003,8 +1004,7 @@ class FloatingBubbleService : Service() {
             val startY = startYRaw - scrollY + paddingTop + relativeY
             val endY = endYRaw - scrollY + paddingTop + relativeY
 
-            val handleSize = 40
-            val halfHandle = handleSize / 2
+            val halfHandle = HANDLE_SIZE / 2
             val upwardShift = dpToPx(15)
 
             // Update left handle within container
@@ -1012,7 +1012,7 @@ class FloatingBubbleService : Service() {
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (startX - halfHandle).toInt()
-                    params.topMargin = (startY - handleSize - upwardShift).toInt()
+                    params.topMargin = (startY - HANDLE_SIZE - upwardShift).toInt()
                     handle.layoutParams = params
                 }
             }
@@ -1022,7 +1022,7 @@ class FloatingBubbleService : Service() {
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (endX - halfHandle).toInt()
-                    params.topMargin = (endY - handleSize - upwardShift).toInt()
+                    params.topMargin = (endY - HANDLE_SIZE - upwardShift).toInt()
                     handle.layoutParams = params
                 }
             }
@@ -1075,10 +1075,10 @@ class FloatingBubbleService : Service() {
                 
                 // Add handles to container
                 handleContainer?.addView(leftHandleView, FrameLayout.LayoutParams(
-                    handleSize, handleSize
+                    HANDLE_SIZE, HANDLE_SIZE
                 ))
                 handleContainer?.addView(rightHandleView, FrameLayout.LayoutParams(
-                    handleSize, handleSize
+                    HANDLE_SIZE, HANDLE_SIZE
                 ))
                 areHandlesVisible = true
             }
