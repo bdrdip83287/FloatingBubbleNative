@@ -98,14 +98,12 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // ✅ Selection handles as child views of notepad
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
     private var areHandlesVisible = false
     
-    // Container for handles (inside noteView)
     private var handleContainer: FrameLayout? = null
     
     private val HANDLE_SIZE = 40
@@ -705,7 +703,6 @@ class FloatingBubbleService : Service() {
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
                         
-                        // ✅ Reset handle references when note is fully expanded
                         resetHandleReferences()
                     }
                     .start()
@@ -722,7 +719,6 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
-            // ✅ Create handle container as child of noteView
             handleContainer = FrameLayout(this).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -753,7 +749,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Reset handle references when note is recreated
     private fun resetHandleReferences() {
         leftHandleView = null
         rightHandleView = null
@@ -764,7 +759,6 @@ class FloatingBubbleService : Service() {
     private fun collapseToBubble() {
         if (!isExpanded) return
 
-        // Hide handles before collapse
         hideSelectionHandles()
         hideFloatingActionBar()
 
@@ -821,7 +815,6 @@ class FloatingBubbleService : Service() {
                         bubble.setLayerType(View.LAYER_TYPE_NONE, null)
                         note.setLayerType(View.LAYER_TYPE_NONE, null)
                         
-                        // ✅ Reset handle references after collapse
                         resetHandleReferences()
                     }
                     .start()
@@ -849,7 +842,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Create selection handles
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createCircleHandleDrawable())
@@ -872,7 +864,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ Handle Touch Listener
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -906,11 +897,9 @@ class FloatingBubbleService : Service() {
                     val currentLayout = editText.layout
                     
                     if (currentLayout != null) {
-                        // Get location of handle container (notepad)
                         val containerLocation = IntArray(2)
                         handleContainer?.getLocationOnScreen(containerLocation) ?: return true
                         
-                        // Convert touch coordinates relative to handle container
                         val textX = event.rawX - containerLocation[0]
                         val textY = event.rawY - containerLocation[1] + editText.scrollY
                         
@@ -973,14 +962,12 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Update handle positions
     private fun updateHandlePositions() {
         if (isScrolling) return
         
         try {
             val currentLayout = editText.layout ?: return
             if (leftHandleView == null || rightHandleView == null) {
-                // Recreate handles if they were lost
                 recreateHandlesIfNeeded()
                 return
             }
@@ -992,14 +979,12 @@ class FloatingBubbleService : Service() {
                 return
             }
 
-            // Get EditText position relative to handle container
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
             
             val containerLocation = IntArray(2)
             handleContainer?.getLocationOnScreen(containerLocation) ?: return
             
-            // Calculate position relative to container
             val relativeX = editLocation[0] - containerLocation[0]
             val relativeY = editLocation[1] - containerLocation[1]
 
@@ -1014,14 +999,12 @@ class FloatingBubbleService : Service() {
             val startX = startXRaw - scrollX + paddingLeft + relativeX
             val endX = endXRaw - scrollX + paddingLeft + relativeX
             
-            // Use line bottom for Y position
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
             val upwardShift = dpToPx(15)
 
-            // Update left handle
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1035,7 +1018,7 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // Update right handle            rightHandleView?.let { handle ->
+            rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (endX - halfHandle).toInt()
@@ -1053,14 +1036,12 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Recreate handles if they were lost
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
             val handles = createSelectionHandles()
             leftHandleView = handles.first
             rightHandleView = handles.second
             
-            // Remove old handles if they exist in container
             handleContainer?.removeAllViews()
             
             handleContainer?.addView(leftHandleView)
@@ -1068,7 +1049,6 @@ class FloatingBubbleService : Service() {
             areHandlesVisible = true
             EmergencyLog.log("Handles recreated")
             
-            // Update positions
             updateHandlePositionsSafe()
         }
     }
@@ -1101,7 +1081,6 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
-    // ✅ Show handles - ensure they're visible
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1110,13 +1089,11 @@ class FloatingBubbleService : Service() {
                 return
             }
             
-            // Recreate handles if needed
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
                 rightHandleView = handles.second
                 
-                // Clear container and add new handles
                 handleContainer?.removeAllViews()
                 handleContainer?.addView(leftHandleView)
                 handleContainer?.addView(rightHandleView)
@@ -1124,7 +1101,6 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            // Update positions and make visible
             updateHandlePositionsSafe()
             
             leftHandleView?.visibility = View.VISIBLE
@@ -1137,7 +1113,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Hide handles with fade
     private fun hideSelectionHandles() {
         try {
             leftHandleView?.let { handle ->
@@ -1297,7 +1272,6 @@ class FloatingBubbleService : Service() {
         
         floatingActionBar = actionBarView
         
-        // Action bar position
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
         
@@ -1545,7 +1519,6 @@ class FloatingBubbleService : Service() {
         
         container.addView(contentContainer)
         
-        // ✅ Create handle container
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1978,7 +1951,6 @@ class FloatingBubbleService : Service() {
         
         container.addView(contentContainer)
         
-        // ✅ Create handle container
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
