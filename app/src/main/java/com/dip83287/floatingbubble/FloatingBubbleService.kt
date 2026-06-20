@@ -102,6 +102,7 @@ class FloatingBubbleService : Service() {
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
+    private var areHandlesVisible = false
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -111,12 +112,16 @@ class FloatingBubbleService : Service() {
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
     private var handleUpdatePending = false
     
-    // ✅ Scroll state tracking
+    // ✅ Scroll state tracking with handle visibility
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
     
+    // ✅ For smooth handle show animation
+    private var handleShowAnimator: ValueAnimator? = null
+    private var handleFadeAnimator: ValueAnimator? = null
+
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
     private var lastScreenHeight = 0
@@ -934,9 +939,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ Main handle position update - First line checks scrolling state
+    // ✅ Main handle position update - Skip if scrolling
     private fun updateHandlePositions() {
-        // ✅ CRITICAL: Skip if scrolling is active
+        // ✅ Skip if scrolling is active
         if (isScrolling) {
             EmergencyLog.log("updateHandlePositions skipped - scrolling active")
             return
@@ -1068,15 +1073,19 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
+    // ✅ Show handles with smooth fade-in animation
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
-            if (start == end || start < 0 || end < 0) return
+            if (start == end || start < 0 || end < 0 || isScrolling) {
+                return
+            }
             
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
                 rightHandleView = handles.second
+                areHandlesVisible = true
             }
             
             val currentLayout = editText.layout
@@ -1109,6 +1118,7 @@ class FloatingBubbleService : Service() {
             val isLeftInViewport = (leftHandleScreenY + handleSize > viewportTop && leftHandleScreenY < viewportBottom)
             val isRightInViewport = (rightHandleScreenY + handleSize > viewportTop && rightHandleScreenY < viewportBottom)
             
+            // Add left handle with fade-in
             if (leftHandleView?.parent == null && isLeftInViewport) {
                 val leftParams = WindowManager.LayoutParams(
                     handleSize, handleSize,
@@ -1122,10 +1132,17 @@ class FloatingBubbleService : Service() {
                 leftParams.x = (startX - halfHandle).toInt()
                 leftParams.y = (startY - halfHandle - upwardShift).toInt()
                 try {
+                    leftHandleView?.alpha = 0f
                     actionBarWindowManager?.addView(leftHandleView, leftParams)
+                    leftHandleView?.animate()
+                        ?.alpha(1f)
+                        ?.setDuration(200)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.start()
                 } catch (e: Exception) { }
             }
             
+            // Add right handle with fade-in
             if (rightHandleView?.parent == null && isRightInViewport) {
                 val rightParams = WindowManager.LayoutParams(
                     handleSize, handleSize,
@@ -1139,7 +1156,13 @@ class FloatingBubbleService : Service() {
                 rightParams.x = (endX - halfHandle).toInt()
                 rightParams.y = (endY - halfHandle - upwardShift).toInt()
                 try {
+                    rightHandleView?.alpha = 0f
                     actionBarWindowManager?.addView(rightHandleView, rightParams)
+                    rightHandleView?.animate()
+                        ?.alpha(1f)
+                        ?.setDuration(200)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.start()
                 } catch (e: Exception) { }
             }
         } catch (e: Exception) {
@@ -1147,20 +1170,47 @@ class FloatingBubbleService : Service() {
         }
     }
     
+    // ✅ Hide handles with smooth fade-out animation
     private fun hideSelectionHandles() {
         try {
-            leftHandleView?.let {
-                if (it.parent != null) {
-                    actionBarWindowManager?.removeView(it)
+            leftHandleView?.let { handle ->
+                if (handle.parent != null) {
+                    handle.animate()
+                        ?.alpha(0f)
+                        ?.setDuration(150)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.withEndAction {
+                            try {
+                                if (handle.parent != null) {
+                                    actionBarWindowManager?.removeView(handle)
+                                }
+                            } catch (e: Exception) { }
+                        }
+                        ?.start()
                 }
-                leftHandleView = null
             }
-            rightHandleView?.let {
-                if (it.parent != null) {
-                    actionBarWindowManager?.removeView(it)
+            rightHandleView?.let { handle ->
+                if (handle.parent != null) {
+                    handle.animate()
+                        ?.alpha(0f)
+                        ?.setDuration(150)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.withEndAction {
+                            try {
+                                if (handle.parent != null) {
+                                    actionBarWindowManager?.removeView(handle)
+                                }
+                            } catch (e: Exception) { }
+                        }
+                        ?.start()
                 }
-                rightHandleView = null
             }
+            // Clear references after animation
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (leftHandleView?.parent == null) leftHandleView = null
+                if (rightHandleView?.parent == null) rightHandleView = null
+                areHandlesVisible = false
+            }, 200)
         } catch (e: Exception) { }
     }
 
@@ -1680,20 +1730,25 @@ class FloatingBubbleService : Service() {
             isFocusable = false
             isFocusableInTouchMode = false
             
-            // ✅ Scroll listener to track scrolling state
+            // ✅ Scroll listener: hide handles on scroll start, show with fade on stop
             setOnScrollChangeListener { _, _, _, _, _ ->
                 val currentTime = System.currentTimeMillis()
                 lastScrollTime = currentTime
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started")
-                }
-                
-                // Hide action bar during scroll
-                if (editText.hasSelection() && isActionBarVisible) {
-                    hideFloatingActionBar()
-                    isActionBarTemporarilyHidden = true
+                    EmergencyLog.log("Scrolling started - hiding handles")
+                    
+                    // ✅ Hide handles immediately when scrolling starts
+                    if (areHandlesVisible) {
+                        hideSelectionHandles()
+                    }
+                    
+                    // Also hide action bar
+                    if (editText.hasSelection() && isActionBarVisible) {
+                        hideFloatingActionBar()
+                        isActionBarTemporarilyHidden = true
+                    }
                 }
                 
                 // Cancel previous stop handler
@@ -1704,9 +1759,9 @@ class FloatingBubbleService : Service() {
                     // Only reset if no new scroll event occurred
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped, updating handles")
+                        EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
-                        // Update handles after scroll stops
+                        // Update handles and show with smooth transition
                         if (editText.hasSelection()) {
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
@@ -1716,6 +1771,7 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
+                                    // ✅ Show handles with smooth fade-in
                                     showSelectionHandles()
                                 }
                             }
@@ -2017,7 +2073,8 @@ class FloatingBubbleService : Service() {
         
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY            else WindowManager.LayoutParams.TYPE_PHONE,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
