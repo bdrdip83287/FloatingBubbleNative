@@ -956,19 +956,11 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Force immediate handle position update without debounce
-    private fun updateHandlePositionsImmediate() {
-        try {
-            updateHandlePositions()
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositionsImmediate")
-        }
-    }
-    
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
+    // ✅ CORRECTED: Zero-gap handle positioning with exact selection box alignment
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -998,14 +990,17 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
+            // ✅ Exact selection boundary positions
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
+            // ✅ Line bottom for exact selection box bottom
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
+            // ✅ Left handle - zero gap, tight to selection box left boundary
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1017,6 +1012,7 @@ class FloatingBubbleService : Service() {
                 }
             }
             
+            // ✅ Right handle - zero gap, tight to selection box right boundary
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1046,7 +1042,7 @@ class FloatingBubbleService : Service() {
             areHandlesVisible = true
             EmergencyLog.log("Handles recreated")
             
-            updateHandlePositionsImmediate()
+            updateHandlePositionsSafe()
         }
     }
     
@@ -1078,6 +1074,7 @@ class FloatingBubbleService : Service() {
         addTextChangedListener(watcher)
     }
     
+    // ✅ FIXED: Show handles with immediate correct positioning
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1086,6 +1083,7 @@ class FloatingBubbleService : Service() {
                 return
             }
             
+            // Create handles if they don't exist
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
@@ -1099,8 +1097,9 @@ class FloatingBubbleService : Service() {
             }
             
             // ✅ Force immediate position update
-            updateHandlePositionsImmediate()
+            updateHandlePositionsSafe()
             
+            // Make visible
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
             rightHandleView?.visibility = View.VISIBLE
@@ -1544,7 +1543,6 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ FIXED: selectWordAtPosition with immediate handle positioning
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1569,15 +1567,12 @@ class FloatingBubbleService : Service() {
                         val selectedWord = text.substring(wordStart, wordEnd)
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
-                        
-                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
-                        
-                        // ✅ Show handles and force immediate position update
+                        // ✅ Immediately show handles with correct position
                         showSelectionHandles()
-                        updateHandlePositionsImmediate()
-                        
-                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned immediately")
+                        // ✅ Force immediate position update
+                        updateHandlePositionsSafe()
+                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
                 }
             }
@@ -1815,8 +1810,8 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    // ✅ Force immediate position update on touch release
-                                    updateHandlePositionsImmediate()
+                                    // ✅ Force position update after selection
+                                    updateHandlePositionsSafe()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
@@ -1861,8 +1856,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            // ✅ Force immediate position update on text change
-                            updateHandlePositionsImmediate()
+                            updateHandlePositionsSafe()
                         }
                     }
                     
