@@ -98,6 +98,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
+    // Keep custom handles but make them optional
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -730,6 +731,7 @@ class FloatingBubbleService : Service() {
             
             (noteView as? ViewGroup)?.addView(handleContainer)
             
+            // ✅ KEY CHANGE: Removed FLAG_NOT_FOCUSABLE to allow selection handles
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -956,7 +958,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Force immediate handle position update without debounce
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
@@ -1098,7 +1099,6 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            // ✅ Force immediate position update
             updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
@@ -1544,7 +1544,6 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ FIXED: selectWordAtPosition with immediate handle positioning
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1570,10 +1569,7 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
-                        
-                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
@@ -1815,7 +1811,6 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
@@ -1848,6 +1843,9 @@ class FloatingBubbleService : Service() {
                 }
             })
             
+            // ✅ Enable system selection handles by not blocking them
+            // The key change is removing FLAG_NOT_FOCUSABLE from the window params
+            
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 
@@ -1861,7 +1859,6 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            // ✅ Force immediate position update on text change
                             updateHandlePositionsImmediate()
                         }
                     }
@@ -1974,6 +1971,7 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
+        // ✅ KEY CHANGE: Removed FLAG_NOT_FOCUSABLE
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -2028,6 +2026,7 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
+        // ✅ KEY CHANGE: Removed FLAG_NOT_FOCUSABLE
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
