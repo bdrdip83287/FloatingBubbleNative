@@ -183,7 +183,9 @@ class FloatingBubbleService : Service() {
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
                         
-                        if (::editText.isInitialized && editText.hasSelection() && !isScrolling) {
+                        // Check if editText is initialized before using it
+                        if (this@FloatingBubbleService::editText.isInitialized && 
+                            editText.hasSelection() && !isScrolling) {
                             updateHandlePositionsSafe()
                         }
                     }
@@ -1731,7 +1733,7 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // Use TextWatcher to detect selection changes instead of setOnSelectionChangedListener
+            // Use TextWatcher to detect selection changes
             addTextChangedListener(object : TextWatcher {
                 private var prevStart = 0
                 private var prevEnd = 0
