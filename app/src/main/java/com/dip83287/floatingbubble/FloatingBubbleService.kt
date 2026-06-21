@@ -97,7 +97,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // ✅ Custom selection handles
+    // Custom selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -183,7 +183,7 @@ class FloatingBubbleService : Service() {
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
                         
-                        if (editText.hasSelection() && !isScrolling) {
+                        if (::editText.isInitialized && editText.hasSelection() && !isScrolling) {
                             updateHandlePositionsSafe()
                         }
                     }
@@ -824,7 +824,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ Create Android-style selection handle drawable
+    // Create Android-style selection handle drawable
     private fun createHandleDrawable(color: Int): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -849,7 +849,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Create selection handles
+    // Create selection handles
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createHandleDrawable(Color.parseColor("#2196F3")))
@@ -872,7 +872,7 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ Handle touch listener for dragging
+    // Handle touch listener for dragging
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -953,7 +953,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Update handle positions with debounce
+    // Update handle positions with debounce
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
         handleUpdatePending = true
@@ -966,7 +966,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Force immediate handle position update
+    // Force immediate handle position update
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
@@ -975,7 +975,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Update handle positions based on selection
+    // Update handle positions based on selection
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1040,7 +1040,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Recreate handles if needed
+    // Recreate handles if needed
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
             val handles = createSelectionHandles()
@@ -1058,7 +1058,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Show selection handles
+    // Show selection handles
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1079,7 +1079,7 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            // ✅ Force immediate position update
+            // Force immediate position update
             updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
@@ -1092,7 +1092,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Hide selection handles with animation
+    // Hide selection handles with animation
     private fun hideSelectionHandles() {
         try {
             leftHandleView?.let { handle ->
@@ -1526,8 +1526,8 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ selectWordAtPosition with immediate handle positioning
-    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
+    // selectWordAtPosition with immediate handle positioning
+    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout
             if (currentLayout != null) {
@@ -1731,16 +1731,20 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            setOnSelectionChangedListener { _, _ ->
-                if (!isScrolling) {
-                    updateHandlePositionsSafe()
-                }
-            }
-            
+            // Use TextWatcher to detect selection changes instead of setOnSelectionChangedListener
             addTextChangedListener(object : TextWatcher {
+                private var prevStart = 0
+                private var prevEnd = 0
+                
                 override fun afterTextChanged(s: Editable?) {
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
+                    val start = selectionStart
+                    val end = selectionEnd
+                    if (start != prevStart || end != prevEnd) {
+                        prevStart = start
+                        prevEnd = end
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
                     }
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -1768,11 +1772,11 @@ class FloatingBubbleService : Service() {
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
                                 isSelecting = true
-                                selectWordAtPosition(this@apply, x, y, true)
+                                selectWordAtPosition(this@apply, x, y)
                             } else {
                                 val runnable = Runnable {
                                     isSelecting = true
-                                    selectWordAtPosition(this@apply, x, y, true)
+                                    selectWordAtPosition(this@apply, x, y)
                                 }
                                 longPressRunnable = runnable
                                 longPressHandler.postDelayed(runnable, 300)
