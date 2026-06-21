@@ -695,23 +695,46 @@ class FloatingBubbleService : Service() {
             val container = createFullNotePad()
             noteView = container
             
-            // ✅ KEY CHANGE: Removed FLAG_NOT_FOCUSABLE to allow system selection handles
+            // ✅ KEY CHANGE: Use TYPE_PHONE for selection handles to work
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
+                if (Build.VERSION.SDK_INT >= 26) {
+                    // Use TYPE_PHONE on Android 8.0+ for selection handles
+                    // Note: This may require SYSTEM_ALERT_WINDOW permission
+                    WindowManager.LayoutParams.TYPE_PHONE
+                } else {
+                    WindowManager.LayoutParams.TYPE_PHONE
+                },
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
             params.x = notepadPosX
             params.y = notepadPosY
+            params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
             
             windowManager.addView(noteView, params)
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "createAndShowNotePad")
+            // Fallback: Try with TYPE_APPLICATION_OVERLAY if TYPE_PHONE fails
+            try {
+                val params = WindowManager.LayoutParams(
+                    currentNotepadWidth, currentNotepadHeight,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    PixelFormat.TRANSLUCENT
+                )
+                params.gravity = Gravity.TOP or Gravity.START
+                params.x = notepadPosX
+                params.y = notepadPosY
+                windowManager.addView(noteView, params)
+            } catch (e2: Exception) {
+                EmergencyLog.logException(e2, "createAndShowNotePad fallback")
+            }
         }
     }
 
@@ -1549,20 +1572,45 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
-        // ✅ KEY CHANGE: Removed FLAG_NOT_FOCUSABLE
+        // ✅ KEY CHANGE: Use TYPE_PHONE for selection handles to work
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
+            if (Build.VERSION.SDK_INT >= 26) {
+                WindowManager.LayoutParams.TYPE_PHONE
+            } else {
+                WindowManager.LayoutParams.TYPE_PHONE
+            },
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
         params.x = notepadPosX
         params.y = notepadPosY
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         
-        windowManager.addView(noteView, params)
+        try {
+            windowManager.addView(noteView, params)
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "openEditorForNote - TYPE_PHONE failed")
+            // Fallback to TYPE_APPLICATION_OVERLAY
+            try {
+                val fallbackParams = WindowManager.LayoutParams(
+                    currentNotepadWidth, currentNotepadHeight,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    PixelFormat.TRANSLUCENT
+                )
+                fallbackParams.gravity = Gravity.TOP or Gravity.START
+                fallbackParams.x = notepadPosX
+                fallbackParams.y = notepadPosY
+                windowManager.addView(noteView, fallbackParams)
+            } catch (e2: Exception) {
+                EmergencyLog.logException(e2, "openEditorForNote - fallback failed")
+            }
+        }
         
         scrollView.postDelayed({
             editText.isFocusable = true
@@ -1602,20 +1650,44 @@ class FloatingBubbleService : Service() {
         noteView?.let { windowManager.removeView(it) }
         noteView = container
         
-        // ✅ KEY CHANGE: Removed FLAG_NOT_FOCUSABLE
+        // ✅ KEY CHANGE: Use TYPE_PHONE for selection handles to work
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
+            if (Build.VERSION.SDK_INT >= 26) {
+                WindowManager.LayoutParams.TYPE_PHONE
+            } else {
+                WindowManager.LayoutParams.TYPE_PHONE
+            },
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
         params.x = notepadPosX
         params.y = notepadPosY
         
-        windowManager.addView(noteView, params)
+        try {
+            windowManager.addView(noteView, params)
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "showNoteList - TYPE_PHONE failed")
+            // Fallback to TYPE_APPLICATION_OVERLAY
+            try {
+                val fallbackParams = WindowManager.LayoutParams(
+                    currentNotepadWidth, currentNotepadHeight,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    PixelFormat.TRANSLUCENT
+                )
+                fallbackParams.gravity = Gravity.TOP or Gravity.START
+                fallbackParams.x = notepadPosX
+                fallbackParams.y = notepadPosY
+                windowManager.addView(noteView, fallbackParams)
+            } catch (e2: Exception) {
+                EmergencyLog.logException(e2, "showNoteList - fallback failed")
+            }
+        }
     }
 
     private fun updateBubbleCount() {
