@@ -183,7 +183,6 @@ class FloatingBubbleService : Service() {
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
                         
-                        // Check if editText is initialized before using it
                         if (this@FloatingBubbleService::editText.isInitialized && 
                             editText.hasSelection() && !isScrolling) {
                             updateHandlePositionsSafe()
@@ -826,15 +825,14 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ FIXED: Create Android-style selection handle drawable with proper setColor()
     private fun createHandleDrawable(color: Int): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                setColor(color)                // use setter
+                setColor(color)
                 style = Paint.Style.FILL
             }
             private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                setColor(Color.WHITE)          // use setter
+                setColor(Color.WHITE)
                 style = Paint.Style.STROKE
                 strokeWidth = 2f
             }
@@ -851,7 +849,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Create selection handles
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createHandleDrawable(Color.parseColor("#2196F3")))
@@ -874,7 +871,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // Handle touch listener for dragging
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -955,7 +951,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Update handle positions with debounce
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
         handleUpdatePending = true
@@ -968,7 +963,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Force immediate handle position update
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
@@ -977,7 +971,22 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Update handle positions based on selection
+    // ✅ Force update with multiple attempts for proper positioning
+    private fun updateHandlePositionsWithRetry() {
+        // First attempt - immediate
+        updateHandlePositionsImmediate()
+        
+        // Second attempt - after a short delay to ensure layout is complete
+        Handler(Looper.getMainLooper()).postDelayed({
+            updateHandlePositionsImmediate()
+        }, 50)
+        
+        // Third attempt - after layout is definitely complete
+        Handler(Looper.getMainLooper()).postDelayed({
+            updateHandlePositionsImmediate()
+        }, 150)
+    }
+    
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1042,7 +1051,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Recreate handles if needed
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
             val handles = createSelectionHandles()
@@ -1056,11 +1064,13 @@ class FloatingBubbleService : Service() {
             areHandlesVisible = true
             EmergencyLog.log("Handles recreated")
             
-            updateHandlePositionsImmediate()
+            // Force position update after adding views
+            handleContainer?.post {
+                updateHandlePositionsWithRetry()
+            }
         }
     }
     
-    // Show selection handles
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1079,10 +1089,15 @@ class FloatingBubbleService : Service() {
                 handleContainer?.addView(rightHandleView)
                 areHandlesVisible = true
                 EmergencyLog.log("Handles created and added to container")
+                
+                // Post to ensure views are laid out
+                handleContainer?.post {
+                    updateHandlePositionsWithRetry()
+                }
+            } else {
+                // Handles already exist, just update positions
+                updateHandlePositionsWithRetry()
             }
-            
-            // Force immediate position update
-            updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
@@ -1094,7 +1109,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Hide selection handles with animation
     private fun hideSelectionHandles() {
         try {
             leftHandleView?.let { handle ->
@@ -1528,7 +1542,7 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // selectWordAtPosition with immediate handle positioning
+    // ✅ selectWordAtPosition with immediate handle positioning using retry
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout
@@ -1556,9 +1570,10 @@ class FloatingBubbleService : Service() {
                         
                         showFloatingActionBar(selectedWord)
                         showSelectionHandles()
-                        updateHandlePositionsImmediate()
+                        // ✅ Use retry mechanism for immediate positioning
+                        updateHandlePositionsWithRetry()
                         
-                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned immediately")
+                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned with retry")
                     }
                 }
             }
@@ -1733,7 +1748,6 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // Use TextWatcher to detect selection changes
             addTextChangedListener(object : TextWatcher {
                 private var prevStart = 0
                 private var prevEnd = 0
@@ -1800,7 +1814,7 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    updateHandlePositionsImmediate()
+                                    updateHandlePositionsWithRetry()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
@@ -1845,7 +1859,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            updateHandlePositionsImmediate()
+                            updateHandlePositionsWithRetry()
                         }
                     }
                     
