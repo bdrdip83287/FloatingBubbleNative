@@ -97,7 +97,6 @@ class FloatingBubbleService : Service() {
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
     
-    // Custom selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
@@ -183,10 +182,13 @@ class FloatingBubbleService : Service() {
                         lastScreenWidth = currentScreenWidth
                         lastScreenHeight = currentScreenHeight
                         
-                        // Check if editText is initialized before using it
-                        if (this@FloatingBubbleService::editText.isInitialized && 
-                            editText.hasSelection() && !isScrolling) {
-                            updateHandlePositionsSafe()
+                        // ✅ FIX: Properly check if editText is initialized
+                        try {
+                            if (editText.hasSelection() && !isScrolling) {
+                                updateHandlePositionsSafe()
+                            }
+                        } catch (e: Exception) {
+                            // editText not initialized yet, ignore
                         }
                     }
                 } catch (e: Exception) {
@@ -826,7 +828,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // Create Android-style selection handle drawable
     private fun createHandleDrawable(color: Int): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -851,7 +852,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Create selection handles
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createHandleDrawable(Color.parseColor("#2196F3")))
@@ -874,7 +874,6 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // Handle touch listener for dragging
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -955,7 +954,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Update handle positions with debounce
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
         handleUpdatePending = true
@@ -968,7 +966,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Force immediate handle position update
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
@@ -977,7 +974,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Update handle positions based on selection
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1042,7 +1038,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Recreate handles if needed
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
             val handles = createSelectionHandles()
@@ -1060,7 +1055,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Show selection handles
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1081,7 +1075,6 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            // Force immediate position update
             updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
@@ -1094,7 +1087,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // Hide selection handles with animation
     private fun hideSelectionHandles() {
         try {
             leftHandleView?.let { handle ->
@@ -1528,7 +1520,6 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // selectWordAtPosition with immediate handle positioning
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout
@@ -1733,7 +1724,6 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // Use TextWatcher to detect selection changes
             addTextChangedListener(object : TextWatcher {
                 private var prevStart = 0
                 private var prevEnd = 0
