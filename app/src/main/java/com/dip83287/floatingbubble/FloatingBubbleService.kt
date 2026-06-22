@@ -971,20 +971,20 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Force update with multiple attempts for proper positioning
+    // ✅ Updated: Reliable handle positioning using doOnLayout
     private fun updateHandlePositionsWithRetry() {
-        // First attempt - immediate
+        // First try immediately
         updateHandlePositionsImmediate()
         
-        // Second attempt - after a short delay to ensure layout is complete
-        Handler(Looper.getMainLooper()).postDelayed({
+        // Then use doOnLayout to ensure proper positioning after layout
+        handleContainer?.doOnLayout {
             updateHandlePositionsImmediate()
-        }, 50)
+        }
         
-        // Third attempt - after layout is definitely complete
+        // Also schedule a delayed update as fallback
         Handler(Looper.getMainLooper()).postDelayed({
             updateHandlePositionsImmediate()
-        }, 150)
+        }, 100)
     }
     
     private fun updateHandlePositions() {
@@ -1065,7 +1065,7 @@ class FloatingBubbleService : Service() {
             EmergencyLog.log("Handles recreated")
             
             // Force position update after adding views
-            handleContainer?.post {
+            handleContainer?.doOnLayout {
                 updateHandlePositionsWithRetry()
             }
         }
@@ -1090,8 +1090,8 @@ class FloatingBubbleService : Service() {
                 areHandlesVisible = true
                 EmergencyLog.log("Handles created and added to container")
                 
-                // Post to ensure views are laid out
-                handleContainer?.post {
+                // Use doOnLayout for reliable positioning
+                handleContainer?.doOnLayout {
                     updateHandlePositionsWithRetry()
                 }
             } else {
@@ -1542,7 +1542,7 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ selectWordAtPosition with immediate handle positioning using retry
+    // ✅ selectWordAtPosition with immediate handle positioning using doOnLayout
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout
@@ -1570,10 +1570,10 @@ class FloatingBubbleService : Service() {
                         
                         showFloatingActionBar(selectedWord)
                         showSelectionHandles()
-                        // ✅ Use retry mechanism for immediate positioning
+                        // ✅ Use doOnLayout for reliable positioning
                         updateHandlePositionsWithRetry()
                         
-                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned with retry")
+                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
                 }
             }
