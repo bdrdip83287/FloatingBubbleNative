@@ -45,7 +45,7 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val BUBBLE_ICON = "📝"
-    private val BUBBLE_SIZE = 110
+    private val BUBBLE_SIZE = 111
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
