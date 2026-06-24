@@ -13,7 +13,6 @@ import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Color
-import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
@@ -1051,9 +1050,19 @@ class FloatingBubbleService : Service() {
     }
     
     private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
+        // Completely disable system selection handles
         this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
             override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
-                return true
+                // Prevent system selection handles from showing
+                return false
+            }
+            override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?) = false
+            override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?) = false
+            override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
+        })
+        this.setCustomInsertionActionModeCallback(object : android.view.ActionMode.Callback {
+            override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
+                return false
             }
             override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?) = false
             override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?) = false
@@ -1098,8 +1107,18 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            // ✅ Force immediate position update
-            updateHandlePositionsImmediate()
+            // Force layout of handle container before positioning
+            handleContainer?.requestLayout()
+            
+            // First attempt after layout is done
+            handleContainer?.post {
+                updateHandlePositionsImmediate()
+            }
+            
+            // Second attempt after a small delay for safety
+            Handler(Looper.getMainLooper()).postDelayed({
+                updateHandlePositionsImmediate()
+            }, 80)
             
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
@@ -1573,14 +1592,8 @@ class FloatingBubbleService : Service() {
                         // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ Show handles and force immediate position update with multiple attempts
-                        showSelectionHandles()
-                        updateHandlePositionsImmediate()
-                        
-                        // ✅ Additional attempt after a short delay to ensure layout is ready
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            updateHandlePositionsImmediate()
-                        }, 50)
+                        // ✅ Show handles and force immediate position update
+                        showSelectionHandles()  // This now handles layout delays internally
                         
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned immediately")
                     }
