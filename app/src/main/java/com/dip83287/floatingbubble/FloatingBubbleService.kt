@@ -133,9 +133,6 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
-    // ✅ ViewTreeObserver for layout completion
-    private var layoutChangeListener: ViewTreeObserver.OnGlobalLayoutListener? = null
-
     data class NoteItem(
         val id: Long,
         var title: String,
@@ -188,7 +185,7 @@ class FloatingBubbleService : Service() {
                         
                         if (this@FloatingBubbleService::editText.isInitialized && 
                             editText.hasSelection() && !isScrolling) {
-                            scheduleHandleUpdate()
+                            updateHandlePositionsSafe()
                         }
                     }
                 } catch (e: Exception) {
@@ -930,7 +927,7 @@ class FloatingBubbleService : Service() {
                         }
                         
                         if (!isScrolling) {
-                            scheduleHandleUpdate()
+                            updateHandlePositionsSafe()
                         }
                         
                         val (start, end) = getSelection()
@@ -954,134 +951,107 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Schedule handle update with ViewTreeObserver
-    private fun scheduleHandleUpdate() {
-        val container = handleContainer
-        if (container == null) {
-            // If container is null, try direct update
-            updateHandlePositionsDirect()
-            return
-        }
-        
-        // Remove previous listener if any
-        layoutChangeListener?.let {
-            container.viewTreeObserver.removeOnGlobalLayoutListener(it)
-            layoutChangeListener = null
-        }
-        
-        // Create and add new listener
-        val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                // Remove listener after first layout
-                container.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                layoutChangeListener = null
-                
-                // Now update handle positions
-                updateHandlePositionsDirect()
+    private fun updateHandlePositionsSafe() {
+        if (handleUpdatePending) return
+        handleUpdatePending = true
+        handleUpdateDebounceHandler.post {
+            try {
+                updateHandlePositions()
+            } finally {
+                handleUpdatePending = false
             }
         }
-        layoutChangeListener = listener
-        container.viewTreeObserver.addOnGlobalLayoutListener(listener)
-        
-        // Also try immediate update as fallback
-        updateHandlePositionsDirect()
     }
     
-    // ✅ Direct handle position update with exact calculation
-    private fun updateHandlePositionsDirect() {
-        if (isScrolling) return
-        
+    private fun updateHandlePositionsImmediate() {
         try {
-            val currentLayout = editText.layout ?: return
-            
-            // Ensure handles exist
-            if (leftHandleView == null || rightHandleView == null) {
-                recreateHandlesIfNeeded()
-                return
-            }
-            
-            val selectionStart = editText.selectionStart
-            val selectionEnd = editText.selectionEnd
-            
-            if (selectionStart == selectionEnd || selectionStart < 0 || selectionEnd < 0) {
-                hideSelectionHandles()
-                return
-            }
-            
-            // Get EditText position on screen
-            val editLocation = IntArray(2)
-            editText.getLocationOnScreen(editLocation)
-            
-            // Get handle container position on screen
-            val containerLocation = IntArray(2)
-            handleContainer?.getLocationOnScreen(containerLocation) ?: return
-            
-            // Calculate relative offset
-            val offsetX = editLocation[0] - containerLocation[0]
-            val offsetY = editLocation[1] - containerLocation[1]
-            
-            // Get selection bounds with EXACT coordinates
-            val leftLineIndex = currentLayout.getLineForOffset(selectionStart)
-            val rightLineIndex = currentLayout.getLineForOffset(
-                if (selectionEnd > 0) selectionEnd - 1 else selectionEnd
-            )
-            
-            // LEFT HANDLE POSITION (Start of selection)
-            val leftX = currentLayout.getPrimaryHorizontal(selectionStart).toInt() + offsetX
-            val leftLineTop = currentLayout.getLineTop(leftLineIndex)
-            val leftLineBottom = currentLayout.getLineBottom(leftLineIndex)
-            val leftY = ((leftLineTop + leftLineBottom) / 2) + offsetY
-            
-            // RIGHT HANDLE POSITION (End of selection)
-            val rightX = currentLayout.getPrimaryHorizontal(selectionEnd).toInt() + offsetX
-            val rightLineTop = currentLayout.getLineTop(rightLineIndex)
-            val rightLineBottom = currentLayout.getLineBottom(rightLineIndex)
-            val rightY = ((rightLineTop + rightLineBottom) / 2) + offsetY
-            
-            // Update handle positions
-            updateHandleInContainer(leftHandleView!!, leftX, leftY)
-            updateHandleInContainer(rightHandleView!!, rightX, rightY)
-            
-            // Show handles
-            leftHandleView?.visibility = View.VISIBLE
-            leftHandleView?.alpha = 1f
-            rightHandleView?.visibility = View.VISIBLE
-            rightHandleView?.alpha = 1f
-            areHandlesVisible = true
-            
-            EmergencyLog.log("Handles positioned: left=($leftX, $leftY), right=($rightX, $rightY)")
-            
+            updateHandlePositions()
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositionsDirect")
+            EmergencyLog.logException(e, "updateHandlePositionsImmediate")
         }
     }
     
-    // ✅ Update handle in container with exact positioning
+    // ✅ NEW: Update handle in container with exact positioning
     private fun updateHandleInContainer(handle: View, x: Int, y: Int) {
-        val params = handle.layoutParams as FrameLayout.LayoutParams
+        val params = handle.layoutParams as? FrameLayout.LayoutParams ?: return
         params.leftMargin = x - (HANDLE_SIZE / 2)
         params.topMargin = y - (HANDLE_SIZE / 2)
         handle.layoutParams = params
     }
     
-    // ✅ Recreate handles if needed
+    // ✅ NEW: Recreate handles if needed
     private fun recreateHandlesIfNeeded() {
         try {
             val (left, right) = createSelectionHandles()
             leftHandleView = left
             rightHandleView = right
-            
             handleContainer?.let {
                 it.removeAllViews()
                 it.addView(left)
                 it.addView(right)
             }
-            
-            EmergencyLog.log("Selection handles recreated")
-            updateHandlePositionsDirect()
-            
+            updateHandlePositions()
+            EmergencyLog.log("Handles recreated")
         } catch (e: Exception) {
             EmergencyLog.logException(e, "recreateHandlesIfNeeded")
+        }
+    }
+    
+    // ✅ FIXED: Update handle positions with exact coordinates
+    private fun updateHandlePositions() {
+        if (isScrolling) return
+        
+        try {
+            val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) {
+                recreateHandlesIfNeeded()
+                return
+            }
+
+            val (selectionStart, selectionEnd) = getSelection()
+            
+            if (selectionStart == selectionEnd) {
+                hideSelectionHandles()
+                return
+            }
+
+            // ✅ EXACT coordinate calculation
+            val leftLineIndex = currentLayout.getLineForOffset(selectionStart)
+            val rightLineIndex = currentLayout.getLineForOffset(
+                (selectionEnd - 1).coerceAtLeast(selectionStart)
+            )
+
+            // EditText এর screen position পাও
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            val offsetX = editLocation[0]
+            val offsetY = editLocation[1]
+
+            // LEFT HANDLE - Selection শুরু হওয়ার জায়গায়
+            val leftX = currentLayout.getPrimaryHorizontal(selectionStart).toInt() + offsetX
+            val leftLineTop = currentLayout.getLineTop(leftLineIndex)
+            val leftLineBottom = currentLayout.getLineBottom(leftLineIndex)
+            val leftY = ((leftLineTop + leftLineBottom) / 2) + offsetY
+
+            // RIGHT HANDLE - Selection শেষ হওয়ার জায়গায়
+            val rightX = currentLayout.getSecondaryHorizontal(
+                (selectionEnd - 1).coerceAtLeast(selectionStart)
+            ).toInt() + offsetX
+            val rightLineTop = currentLayout.getLineTop(rightLineIndex)
+            val rightLineBottom = currentLayout.getLineBottom(rightLineIndex)
+            val rightY = ((rightLineTop + rightLineBottom) / 2) + offsetY            // Handle update করো
+            updateHandleInContainer(leftHandleView!!, leftX, leftY)
+            updateHandleInContainer(rightHandleView!!, rightX, rightY)
+
+            // Handles দেখাও
+            if (!areHandlesVisible) {
+                showSelectionHandles()
+            }
+
+            EmergencyLog.log("Handles updated: L($leftX,$leftY) R($rightX,$rightY)")
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
         }
     }
     
@@ -1098,8 +1068,8 @@ class FloatingBubbleService : Service() {
                 return
             }
             
-            // Update positions using ViewTreeObserver
-            scheduleHandleUpdate()
+            // Update positions immediately
+            updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
@@ -1545,11 +1515,12 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ selectWordAtPosition with immediate handle positioning
+    // ✅ FIXED: selectWordAtPosition with immediate handle positioning
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout
             if (currentLayout != null) {
+                // Adjust for scroll position
                 val scrollX = editText.scrollX
                 val scrollY = editText.scrollY
                 
@@ -1576,8 +1547,8 @@ class FloatingBubbleService : Service() {
                         
                         showFloatingActionBar(selectedWord)
                         showSelectionHandles()
-                        // ✅ Force immediate position update
-                        scheduleHandleUpdate()
+                        // ✅ Call updateHandlePositionsSafe() which will call updateHandlePositions()
+                        updateHandlePositionsSafe()
                         
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
@@ -1709,7 +1680,7 @@ class FloatingBubbleService : Service() {
                         
                         if (editText.hasSelection()) {
                             // Update handles immediately after scrolling stops
-                            scheduleHandleUpdate()
+                            updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
                                 val selected = editText.text.substring(start, end)
@@ -1766,7 +1737,7 @@ class FloatingBubbleService : Service() {
                         prevStart = start
                         prevEnd = end
                         if (!isScrolling) {
-                            scheduleHandleUpdate()
+                            updateHandlePositionsSafe()
                         }
                     }
                 }
@@ -1821,7 +1792,8 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    scheduleHandleUpdate()
+                                    // ✅ Call updateHandlePositionsSafe()
+                                    updateHandlePositionsSafe()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
@@ -1836,7 +1808,7 @@ class FloatingBubbleService : Service() {
                             if (dx > 20 || dy > 20) {
                                 cancelLongPress()
                                 if (this@apply.hasSelection() && !isScrolling) {
-                                    scheduleHandleUpdate()
+                                    updateHandlePositionsSafe()
                                 }
                             }
                         }
@@ -1866,7 +1838,8 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            scheduleHandleUpdate()
+                            // ✅ Call updateHandlePositionsSafe()
+                            updateHandlePositionsSafe()
                         }
                     }
                     
@@ -2188,13 +2161,6 @@ class FloatingBubbleService : Service() {
         bubbleView?.let { windowManager.removeView(it) }
         noteView?.let { windowManager.removeView(it) }
         deleteZoneView?.let { windowManager.removeView(it) }
-        
-        // Remove layout listener
-        layoutChangeListener?.let {
-            handleContainer?.viewTreeObserver?.removeOnGlobalLayoutListener(it)
-            layoutChangeListener = null
-        }
-        
         hideSelectionHandles()
         hideFloatingActionBar()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
