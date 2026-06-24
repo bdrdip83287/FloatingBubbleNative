@@ -971,15 +971,19 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ NEW: Update handle in container with exact positioning
+    // Update handle in container with exact positioning
     private fun updateHandleInContainer(handle: View, x: Int, y: Int) {
-        val params = handle.layoutParams as? FrameLayout.LayoutParams ?: return
-        params.leftMargin = x - (HANDLE_SIZE / 2)
-        params.topMargin = y - (HANDLE_SIZE / 2)
-        handle.layoutParams = params
+        try {
+            val params = handle.layoutParams as? FrameLayout.LayoutParams ?: return
+            params.leftMargin = x - (HANDLE_SIZE / 2)
+            params.topMargin = y - (HANDLE_SIZE / 2)
+            handle.layoutParams = params
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandleInContainer")
+        }
     }
     
-    // ✅ NEW: Recreate handles if needed
+    // Recreate handles if needed
     private fun recreateHandlesIfNeeded() {
         try {
             val (left, right) = createSelectionHandles()
@@ -997,7 +1001,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ FIXED: Update handle positions with exact coordinates
+    // ✅ FIXED: Update handle positions with exact coordinates - CRASH FIXED
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1008,18 +1012,13 @@ class FloatingBubbleService : Service() {
                 return
             }
 
-            val (selectionStart, selectionEnd) = getSelection()
+            val selectionStart = editText.selectionStart
+            val selectionEnd = editText.selectionEnd
             
-            if (selectionStart == selectionEnd) {
+            if (selectionStart == selectionEnd || selectionStart < 0 || selectionEnd < 0) {
                 hideSelectionHandles()
                 return
             }
-
-            // ✅ EXACT coordinate calculation
-            val leftLineIndex = currentLayout.getLineForOffset(selectionStart)
-            val rightLineIndex = currentLayout.getLineForOffset(
-                (selectionEnd - 1).coerceAtLeast(selectionStart)
-            )
 
             // EditText এর screen position পাও
             val editLocation = IntArray(2)
@@ -1027,19 +1026,30 @@ class FloatingBubbleService : Service() {
             val offsetX = editLocation[0]
             val offsetY = editLocation[1]
 
-            // LEFT HANDLE - Selection শুরু হওয়ার জায়গায়
+            // ✅ LEFT HANDLE - Selection শুরু হওয়ার জায়গায়
+            val leftLineIndex = currentLayout.getLineForOffset(selectionStart)
             val leftX = currentLayout.getPrimaryHorizontal(selectionStart).toInt() + offsetX
             val leftLineTop = currentLayout.getLineTop(leftLineIndex)
             val leftLineBottom = currentLayout.getLineBottom(leftLineIndex)
             val leftY = ((leftLineTop + leftLineBottom) / 2) + offsetY
 
-            // RIGHT HANDLE - Selection শেষ হওয়ার জায়গায়
-            val rightX = currentLayout.getSecondaryHorizontal(
-                (selectionEnd - 1).coerceAtLeast(selectionStart)
-            ).toInt() + offsetX
+            // ✅ RIGHT HANDLE - Selection শেষ হওয়ার জায়গায় (এখন নিরাপদ)
+            val endOffset = if (selectionEnd > 0) selectionEnd - 1 else 0
+            val rightLineIndex = currentLayout.getLineForOffset(endOffset)
+            
+            // getSecondaryHorizontal নিরাপদে ব্যবহার
+            val rightX = try {
+                currentLayout.getSecondaryHorizontal(endOffset).toInt() + offsetX
+            } catch (e: Exception) {
+                // যদি getSecondaryHorizontal fails, তাহলে getPrimaryHorizontal ব্যবহার করো
+                currentLayout.getPrimaryHorizontal(endOffset).toInt() + offsetX
+            }
+            
             val rightLineTop = currentLayout.getLineTop(rightLineIndex)
             val rightLineBottom = currentLayout.getLineBottom(rightLineIndex)
-            val rightY = ((rightLineTop + rightLineBottom) / 2) + offsetY            // Handle update করো
+            val rightY = ((rightLineTop + rightLineBottom) / 2) + offsetY
+
+            // Handle update করো
             updateHandleInContainer(leftHandleView!!, leftX, leftY)
             updateHandleInContainer(rightHandleView!!, rightX, rightY)
 
@@ -1515,12 +1525,11 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ FIXED: selectWordAtPosition with immediate handle positioning
+    // selectWordAtPosition with immediate handle positioning
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout
             if (currentLayout != null) {
-                // Adjust for scroll position
                 val scrollX = editText.scrollX
                 val scrollY = editText.scrollY
                 
@@ -1547,7 +1556,6 @@ class FloatingBubbleService : Service() {
                         
                         showFloatingActionBar(selectedWord)
                         showSelectionHandles()
-                        // ✅ Call updateHandlePositionsSafe() which will call updateHandlePositions()
                         updateHandlePositionsSafe()
                         
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
@@ -1679,7 +1687,6 @@ class FloatingBubbleService : Service() {
                         EmergencyLog.log("Scrolling stopped - showing handles")
                         
                         if (editText.hasSelection()) {
-                            // Update handles immediately after scrolling stops
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
@@ -1792,7 +1799,6 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    // ✅ Call updateHandlePositionsSafe()
                                     updateHandlePositionsSafe()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
@@ -1838,7 +1844,6 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            // ✅ Call updateHandlePositionsSafe()
                             updateHandlePositionsSafe()
                         }
                     }
