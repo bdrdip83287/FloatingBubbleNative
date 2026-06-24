@@ -971,7 +971,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ FIXED: Proper handle positioning with correct offset calculation
+    // ✅ NEW: Update handle positions with retry
     private fun updateHandlePositionsWithRetry() {
         // First attempt - immediate
         updateHandlePositionsImmediate()
@@ -987,96 +987,104 @@ class FloatingBubbleService : Service() {
         }, 100)
     }
     
-    // ✅ FIXED: Correct handle position calculation
+    // ✅ NEW: Update handle in container with exact positioning
+    private fun updateHandleInContainer(handle: View, x: Int, y: Int) {
+        val params = handle.layoutParams as FrameLayout.LayoutParams
+        
+        // Center handle on exact position (handle size is HANDLE_SIZE)
+        params.leftMargin = x - (HANDLE_SIZE / 2)
+        params.topMargin = y - (HANDLE_SIZE / 2)
+        
+        handle.layoutParams = params
+    }
+    
+    // ✅ FIXED: Update handle positions with exact coordinates
     private fun updateHandlePositions() {
         if (isScrolling) return
         
         try {
             val currentLayout = editText.layout ?: return
+            
+            // Ensure handles exist
             if (leftHandleView == null || rightHandleView == null) {
                 recreateHandlesIfNeeded()
                 return
             }
-
-            val start = editText.selectionStart
-            val end = editText.selectionEnd
             
-            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+            val selectionStart = editText.selectionStart
+            val selectionEnd = editText.selectionEnd
+            
+            if (selectionStart == selectionEnd) {
+                hideSelectionHandles()
                 return
             }
-
-            // Get EditText location on screen
+            
+            // Get EditText position on screen
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
             
-            // Get handle container location on screen
+            // Get handle container position on screen
             val containerLocation = IntArray(2)
             handleContainer?.getLocationOnScreen(containerLocation) ?: return
             
-            // Calculate relative position
-            val relativeX = editLocation[0] - containerLocation[0]
-            val relativeY = editLocation[1] - containerLocation[1]
-
-            // Get selection positions
-            val startLine = currentLayout.getLineForOffset(start)
-            val endLine = currentLayout.getLineForOffset(end)
+            // Calculate relative offset
+            val offsetX = editLocation[0] - containerLocation[0]
+            val offsetY = editLocation[1] - containerLocation[1]
             
-            // Get horizontal positions - these already include scroll offset
-            val startX = currentLayout.getPrimaryHorizontal(start)
-            val endX = currentLayout.getPrimaryHorizontal(end)
+            // Get selection bounds with EXACT coordinates
+            val leftLineIndex = currentLayout.getLineForOffset(selectionStart)
+            val rightLineIndex = currentLayout.getLineForOffset(selectionEnd - 1)
             
-            // Get vertical positions at line bottom
-            val startY = currentLayout.getLineBottom(startLine)
-            val endY = currentLayout.getLineBottom(endLine)
-
-            val halfHandle = HANDLE_SIZE / 2
-
-            // Position left handle at the start of selection
-            leftHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    params.leftMargin = (relativeX + startX - halfHandle).toInt()
-                    params.topMargin = (relativeY + startY - HANDLE_SIZE).toInt()
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                }
+            // LEFT HANDLE POSITION (Start of selection)
+            val leftX = currentLayout.getPrimaryHorizontal(selectionStart).toInt() + offsetX
+            val leftLineTop = currentLayout.getLineTop(leftLineIndex)
+            val leftLineBottom = currentLayout.getLineBottom(leftLineIndex)
+            val leftY = ((leftLineTop + leftLineBottom) / 2) + offsetY
+            
+            // RIGHT HANDLE POSITION (End of selection)
+            val rightX = currentLayout.getSecondaryHorizontal(selectionEnd - 1).toInt() + offsetX
+            val rightLineTop = currentLayout.getLineTop(rightLineIndex)
+            val rightLineBottom = currentLayout.getLineBottom(rightLineIndex)
+            val rightY = ((rightLineTop + rightLineBottom) / 2) + offsetY
+            
+            // Update handle positions in FrameLayout
+            updateHandleInContainer(leftHandleView!!, leftX, leftY)
+            updateHandleInContainer(rightHandleView!!, rightX, rightY)
+            
+            // Show handles
+            if (leftHandleView?.visibility != View.VISIBLE) {
+                leftHandleView?.visibility = View.VISIBLE
             }
-            
-            // Position right handle at the end of selection
-            rightHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    params.leftMargin = (relativeX + endX - halfHandle).toInt()
-                    params.topMargin = (relativeY + endY - HANDLE_SIZE).toInt()
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                }
+            if (rightHandleView?.visibility != View.VISIBLE) {
+                rightHandleView?.visibility = View.VISIBLE
             }
+            areHandlesVisible = true
+            
+            EmergencyLog.log("Handles positioned: left=($leftX, $leftY), right=($rightX, $rightY)")
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
         }
     }
     
+    // ✅ NEW: Recreate handles if needed
     private fun recreateHandlesIfNeeded() {
-        if (leftHandleView == null || rightHandleView == null) {
-            val handles = createSelectionHandles()
-            leftHandleView = handles.first
-            rightHandleView = handles.second
+        try {
+            val (left, right) = createSelectionHandles()
+            leftHandleView = left
+            rightHandleView = right
             
-            handleContainer?.removeAllViews()
-            
-            handleContainer?.addView(leftHandleView)
-            handleContainer?.addView(rightHandleView)
-            areHandlesVisible = true
-            EmergencyLog.log("Handles recreated")
-            
-            // Force position update after views are added and laid out
-            handleContainer?.post {
-                updateHandlePositionsWithRetry()
+            handleContainer?.let {
+                it.removeAllViews()
+                it.addView(left)
+                it.addView(right)
             }
+            
+            EmergencyLog.log("Selection handles recreated")
+            updateHandlePositions()
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "recreateHandlesIfNeeded")
         }
     }
     
@@ -1089,29 +1097,18 @@ class FloatingBubbleService : Service() {
             }
             
             if (leftHandleView == null || rightHandleView == null) {
-                val handles = createSelectionHandles()
-                leftHandleView = handles.first
-                rightHandleView = handles.second
-                
-                handleContainer?.removeAllViews()
-                handleContainer?.addView(leftHandleView)
-                handleContainer?.addView(rightHandleView)
-                areHandlesVisible = true
-                EmergencyLog.log("Handles created and added to container")
-                
-                // Post to ensure views are laid out
-                handleContainer?.post {
-                    updateHandlePositionsWithRetry()
-                }
-            } else {
-                // Handles already exist, just update positions
-                updateHandlePositionsWithRetry()
+                recreateHandlesIfNeeded()
+                return
             }
+            
+            // Update positions immediately
+            updateHandlePositionsWithRetry()
             
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
             rightHandleView?.visibility = View.VISIBLE
             rightHandleView?.alpha = 1f
+            areHandlesVisible = true
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -1583,7 +1580,7 @@ class FloatingBubbleService : Service() {
                         
                         showFloatingActionBar(selectedWord)
                         showSelectionHandles()
-                        // Force immediate position update
+                        // ✅ Force immediate position update with retry
                         updateHandlePositionsWithRetry()
                         
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
@@ -1828,6 +1825,7 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    // ✅ Force immediate position update with retry
                                     updateHandlePositionsWithRetry()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
@@ -1873,6 +1871,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            // ✅ Force immediate position update with retry
                             updateHandlePositionsWithRetry()
                         }
                     }
