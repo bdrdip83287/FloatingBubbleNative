@@ -100,6 +100,8 @@ class FloatingBubbleService : Service() {
     // Custom selection handles
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
+    private var isDraggingLeftHandle = false
+    private var isDraggingRightHandle = false
     private var areHandlesVisible = false
     
     private var handleContainer: FrameLayout? = null
@@ -183,7 +185,7 @@ class FloatingBubbleService : Service() {
                         
                         if (this@FloatingBubbleService::editText.isInitialized && 
                             editText.hasSelection() && !isScrolling) {
-                            scheduleHandleUpdate()
+                            updateHandlePositionsSafe()
                         }
                     }
                 } catch (e: Exception) {
@@ -852,6 +854,7 @@ class FloatingBubbleService : Service() {
             setImageDrawable(createHandleDrawable(Color.parseColor("#2196F3")))
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
+            setOnTouchListener(HandleTouchListener(isLeft = true))
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE)
         }
@@ -860,6 +863,7 @@ class FloatingBubbleService : Service() {
             setImageDrawable(createHandleDrawable(Color.parseColor("#2196F3")))
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
+            setOnTouchListener(HandleTouchListener(isLeft = false))
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE)
         }
@@ -867,99 +871,212 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ Schedule handle update with proper timing
-    private fun scheduleHandleUpdate() {
-        // Cancel any pending updates
-        handleUpdateDebounceHandler.removeCallbacksAndMessages(null)
-        handleUpdatePending = false
+    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
+        private var initialTouchX = 0f
+        private var initialSelectionStart = 0
+        private var initialSelectionEnd = 0
+        private var lastUpdateTime = 0L
         
-        // Post with small delay to ensure layout is complete
-        handleUpdateDebounceHandler.postDelayed({
-            if (!isScrolling) {
-                updateHandlePositions()
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialTouchX = event.rawX
+                    initialSelectionStart = editText.selectionStart
+                    initialSelectionEnd = editText.selectionEnd
+                    lastUpdateTime = System.currentTimeMillis()
+                    
+                    if (isLeft) {
+                        isDraggingLeftHandle = true
+                    } else {
+                        isDraggingRightHandle = true
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastUpdateTime < 16) {
+                        return true
+                    }
+                    lastUpdateTime = currentTime
+                    
+                    val currentLayout = editText.layout
+                    
+                    if (currentLayout != null) {
+                        val editLocation = IntArray(2)
+                        editText.getLocationOnScreen(editLocation)
+                        
+                        val textX = event.rawX - editLocation[0] + editText.scrollX
+                        val textY = event.rawY - editLocation[1] + editText.scrollY
+                        
+                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
+                        val newOffset = offset.coerceIn(0, editText.text.length)
+                        
+                        if (isLeft) {
+                            if (newOffset < initialSelectionEnd) {
+                                editText.setSelection(newOffset, initialSelectionEnd)
+                            } else {
+                                editText.setSelection(initialSelectionEnd, newOffset)
+                            }
+                        } else {
+                            if (newOffset > initialSelectionStart) {
+                                editText.setSelection(initialSelectionStart, newOffset)
+                            } else {
+                                editText.setSelection(newOffset, initialSelectionStart)
+                            }
+                        }
+                        
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
+                        
+                        val (start, end) = getSelection()
+                        if (start != end && start >= 0 && end <= editText.text.length) {
+                            val selected = editText.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
+                            }
+                        }
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    return true
+                }
             }
-        }, 50)
-    }
-    
-    // ✅ Force immediate handle update
-    private fun updateHandlePositionsImmediate() {
-        if (!isScrolling) {
-            updateHandlePositions()
+            return false
         }
     }
     
-    private fun updateHandlePositions() {
+    private fun updateHandlePositionsSafe() {
+        if (handleUpdatePending) return
+        handleUpdatePending = true
+        handleUpdateDebounceHandler.post {
+            try {
+                updateHandlePositions()
+            } finally {
+                handleUpdatePending = false
+            }
+        }
+    }
+    
+    private fun updateHandlePositionsImmediate() {
         try {
-            val currentLayout = editText.layout
-            if (currentLayout == null) return
-            
+            updateHandlePositions()
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositionsImmediate")
+        }
+    }
+    
+    // ✅ FIXED: Proper handle positioning with correct offset calculation
+    private fun updateHandlePositionsWithRetry() {
+        // First attempt - immediate
+        updateHandlePositionsImmediate()
+        
+        // Second attempt - after layout is complete
+        handleContainer?.post {
+            updateHandlePositionsImmediate()
+        }
+        
+        // Third attempt - after a short delay
+        Handler(Looper.getMainLooper()).postDelayed({
+            updateHandlePositionsImmediate()
+        }, 100)
+    }
+    
+    // ✅ FIXED: Correct handle position calculation
+    private fun updateHandlePositions() {
+        if (isScrolling) return
+        
+        try {
+            val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) {
+                recreateHandlesIfNeeded()
+                return
+            }
+
             val start = editText.selectionStart
             val end = editText.selectionEnd
             
-            if (start == end || start < 0 || end < 0 || 
-                start > editText.text.length || end > editText.text.length) {
-                hideSelectionHandles()
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
                 return
             }
-            
-            // Create handles if they don't exist
-            if (leftHandleView == null || rightHandleView == null) {
-                val handles = createSelectionHandles()
-                leftHandleView = handles.first
-                rightHandleView = handles.second
-                
-                handleContainer?.removeAllViews()
-                handleContainer?.addView(leftHandleView)
-                handleContainer?.addView(rightHandleView)
-                areHandlesVisible = true
-            }
 
+            // Get EditText location on screen
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
             
+            // Get handle container location on screen
             val containerLocation = IntArray(2)
             handleContainer?.getLocationOnScreen(containerLocation) ?: return
             
+            // Calculate relative position
             val relativeX = editLocation[0] - containerLocation[0]
             val relativeY = editLocation[1] - containerLocation[1]
 
+            // Get selection positions
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
-            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
+            // Get horizontal positions - these already include scroll offset
+            val startX = currentLayout.getPrimaryHorizontal(start)
+            val endX = currentLayout.getPrimaryHorizontal(end)
             
-            val startY = currentLayout.getLineBottom(startLine) + relativeY
-            val endY = currentLayout.getLineBottom(endLine) + relativeY
+            // Get vertical positions at line bottom
+            val startY = currentLayout.getLineBottom(startLine)
+            val endY = currentLayout.getLineBottom(endLine)
 
             val halfHandle = HANDLE_SIZE / 2
 
+            // Position left handle at the start of selection
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    params.leftMargin = (startX - halfHandle).toInt()
-                    params.topMargin = (startY - HANDLE_SIZE).toInt()
+                    params.leftMargin = (relativeX + startX - halfHandle).toInt()
+                    params.topMargin = (relativeY + startY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
                 }
             }
             
+            // Position right handle at the end of selection
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    params.leftMargin = (endX - halfHandle).toInt()
-                    params.topMargin = (endY - HANDLE_SIZE).toInt()
+                    params.leftMargin = (relativeX + endX - halfHandle).toInt()
+                    params.topMargin = (relativeY + endY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
                 }
             }
             
-            areHandlesVisible = true
-            
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
+        }
+    }
+    
+    private fun recreateHandlesIfNeeded() {
+        if (leftHandleView == null || rightHandleView == null) {
+            val handles = createSelectionHandles()
+            leftHandleView = handles.first
+            rightHandleView = handles.second
+            
+            handleContainer?.removeAllViews()
+            
+            handleContainer?.addView(leftHandleView)
+            handleContainer?.addView(rightHandleView)
+            areHandlesVisible = true
+            EmergencyLog.log("Handles recreated")
+            
+            // Force position update after views are added and laid out
+            handleContainer?.post {
+                updateHandlePositionsWithRetry()
+            }
         }
     }
     
@@ -971,7 +1088,6 @@ class FloatingBubbleService : Service() {
                 return
             }
             
-            // Make sure handles exist
             if (leftHandleView == null || rightHandleView == null) {
                 val handles = createSelectionHandles()
                 leftHandleView = handles.first
@@ -981,26 +1097,21 @@ class FloatingBubbleService : Service() {
                 handleContainer?.addView(leftHandleView)
                 handleContainer?.addView(rightHandleView)
                 areHandlesVisible = true
+                EmergencyLog.log("Handles created and added to container")
+                
+                // Post to ensure views are laid out
+                handleContainer?.post {
+                    updateHandlePositionsWithRetry()
+                }
+            } else {
+                // Handles already exist, just update positions
+                updateHandlePositionsWithRetry()
             }
             
-            // Show handles with animation
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
             rightHandleView?.visibility = View.VISIBLE
             rightHandleView?.alpha = 1f
-            
-            // ✅ CRITICAL: Update positions immediately and then again after layout
-            updateHandlePositionsImmediate()
-            
-            // Schedule another update after layout completes
-            handleContainer?.post {
-                updateHandlePositionsImmediate()
-            }
-            
-            // One more delayed update for safety
-            Handler(Looper.getMainLooper()).postDelayed({
-                updateHandlePositionsImmediate()
-            }, 100)
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -1440,13 +1551,17 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ selectWordAtPosition with proper handle positioning
+    // ✅ FIXED: selectWordAtPosition with immediate handle positioning
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float) {
         try {
             val currentLayout = editText.layout
             if (currentLayout != null) {
-                val line = currentLayout.getLineForVertical(editText.scrollY + y.toInt())
-                val offset = currentLayout.getOffsetForHorizontal(line, x)
+                // Adjust for scroll position
+                val scrollX = editText.scrollX
+                val scrollY = editText.scrollY
+                
+                val line = currentLayout.getLineForVertical(scrollY + y.toInt())
+                val offset = currentLayout.getOffsetForHorizontal(line, scrollX + x)
                 
                 val text = editText.text.toString()
                 if (offset >= 0 && offset <= text.length) {
@@ -1466,23 +1581,10 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // Show action bar
                         showFloatingActionBar(selectedWord)
-                        
-                        // ✅ CRITICAL: Show handles and update positions immediately
                         showSelectionHandles()
-                        
-                        // Force immediate update
-                        updateHandlePositionsImmediate()
-                        
-                        // Schedule additional updates
-                        handleContainer?.post {
-                            updateHandlePositionsImmediate()
-                        }
-                        
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            updateHandlePositionsImmediate()
-                        }, 50)
+                        // Force immediate position update
+                        updateHandlePositionsWithRetry()
                         
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset")
                     }
@@ -1613,6 +1715,8 @@ class FloatingBubbleService : Service() {
                         EmergencyLog.log("Scrolling stopped - showing handles")
                         
                         if (editText.hasSelection()) {
+                            // Update handles immediately after scrolling stops
+                            updateHandlePositionsWithRetry()
                             val (start, end) = getSelection()
                             if (start != end) {
                                 val selected = editText.text.substring(start, end)
@@ -1658,7 +1762,6 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ Listen for selection changes
             addTextChangedListener(object : TextWatcher {
                 private var prevStart = 0
                 private var prevEnd = 0
@@ -1669,8 +1772,8 @@ class FloatingBubbleService : Service() {
                     if (start != prevStart || end != prevEnd) {
                         prevStart = start
                         prevEnd = end
-                        if (!isScrolling && hasSelection()) {
-                            scheduleHandleUpdate()
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
                         }
                     }
                 }
@@ -1695,7 +1798,6 @@ class FloatingBubbleService : Service() {
                             
                             cancelLongPress()
                             
-                            // Double tap detection
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
@@ -1726,6 +1828,7 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    updateHandlePositionsWithRetry()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
@@ -1740,7 +1843,7 @@ class FloatingBubbleService : Service() {
                             if (dx > 20 || dy > 20) {
                                 cancelLongPress()
                                 if (this@apply.hasSelection() && !isScrolling) {
-                                    scheduleHandleUpdate()
+                                    updateHandlePositionsSafe()
                                 }
                             }
                         }
@@ -1770,6 +1873,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            updateHandlePositionsWithRetry()
                         }
                     }
                     
