@@ -93,39 +93,38 @@ class FloatingBubbleService : Service() {
     private var velocityTracker: VelocityTracker? = null
     private var velocityY = 0f
 
+    // ============ ACTION BAR ============
     private var floatingActionBar: View? = null
     private var isActionBarVisible = false
     private var actionBarWindowManager: WindowManager? = null
-    
+    private var isActionBarTemporarilyHidden = false
+    private var currentSelectedText = ""
+
+    // ============ SELECTION HANDLES ============
     private var leftHandleView: View? = null
     private var rightHandleView: View? = null
     private var isDraggingLeftHandle = false
     private var isDraggingRightHandle = false
     private var areHandlesVisible = false
-    
     private var handleContainer: FrameLayout? = null
-    
     private val HANDLE_SIZE = 48
 
+    // ============ SCROLL HANDLING ============
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
-    private var isActionBarTemporarilyHidden = false
-    private var currentSelectedText = ""
-
-    private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
-    private var handleUpdatePending = false
-    
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
 
+    // ============ CONFIGURATION ============
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
     private var lastScreenHeight = 0
     private val configCheckHandler = Handler(Looper.getMainLooper())
     private var configCheckRunnable: Runnable? = null
 
+    // ============ NOTES ============
     private val notesList = mutableListOf<NoteItem>()
     private lateinit var notesAdapter: NoteAdapter
     private lateinit var recyclerView: RecyclerView
@@ -183,7 +182,7 @@ class FloatingBubbleService : Service() {
                         lastScreenHeight = currentScreenHeight
                         
                         if (editText.hasSelection() && !isScrolling) {
-                            updateHandlePositionsSafe()
+                            updateHandlePositionsImmediate()
                         }
                     }
                 } catch (e: Exception) {
@@ -823,6 +822,10 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ============================================================
+    // ============ SELECTION HANDLES IMPLEMENTATION ============
+    // ============================================================
+    
     private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -919,7 +922,7 @@ class FloatingBubbleService : Service() {
                         }
                         
                         if (!isScrolling) {
-                            updateHandlePositionsSafe()
+                            updateHandlePositionsImmediate()
                         }
                         
                         val (start, end) = getSelection()
@@ -943,29 +946,13 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    private fun updateHandlePositionsSafe() {
-        if (handleUpdatePending) return
-        handleUpdatePending = true
-        handleUpdateDebounceHandler.post {
-            try {
-                updateHandlePositions()
-            } finally {
-                handleUpdatePending = false
-            }
-        }
-    }
-    
-    // ✅ Force immediate handle position update without debounce
+    // ✅ IMMEDIATE handle position update - NO DEBOUNCE
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositionsImmediate")
         }
-    }
-    
-    private fun dpToPx(dp: Int): Int {
-        return (dp * resources.displayMetrics.density).toInt()
     }
     
     private fun updateHandlePositions() {
@@ -1049,44 +1036,7 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    private fun EditText.setOnSelectionChangedListener(callback: (selStart: Int, selEnd: Int) -> Unit) {
-        // Completely disable system selection handles
-        this.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
-            override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
-                // Prevent system selection handles from showing
-                return false
-            }
-            override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?) = false
-            override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?) = false
-            override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
-        })
-        this.setCustomInsertionActionModeCallback(object : android.view.ActionMode.Callback {
-            override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
-                return false
-            }
-            override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?) = false
-            override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?) = false
-            override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
-        })
-        
-        val watcher = object : TextWatcher {
-            private var prevStart = 0
-            private var prevEnd = 0
-            override fun afterTextChanged(s: Editable?) {
-                val start = selectionStart
-                val end = selectionEnd
-                if (start != prevStart || end != prevEnd) {
-                    prevStart = start
-                    prevEnd = end
-                    callback(start, end)
-                }
-            }
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-        }
-        addTextChangedListener(watcher)
-    }
-    
+    // ✅ SHOW handles with immediate positioning
     private fun showSelectionHandles() {
         try {
             val (start, end) = getSelection()
@@ -1107,23 +1057,19 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            // Force layout of handle container before positioning
-            handleContainer?.requestLayout()
+            // ✅ CRITICAL: Force immediate position update
+            updateHandlePositionsImmediate()
             
-            // First attempt after layout is done
-            handleContainer?.post {
-                updateHandlePositionsImmediate()
-            }
-            
-            // Second attempt after a small delay for safety
-            Handler(Looper.getMainLooper()).postDelayed({
-                updateHandlePositionsImmediate()
-            }, 80)
-            
+            // Make handles visible
             leftHandleView?.visibility = View.VISIBLE
             leftHandleView?.alpha = 1f
             rightHandleView?.visibility = View.VISIBLE
             rightHandleView?.alpha = 1f
+            
+            // ✅ Extra update after layout is complete
+            handleContainer?.post {
+                updateHandlePositionsImmediate()
+            }
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -1155,6 +1101,10 @@ class FloatingBubbleService : Service() {
             areHandlesVisible = false
         } catch (e: Exception) { }
     }
+
+    // ============================================================
+    // ============ ACTION BAR IMPLEMENTATION ============
+    // ============================================================
 
     private fun showFloatingActionBar(selectedText: String) {
         if (!isExpanded) return
@@ -1412,6 +1362,14 @@ class FloatingBubbleService : Service() {
         return Pair(editText.selectionStart, editText.selectionEnd)
     }
 
+    private fun EditText.hasSelection(): Boolean {
+        return selectionStart != selectionEnd
+    }
+
+    // ============================================================
+    // ============ NOTE PAD UI ============
+    // ============================================================
+
     private fun createFullNotePad(): View {
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -1589,11 +1547,20 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // ✅ Show action bar immediately
+                        // ✅ Show action bar
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ Show handles and force immediate position update
-                        showSelectionHandles()  // This now handles layout delays internally
+                        // ✅ CRITICAL: Show handles and force immediate position update
+                        showSelectionHandles()
+                        
+                        // ✅ Multiple update attempts to ensure correct positioning
+                        updateHandlePositionsImmediate()
+                        handleContainer?.post {
+                            updateHandlePositionsImmediate()
+                        }
+                        handleContainer?.postDelayed({
+                            updateHandlePositionsImmediate()
+                        }, 50)
                         
                         EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned immediately")
                     }
@@ -1724,7 +1691,6 @@ class FloatingBubbleService : Service() {
                         EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
                         if (editText.hasSelection()) {
-                            updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
                                 val selected = editText.text.substring(start, end)
@@ -1769,22 +1735,6 @@ class FloatingBubbleService : Service() {
             isCursorVisible = true
             isFocusable = true
             isFocusableInTouchMode = true
-            
-            setOnSelectionChangedListener { _, _ ->
-                if (!isScrolling) {
-                    updateHandlePositionsSafe()
-                }
-            }
-            
-            addTextChangedListener(object : TextWatcher {
-                override fun afterTextChanged(s: Editable?) {
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
-                    }
-                }
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            })
             
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
@@ -1833,8 +1783,6 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    // ✅ Force immediate position update on touch release
-                                    updateHandlePositionsImmediate()
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
@@ -1849,7 +1797,7 @@ class FloatingBubbleService : Service() {
                             if (dx > 20 || dy > 20) {
                                 cancelLongPress()
                                 if (this@apply.hasSelection() && !isScrolling) {
-                                    updateHandlePositionsSafe()
+                                    updateHandlePositionsImmediate()
                                 }
                             }
                         }
@@ -1879,8 +1827,6 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            // ✅ Force immediate position update on text change
-                            updateHandlePositionsImmediate()
                         }
                     }
                     
@@ -2014,10 +1960,6 @@ class FloatingBubbleService : Service() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
         }, 300)
-    }
-
-    private fun EditText.hasSelection(): Boolean {
-        return selectionStart != selectionEnd
     }
 
     private fun saveCurrentNote(noteId: Long) {
