@@ -1545,34 +1545,23 @@ class FloatingBubbleService : Service() {
     }
 
     /**
-     * ✅ Enhanced word selection that handles:
-     * - Bengali characters (Unicode)
-     * - English letters
-     * - Dots (.) in package names
-     * - Underscores (_)
-     * - Hyphens (-)
-     * - Any other word characters
+     * ✅ Enhanced isWordChar - supports Bengali, English, dots, underscores, etc.
      */
     private fun isWordChar(char: Char): Boolean {
-        return Character.isLetterOrDigit(char) ||
-               char == '.' ||
-               char == '_' ||
-               char == '-' ||
-               char == '@' ||
-               char == '#' ||
-               char == '$' ||
-               char == '%' ||
-               char == '&' ||
-               char == '*' ||
-               char == '+' ||
-               char == '=' ||
-               char == '~' ||
-               char == ':' ||
-               char == '/' ||
-               char == '\\'
+        // Check if it's a Bengali character (Unicode range: 0980-09FF)
+        val isBengali = char in '\u0980'..'\u09FF'
+        // Check if it's a letter or digit (includes all Unicode letters like Bengali)
+        val isLetterOrDigit = Character.isLetterOrDigit(char)
+        // Check for special characters commonly used in identifiers
+        val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
+                       char == '#' || char == '$' || char == '%' || char == '&' ||
+                       char == '*' || char == '+' || char == '=' || char == '~' ||
+                       char == ':' || char == '/' || char == '\\'
+        
+        return isBengali || isLetterOrDigit || isSpecial
     }
 
-    // ✅ FIXED: selectWordAtPosition with improved word boundary detection
+    // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1585,17 +1574,17 @@ class FloatingBubbleService : Service() {
                     var wordStart = offset
                     var wordEnd = offset
                     
-                    // 🔥 EXTEND LEFT: include all word characters
+                    // EXTEND LEFT: include all word characters
                     while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
                     
-                    // 🔥 EXTEND RIGHT: include all word characters
+                    // EXTEND RIGHT: include all word characters
                     while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
                     }
                     
-                    // If nothing was selected (e.g., cursor on a space), try to select nearby word
+                    // If nothing was selected (e.g., cursor on a space), try to find nearby word
                     if (wordStart == wordEnd) {
                         // Try to find word to the left
                         var tempStart = offset - 1
@@ -1624,10 +1613,14 @@ class FloatingBubbleService : Service() {
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
-                        // ✅ Additional attempt after a short delay to ensure layout is ready
+                        // ✅ Multiple attempts to ensure handles are positioned correctly
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 50)
+                        
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            updateHandlePositionsImmediate()
+                        }, 150)
                         
                         EmergencyLog.log("Selected: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
                     }
@@ -1869,6 +1862,10 @@ class FloatingBubbleService : Service() {
                                     showSelectionHandles()
                                     // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
+                                    // ✅ Additional attempts
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        updateHandlePositionsImmediate()
+                                    }, 50)
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
