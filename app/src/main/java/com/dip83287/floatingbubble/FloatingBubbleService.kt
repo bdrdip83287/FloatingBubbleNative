@@ -1544,7 +1544,35 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    // ✅ FIXED: selectWordAtPosition with immediate handle positioning
+    /**
+     * ✅ Enhanced word selection that handles:
+     * - Bengali characters (Unicode)
+     * - English letters
+     * - Dots (.) in package names
+     * - Underscores (_)
+     * - Hyphens (-)
+     * - Any other word characters
+     */
+    private fun isWordChar(char: Char): Boolean {
+        return Character.isLetterOrDigit(char) ||
+               char == '.' ||
+               char == '_' ||
+               char == '-' ||
+               char == '@' ||
+               char == '#' ||
+               char == '$' ||
+               char == '%' ||
+               char == '&' ||
+               char == '*' ||
+               char == '+' ||
+               char == '=' ||
+               char == '~' ||
+               char == ':' ||
+               char == '/' ||
+               char == '\\'
+    }
+
+    // ✅ FIXED: selectWordAtPosition with improved word boundary detection
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1557,11 +1585,30 @@ class FloatingBubbleService : Service() {
                     var wordStart = offset
                     var wordEnd = offset
                     
-                    while (wordStart > 0 && text[wordStart - 1].isLetterOrDigit()) {
+                    // 🔥 EXTEND LEFT: include all word characters
+                    while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
-                    while (wordEnd < text.length && text[wordEnd].isLetterOrDigit()) {
+                    
+                    // 🔥 EXTEND RIGHT: include all word characters
+                    while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
+                    }
+                    
+                    // If nothing was selected (e.g., cursor on a space), try to select nearby word
+                    if (wordStart == wordEnd) {
+                        // Try to find word to the left
+                        var tempStart = offset - 1
+                        while (tempStart >= 0 && isWordChar(text[tempStart])) {
+                            tempStart--
+                        }
+                        wordStart = tempStart + 1
+                        
+                        var tempEnd = offset
+                        while (tempEnd < text.length && isWordChar(text[tempEnd])) {
+                            tempEnd++
+                        }
+                        wordEnd = tempEnd
                     }
                     
                     if (wordStart < wordEnd) {
@@ -1573,7 +1620,7 @@ class FloatingBubbleService : Service() {
                         // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ Show handles and force immediate position update with multiple attempts
+                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
@@ -1582,7 +1629,7 @@ class FloatingBubbleService : Service() {
                             updateHandlePositionsImmediate()
                         }, 50)
                         
-                        EmergencyLog.log("Selected word: '$selectedWord' at offset $offset - handles positioned immediately")
+                        EmergencyLog.log("Selected: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
                     }
                 }
             }
