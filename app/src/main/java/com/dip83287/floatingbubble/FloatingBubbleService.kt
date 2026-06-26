@@ -106,7 +106,7 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
-    private val HANDLE_SIZE = 48
+    private val HANDLE_SIZE = 38
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -1548,18 +1548,29 @@ class FloatingBubbleService : Service() {
      * ✅ Enhanced isWordChar - supports Bengali, English, dots, underscores, etc.
      */
     private fun isWordChar(char: Char): Boolean {
-        // Check if it's a Bengali character (Unicode range: 0980-09FF)
-        val isBengali = char in '\u0980'..'\u09FF'
-        // Check if it's a letter or digit (includes all Unicode letters like Bengali)
-        val isLetterOrDigit = Character.isLetterOrDigit(char)
-        // Check for special characters commonly used in identifiers
-        val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
-                       char == '#' || char == '$' || char == '%' || char == '&' ||
-                       char == '*' || char == '+' || char == '=' || char == '~' ||
-                       char == ':' || char == '/' || char == '\\'
-        
-        return isBengali || isLetterOrDigit || isSpecial
-    }
+    // ✅ বাংলা (Bengali: 0980-09FF)
+    val isBengali = char in '\u0980'..'\u09FF'
+    
+    // ✅ হিন্দি/দেবনাগরী (Devanagari: 0900-097F)
+    val isHindi = char in '\u0900'..'\u097F'
+    
+    // ✅ আরবী (Arabic: 0600-06FF)
+    val isArabic = char in '\u0600'..'\u06FF'
+    
+    // ✅ উর্দু (Arabic extended)
+    val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
+    
+    // ✅ যেকোনো ইউনিকোড অক্ষর বা সংখ্যা
+    val isLetterOrDigit = Character.isLetterOrDigit(char)
+    
+    // ✅ স্পেশাল ক্যারেক্টার
+    val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
+                   char == '#' || char == '$' || char == '%' || char == '&' ||
+                   char == '*' || char == '+' || char == '=' || char == '~' ||
+                   char == ':' || char == '/' || char == '\\'
+    
+    return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
+}
 
     // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
