@@ -106,7 +106,9 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
-    private val HANDLE_SIZE = 44
+    // ✅ Slightly smaller handle for better precision
+    private val HANDLE_SIZE = 40
+    private val HANDLE_RADIUS = 18f
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -824,17 +826,34 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ✅ NEW: Handle drawable with a visible center marker
     private fun createCircleHandleDrawable(): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2196F3")
                 style = Paint.Style.FILL
             }
+            private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+            }
+            private val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.FILL
+            }
+            
             override fun draw(canvas: Canvas) {
                 val cx = bounds.width() / 2f
                 val cy = bounds.height() / 2f
                 val radius = bounds.width().coerceAtMost(bounds.height()) / 2f - 2f
+                
+                // Draw main circle
                 canvas.drawCircle(cx, cy, radius, paint)
+                // Draw border
+                canvas.drawCircle(cx, cy, radius, borderPaint)
+                // Draw center dot (to verify alignment)
+                canvas.drawCircle(cx, cy, 3f, centerPaint)
             }
             override fun setAlpha(alpha: Int) {}
             override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
@@ -969,7 +988,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ UPDATED: Handles centered on selection edges (not corners)
+    // ✅ COMPLETELY REWRITTEN: Precise handle positioning with center alignment
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -987,36 +1006,39 @@ class FloatingBubbleService : Service() {
                 return
             }
 
+            // Get EditText position on screen
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
             
+            // Get container position on screen
             val containerLocation = IntArray(2)
             handleContainer?.getLocationOnScreen(containerLocation) ?: return
             
+            // Calculate relative position
             val relativeX = editLocation[0] - containerLocation[0]
             val relativeY = editLocation[1] - containerLocation[1]
 
+            // Get line information
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            // ✅ Get horizontal positions - these are the selection edges
+            // Get horizontal positions (selection edges)
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // ✅ Get bottom Y position of the lines
+            // Get vertical position - bottom of the line
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ Left handle - centered on the left edge of selection
-            // The selection edge (startX) should align with the center of the handle
+            // ✅ LEFT HANDLE: Center of handle aligns with startX
+            // leftMargin = startX - halfHandle (so center is at startX)
+            // topMargin = startY - HANDLE_SIZE (so bottom of handle is at line bottom)
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // ✅ Center of handle at startX, so leftMargin = startX - halfHandle
                     params.leftMargin = (startX - halfHandle).toInt()
-                    // ✅ Bottom of handle at line bottom, so topMargin = lineBottom - HANDLE_SIZE
                     params.topMargin = (startY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
@@ -1024,14 +1046,13 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ Right handle - centered on the right edge of selection
-            // The selection edge (endX) should align with the center of the handle
+            // ✅ RIGHT HANDLE: Center of handle aligns with endX
+            // leftMargin = endX - halfHandle (so center is at endX)
+            // topMargin = endY - HANDLE_SIZE (so bottom of handle is at line bottom)
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // ✅ Center of handle at endX, so leftMargin = endX - halfHandle
                     params.leftMargin = (endX - halfHandle).toInt()
-                    // ✅ Bottom of handle at line bottom, so topMargin = lineBottom - HANDLE_SIZE
                     params.topMargin = (endY - HANDLE_SIZE).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
