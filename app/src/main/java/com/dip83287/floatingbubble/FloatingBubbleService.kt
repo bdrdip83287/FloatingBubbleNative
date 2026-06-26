@@ -18,7 +18,6 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -134,10 +133,9 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
-    // Magnifier view
-    private var magnifierView: View? = null
-    private var magnifierWindowManager: WindowManager? = null
-    private var isMagnifierVisible = false
+    // ✅ Magnifier
+    private var magnifier: android.widget.Magnifier? = null
+    private var magnifierAnimator: ValueAnimator? = null
 
     data class NoteItem(
         val id: Long,
@@ -151,7 +149,6 @@ class FloatingBubbleService : Service() {
         try {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            magnifierWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
             loadNotes()
@@ -166,6 +163,14 @@ class FloatingBubbleService : Service() {
             lastScreenHeight = resources.displayMetrics.heightPixels
             
             startConfigurationCheck()
+            
+            // ✅ Initialize Magnifier
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                magnifier = android.widget.Magnifier.Builder(editText)
+                    .setSize(150, 150)
+                    .setZoom(1.5f)
+                    .build()
+            }
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
@@ -768,7 +773,6 @@ class FloatingBubbleService : Service() {
 
         hideSelectionHandles()
         hideFloatingActionBar()
-        hideMagnifier()
 
         try {
             val note = noteView ?: return
@@ -874,19 +878,19 @@ class FloatingBubbleService : Service() {
     
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
-        private var initialTouchY = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
+        private var isDragging = false
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialTouchX = event.rawX
-                    initialTouchY = event.rawY
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
+                    isDragging = true
                     
                     if (isLeft) {
                         isDraggingLeftHandle = true
@@ -894,7 +898,8 @@ class FloatingBubbleService : Service() {
                         isDraggingRightHandle = true
                     }
                     
-                    showMagnifier(event.rawX, event.rawY)
+                    // ✅ Hide handles smoothly during drag
+                    hideHandlesSmoothly()
                     
                     return true
                 }
@@ -904,8 +909,6 @@ class FloatingBubbleService : Service() {
                         return true
                     }
                     lastUpdateTime = currentTime
-                    
-                    updateMagnifier(event.rawX, event.rawY)
                     
                     val currentLayout = editText.layout
                     
@@ -934,6 +937,9 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
+                        // ✅ Show magnifier during drag
+                        showMagnifier(event.rawX, event.rawY)
+                        
                         if (!isScrolling) {
                             updateHandlePositionsSafe()
                         }
@@ -950,10 +956,15 @@ class FloatingBubbleService : Service() {
                     return true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isDragging = false
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
                     
+                    // ✅ Hide magnifier
                     hideMagnifier()
+                    
+                    // ✅ Show handles smoothly after drag
+                    showHandlesSmoothly()
                     
                     return true
                 }
@@ -962,151 +973,60 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ========== MAGNIFIER METHODS ==========
-    
-    private fun createMagnifier(): View {
-        val size = resources.displayMetrics.widthPixels / 3
-        val magnifierSize = size.coerceAtMost(300)
-        
-        val container = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(magnifierSize, magnifierSize)
-            setBackgroundColor(Color.parseColor("#CCFFFFFF"))
-            
-            val shape = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#CCFFFFFF"))
-                setStroke(2, Color.parseColor("#2196F3"))
-            }
-            background = shape
+    private fun hideHandlesSmoothly() {
+        leftHandleView?.let { handle ->
+            handle.animate()
+                .alpha(0f)
+                .setDuration(150)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
         }
-        
-        // Create zoom view
-        val zoomView = ZoomView(this@FloatingBubbleService, editText)
-        container.addView(zoomView, FrameLayout.LayoutParams(
-            magnifierSize - 20, magnifierSize - 20,
-            Gravity.CENTER
-        ))
-        
-        return container
-    }
-    
-    inner class ZoomView(context: Context, private val targetView: View) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var zoomX = 0f
-        private var zoomY = 0f
-        
-        fun updateZoom(x: Float, y: Float) {
-            zoomX = x
-            zoomY = y
-            invalidate()
-        }
-        
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            
-            try {
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                val zoomCanvas = Canvas(bitmap)
-                
-                val scale = 2.5f
-                val centerX = width / 2f
-                val centerY = height / 2f
-                
-                zoomCanvas.save()
-                zoomCanvas.scale(scale, scale, centerX, centerY)
-                
-                val location = IntArray(2)
-                targetView.getLocationOnScreen(location)
-                
-                val dx = centerX - (zoomX - location[0]) * scale
-                val dy = centerY - (zoomY - location[1]) * scale
-                
-                zoomCanvas.translate(dx, dy)
-                targetView.draw(zoomCanvas)
-                zoomCanvas.restore()
-                
-                // Draw crosshair
-                paint.color = Color.parseColor("#2196F3")
-                paint.strokeWidth = 2f
-                paint.style = Paint.Style.STROKE
-                
-                canvas.drawBitmap(bitmap, 0f, 0f, null)
-                
-                // Crosshair
-                canvas.drawLine(centerX - 20, centerY, centerX + 20, centerY, paint)
-                canvas.drawLine(centerX, centerY - 20, centerX, centerY + 20, paint)
-                
-                bitmap.recycle()
-            } catch (e: Exception) {
-                EmergencyLog.logException(e, "ZoomView.onDraw")
-            }
+        rightHandleView?.let { handle ->
+            handle.animate()
+                .alpha(0f)
+                .setDuration(150)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
         }
     }
     
+    private fun showHandlesSmoothly() {
+        leftHandleView?.let { handle ->
+            handle.animate()
+                .alpha(1f)
+                .setDuration(150)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }
+        rightHandleView?.let { handle ->
+            handle.animate()
+                .alpha(1f)
+                .setDuration(150)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }
+    }
+    
+    // ✅ Magnifier methods
     private fun showMagnifier(x: Float, y: Float) {
-        if (isMagnifierVisible) return
-        
-        try {
-            val magnifier = createMagnifier()
-            magnifierView = magnifier
-            
-            val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
-            )
-            
-            params.gravity = Gravity.TOP or Gravity.START
-            params.x = (x - 150).toInt()
-            params.y = (y - 200).toInt()
-            
-            magnifierWindowManager?.addView(magnifierView, params)
-            isMagnifierVisible = true
-            
-            // Update zoom
-            val zoomView = (magnifier as? FrameLayout)?.getChildAt(0) as? ZoomView
-            zoomView?.updateZoom(x, y)
-            
-            EmergencyLog.log("Magnifier shown")
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "showMagnifier")
-        }
-    }
-    
-    private fun updateMagnifier(x: Float, y: Float) {
-        try {
-            magnifierView?.let { view ->
-                val params = view.layoutParams as? WindowManager.LayoutParams
-                if (params != null) {
-                    params.x = (x - 150).toInt()
-                    params.y = (y - 200).toInt()
-                    magnifierWindowManager?.updateViewLayout(view, params)
-                }
-                
-                val zoomView = (view as? FrameLayout)?.getChildAt(0) as? ZoomView
-                zoomView?.updateZoom(x, y)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                magnifier?.show(x, y)
+            } catch (e: Exception) {
+                // Magnifier might fail silently
             }
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateMagnifier")
         }
     }
     
     private fun hideMagnifier() {
-        try {
-            magnifierView?.let {
-                magnifierWindowManager?.removeView(it)
-                magnifierView = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                magnifier?.dismiss()
+            } catch (e: Exception) {
+                // Ignore
             }
-            isMagnifierVisible = false
-            EmergencyLog.log("Magnifier hidden")
-        } catch (e: Exception) { }
+        }
     }
-    
-    // ========== HANDLE UPDATE METHODS ==========
     
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
@@ -1120,12 +1040,17 @@ class FloatingBubbleService : Service() {
         }
     }
     
+    // ✅ Force immediate handle position update without debounce
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositionsImmediate")
         }
+    }
+    
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
     
     private fun updateHandlePositions() {
@@ -1157,31 +1082,34 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
+            // ✅ Get exact character positions
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // Place at bottom of line
+            // ✅ Position handles at the BOTTOM of the text (line bottom)
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
+            // ✅ Left handle at start position, bottom aligned
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (startX - halfHandle).toInt()
-                    params.topMargin = (startY - HANDLE_SIZE + 8).toInt()
+                    params.topMargin = (startY).toInt()  // Bottom of text, not top
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
                 }
             }
             
+            // ✅ Right handle at end position, bottom aligned
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (endX - halfHandle).toInt()
-                    params.topMargin = (endY - HANDLE_SIZE + 8).toInt()
+                    params.topMargin = (endY).toInt()  // Bottom of text, not top
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
@@ -1258,28 +1186,13 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
+            // ✅ Force immediate position update
             updateHandlePositionsImmediate()
             
-            // Smooth fade in
-            leftHandleView?.let { handle ->
-                handle.alpha = 0f
-                handle.visibility = View.VISIBLE
-                handle.animate()
-                    .alpha(1f)
-                    .setDuration(200)
-                    .setInterpolator(DecelerateInterpolator())
-                    .start()
-            }
-            
-            rightHandleView?.let { handle ->
-                handle.alpha = 0f
-                handle.visibility = View.VISIBLE
-                handle.animate()
-                    .alpha(1f)
-                    .setDuration(200)
-                    .setInterpolator(DecelerateInterpolator())
-                    .start()
-            }
+            leftHandleView?.visibility = View.VISIBLE
+            leftHandleView?.alpha = 1f
+            rightHandleView?.visibility = View.VISIBLE
+            rightHandleView?.alpha = 1f
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -1288,30 +1201,25 @@ class FloatingBubbleService : Service() {
     
     private fun hideSelectionHandles() {
         try {
-            // Smooth fade out
             leftHandleView?.let { handle ->
                 handle.animate()
-                    .alpha(0f)
-                    .setDuration(150)
-                    .setInterpolator(DecelerateInterpolator())
-                    .withEndAction {
-                        if (!isDraggingLeftHandle) {
-                            handle.visibility = View.GONE
-                        }
+                    ?.alpha(0f)
+                    ?.setDuration(150)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.withEndAction {
+                        handle.visibility = View.GONE
                     }
-                    .start()
+                    ?.start()
             }
             rightHandleView?.let { handle ->
                 handle.animate()
-                    .alpha(0f)
-                    .setDuration(150)
-                    .setInterpolator(DecelerateInterpolator())
-                    .withEndAction {
-                        if (!isDraggingRightHandle) {
-                            handle.visibility = View.GONE
-                        }
+                    ?.alpha(0f)
+                    ?.setDuration(150)
+                    ?.setInterpolator(DecelerateInterpolator())
+                    ?.withEndAction {
+                        handle.visibility = View.GONE
                     }
-                    .start()
+                    ?.start()
             }
             areHandlesVisible = false
         } catch (e: Exception) { }
@@ -1794,7 +1702,11 @@ class FloatingBubbleService : Service() {
                             updateHandlePositionsImmediate()
                         }, 150)
                         
-                        EmergencyLog.log("Selected: '$selectedWord' (${selectedWord.length} chars)")
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            updateHandlePositionsImmediate()
+                        }, 300)
+                        
+                        EmergencyLog.log("Selected: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
                     }
                 }
             }
@@ -1836,7 +1748,6 @@ class FloatingBubbleService : Service() {
             setOnClickListener {
                 hideSelectionHandles()
                 hideFloatingActionBar()
-                hideMagnifier()
                 showNoteList()
             }
         }
@@ -1904,13 +1815,12 @@ class FloatingBubbleService : Service() {
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started - hiding handles")
+                    EmergencyLog.log("Scrolling started - hiding handles smoothly")
                     
                     if (areHandlesVisible) {
-                        hideSelectionHandles()
+                        // ✅ Smooth hide on scroll start
+                        hideHandlesSmoothly()
                     }
-                    
-                    hideMagnifier()
                     
                     if (editText.hasSelection() && isActionBarVisible) {
                         hideFloatingActionBar()
@@ -1923,7 +1833,7 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped - showing handles with fade")
+                        EmergencyLog.log("Scrolling stopped - showing handles smoothly")
                         
                         if (editText.hasSelection()) {
                             updateHandlePositionsSafe()
@@ -1935,6 +1845,8 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    // ✅ Smooth show after scroll
+                                    showHandlesSmoothly()
                                 }
                             }
                         }
@@ -1971,6 +1883,11 @@ class FloatingBubbleService : Service() {
             isCursorVisible = true
             isFocusable = true
             isFocusableInTouchMode = true
+            
+            // ✅ Enable native magnifier
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                isMagnifying = true
+            }
             
             setOnSelectionChangedListener { _, _ ->
                 if (!isScrolling) {
@@ -2036,6 +1953,9 @@ class FloatingBubbleService : Service() {
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
                                     updateHandlePositionsImmediate()
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        updateHandlePositionsImmediate()
+                                    }, 50)
                                 }
                             } else if (!isSelecting && !this@apply.hasSelection()) {
                                 hideSelectionHandles()
@@ -2141,7 +2061,6 @@ class FloatingBubbleService : Service() {
                 updateBubbleCount()
                 hideSelectionHandles()
                 hideFloatingActionBar()
-                hideMagnifier()
                 showNoteList()
                 Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
             }
@@ -2236,7 +2155,6 @@ class FloatingBubbleService : Service() {
             Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
             hideSelectionHandles()
             hideFloatingActionBar()
-            hideMagnifier()
             showNoteList()
         }
     }
@@ -2244,7 +2162,6 @@ class FloatingBubbleService : Service() {
     private fun showNoteList() {
         hideSelectionHandles()
         hideFloatingActionBar()
-        hideMagnifier()
         val container = createFullNotePad()
         noteView?.let { windowManager.removeView(it) }
         noteView = container
