@@ -969,9 +969,8 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FINAL FIX: Perfect handle positioning
-    // Left handle: LEFT of selection start (●[SELECTED TEXT]
-    // Right handle: RIGHT of selection end (SELECTED TEXT]●)
+    // ✅ UPDATED: Handles positioned OUTSIDE the selection box
+    // Left handle: left of left edge, Right handle: right of right edge
     // Visual: ●[===== SELECTED TEXT =====]●
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1002,25 +1001,24 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            // Get horizontal positions
+            // Get horizontal positions (start and end of selection)
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // Get bottom Y position of the lines (handles at bottom of text)
+            // Get bottom Y position of the lines
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ LEFT HANDLE: Positioned to the LEFT of selection start
-            // Visual: ●[SELECTED TEXT
-            // The handle's RIGHT edge touches the selection start
+            // ✅ LEFT HANDLE: Positioned to the LEFT of the selection start
+            // Visual: ●[===== SELECTED TEXT =====]●
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Position handle so its RIGHT edge is at startX
-                    // So leftMargin = startX - HANDLE_SIZE
+                    // Left handle: leftMargin = startX - HANDLE_SIZE (full handle width to the left)
                     params.leftMargin = (startX - HANDLE_SIZE).toInt()
+                    // Centered vertically on the line
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
@@ -1028,15 +1026,14 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ RIGHT HANDLE: Positioned to the RIGHT of selection end
-            // Visual: SELECTED TEXT]●
-            // The handle's LEFT edge touches the selection end
+            // ✅ RIGHT HANDLE: Positioned to the RIGHT of the selection end
+            // Visual: ●[===== SELECTED TEXT =====]●
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Position handle so its LEFT edge is at endX
-                    // So leftMargin = endX
+                    // Right handle: leftMargin = endX (starts right after the text)
                     params.leftMargin = endX.toInt()
+                    // Centered vertically on the line
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
@@ -1560,21 +1557,12 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    /**
-     * ✅ Enhanced isWordChar - supports all languages including Bengali, Hindi, Arabic, Urdu
-     */
     private fun isWordChar(char: Char): Boolean {
-        // ✅ Bengali (0980-09FF)
         val isBengali = char in '\u0980'..'\u09FF'
-        // ✅ Hindi/Devanagari (0900-097F)
         val isHindi = char in '\u0900'..'\u097F'
-        // ✅ Arabic (0600-06FF)
         val isArabic = char in '\u0600'..'\u06FF'
-        // ✅ Urdu (Arabic extended)
         val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
-        // ✅ Any Unicode letter or digit
         val isLetterOrDigit = Character.isLetterOrDigit(char)
-        // ✅ Special characters
         val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
                        char == '#' || char == '$' || char == '%' || char == '&' ||
                        char == '*' || char == '+' || char == '=' || char == '~' ||
@@ -1583,7 +1571,6 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
-    // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1596,19 +1583,15 @@ class FloatingBubbleService : Service() {
                     var wordStart = offset
                     var wordEnd = offset
                     
-                    // EXTEND LEFT: include all word characters
                     while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
                     
-                    // EXTEND RIGHT: include all word characters
                     while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
                     }
                     
-                    // If nothing was selected (e.g., cursor on a space), try to find nearby word
                     if (wordStart == wordEnd) {
-                        // Try to find word to the left
                         var tempStart = offset - 1
                         while (tempStart >= 0 && isWordChar(text[tempStart])) {
                             tempStart--
@@ -1628,18 +1611,14 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ CRITICAL FIX: Force recreate handles before showing
                         leftHandleView = null
                         rightHandleView = null
                         
-                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
-                        // ✅ Multiple attempts to ensure handles are positioned correctly
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 50)
@@ -1890,9 +1869,7 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
-                                    // ✅ Additional attempts
                                     Handler(Looper.getMainLooper()).postDelayed({
                                         updateHandlePositionsImmediate()
                                     }, 50)
@@ -1940,7 +1917,6 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            // ✅ Force immediate position update on text change
                             updateHandlePositionsImmediate()
                         }
                     }
