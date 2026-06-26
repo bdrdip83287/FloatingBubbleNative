@@ -971,46 +971,7 @@ class FloatingBubbleService : Service() {
     }
     
     // ✅ UPDATED: Handles positioned at bottom corners of selection box
-    private fun updateHandlePositions() {
-        if (isScrolling) return
-        
-        try {
-            val currentLayout = editText.layout ?: return
-            if (leftHandleView == null || rightHandleView == null) {
-                recreateHandlesIfNeeded()
-                return
-            }
-
-            val start = editText.selectionStart
-            val end = editText.selectionEnd
-            
-            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-                return
-            }
-
-            val editLocation = IntArray(2)
-            editText.getLocationOnScreen(editLocation)
-            
-            val containerLocation = IntArray(2)
-            handleContainer?.getLocationOnScreen(containerLocation) ?: return
-            
-            val relativeX = editLocation[0] - containerLocation[0]
-            val relativeY = editLocation[1] - containerLocation[1]
-
-            val startLine = currentLayout.getLineForOffset(start)
-            val endLine = currentLayout.getLineForOffset(end)
-            
-            // ✅ Get horizontal positions
-            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
-            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
-            
-            // ✅ Get bottom Y position of the lines (not top)
-            val startY = currentLayout.getLineBottom(startLine) + relativeY
-            val endY = currentLayout.getLineBottom(endLine) + relativeY
-
-            val halfHandle = HANDLE_SIZE / 2
-
-// ✅ UPDATED: Handles positioned at bottom corners of selection box
+    // ✅ UPDATED: Handles positioned at bottom corners of selection box
 // Left handle: right edge aligns with selection start
 // Right handle: left edge aligns with selection end
 private fun updateHandlePositions() {
