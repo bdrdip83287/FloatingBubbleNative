@@ -106,7 +106,6 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
-    // ✅ Increased handle size for better visibility
     private val HANDLE_SIZE = 44
 
     private var scrollHideHandler: Handler? = null
@@ -970,79 +969,80 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ UPDATED: Handles positioned at bottom corners of selection box
-    // ✅ UPDATED: Handles positioned at bottom corners of selection box
-// Left handle: right edge aligns with selection start
-// Right handle: left edge aligns with selection end
-private fun updateHandlePositions() {
-    if (isScrolling) return
-    
-    try {
-        val currentLayout = editText.layout ?: return
-        if (leftHandleView == null || rightHandleView == null) {
-            recreateHandlesIfNeeded()
-            return
-        }
-
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
+    // ✅ UPDATED: Handles centered on selection edges (not corners)
+    private fun updateHandlePositions() {
+        if (isScrolling) return
         
-        if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-            return
-        }
-
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
-        
-        val containerLocation = IntArray(2)
-        handleContainer?.getLocationOnScreen(containerLocation) ?: return
-        
-        val relativeX = editLocation[0] - containerLocation[0]
-        val relativeY = editLocation[1] - containerLocation[1]
-
-        val startLine = currentLayout.getLineForOffset(start)
-        val endLine = currentLayout.getLineForOffset(end)
-        
-        // Get horizontal positions
-        val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
-        val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
-        
-        // Get bottom Y position of the lines
-        val startY = currentLayout.getLineBottom(startLine) + relativeY
-        val endY = currentLayout.getLineBottom(endLine) + relativeY
-
-        val halfHandle = HANDLE_SIZE / 2
-
-        // ✅ Left handle - right edge aligns with selection start
-        // Position: startX - HANDLE_SIZE (so right edge at startX)
-        leftHandleView?.let { handle ->
-            val params = handle.layoutParams as? FrameLayout.LayoutParams
-            if (params != null) {
-                params.leftMargin = (startX - HANDLE_SIZE).toInt()
-                params.topMargin = (startY - halfHandle).toInt()
-                handle.layoutParams = params
-                handle.visibility = View.VISIBLE
-                handle.alpha = 1f
+        try {
+            val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) {
+                recreateHandlesIfNeeded()
+                return
             }
-        }
-        
-        // ✅ Right handle - left edge aligns with selection end
-        // Position: endX (so left edge at endX)
-        rightHandleView?.let { handle ->
-            val params = handle.layoutParams as? FrameLayout.LayoutParams
-            if (params != null) {
-                params.leftMargin = endX.toInt()
-                params.topMargin = (endY - halfHandle).toInt()
-                handle.layoutParams = params
-                handle.visibility = View.VISIBLE
-                handle.alpha = 1f
+
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+            
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+                return
             }
+
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            
+            val containerLocation = IntArray(2)
+            handleContainer?.getLocationOnScreen(containerLocation) ?: return
+            
+            val relativeX = editLocation[0] - containerLocation[0]
+            val relativeY = editLocation[1] - containerLocation[1]
+
+            val startLine = currentLayout.getLineForOffset(start)
+            val endLine = currentLayout.getLineForOffset(end)
+            
+            // ✅ Get horizontal positions - these are the selection edges
+            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
+            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
+            
+            // ✅ Get bottom Y position of the lines
+            val startY = currentLayout.getLineBottom(startLine) + relativeY
+            val endY = currentLayout.getLineBottom(endLine) + relativeY
+
+            val halfHandle = HANDLE_SIZE / 2
+
+            // ✅ Left handle - centered on the left edge of selection
+            // The selection edge (startX) should align with the center of the handle
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    // ✅ Center of handle at startX, so leftMargin = startX - halfHandle
+                    params.leftMargin = (startX - halfHandle).toInt()
+                    // ✅ Bottom of handle at line bottom, so topMargin = lineBottom - HANDLE_SIZE
+                    params.topMargin = (startY - HANDLE_SIZE).toInt()
+                    handle.layoutParams = params
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
+                }
+            }
+            
+            // ✅ Right handle - centered on the right edge of selection
+            // The selection edge (endX) should align with the center of the handle
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    // ✅ Center of handle at endX, so leftMargin = endX - halfHandle
+                    params.leftMargin = (endX - halfHandle).toInt()
+                    // ✅ Bottom of handle at line bottom, so topMargin = lineBottom - HANDLE_SIZE
+                    params.topMargin = (endY - HANDLE_SIZE).toInt()
+                    handle.layoutParams = params
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
+                }
+            }
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
         }
-        
-    } catch (e: Exception) {
-        EmergencyLog.logException(e, "updateHandlePositions")
     }
-}
     
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
