@@ -969,8 +969,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FIXED: Handles positioned OUTSIDE the selection box
-    // Left handle: just left of text, Right handle: just right of text
+    // ✅ FINAL FIX: Handles positioned OUTSIDE the selection box
+    // Left handle: just left of text (leftMargin = startX - halfHandle)
+    // Right handle: just right of text (leftMargin = endX)
     // Visual: ●[===== SELECTED TEXT =====]●
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1012,12 +1013,12 @@ class FloatingBubbleService : Service() {
             val halfHandle = HANDLE_SIZE / 2
 
             // ✅ LEFT HANDLE: Positioned just to the LEFT of the selection start
-            // Using halfHandle offset so the handle's right edge touches the text
+            // Visual: ●[===== TEXT =====]●
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Left handle: leftMargin = startX - halfHandle (half of handle width)
-                    // This makes the handle's right edge touch the text's left edge
+                    // Left handle: leftMargin = startX - halfHandle
+                    // Handle's right edge touches text's left edge
                     params.leftMargin = (startX - halfHandle).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
@@ -1027,13 +1028,13 @@ class FloatingBubbleService : Service() {
             }
             
             // ✅ RIGHT HANDLE: Positioned just to the RIGHT of the selection end
-            // Using halfHandle offset so the handle's left edge touches the text's right edge
+            // Visual: ●[===== TEXT =====]●
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Right handle: leftMargin = endX - halfHandle
-                    // This makes the handle's left edge touch the text's right edge
-                    params.leftMargin = (endX - halfHandle).toInt()
+                    // Right handle: leftMargin = endX (NOT endX - halfHandle)
+                    // Handle's left edge touches text's right edge
+                    params.leftMargin = endX.toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
