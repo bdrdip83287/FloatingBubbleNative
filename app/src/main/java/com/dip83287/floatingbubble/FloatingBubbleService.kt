@@ -969,9 +969,10 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ UPDATED: Handles positioned at bottom corners of selection box
-    // Left handle: left side aligned with selection start
-    // Right handle: left side aligned with selection end (NOT right side)
+    // ✅ FINAL FIX: Handles positioned at BOTH ends of selection box
+    // Left handle: LEFT side aligned with selection start (handle is to the LEFT of start)
+    // Right handle: RIGHT side aligned with selection end (handle is to the RIGHT of end)
+    // Visual: ●[===== SELECTED TEXT =====]●
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1012,7 +1013,8 @@ class FloatingBubbleService : Service() {
             val halfHandle = HANDLE_SIZE / 2
 
             // ✅ Left handle: LEFT side aligned with selection start
-            // Position handle so its LEFT edge is at startX
+            // Position: ●[SELECTED TEXT]
+            // Handle's LEFT edge is at startX, so handle is to the LEFT of selection
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1024,14 +1026,14 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ Right handle: LEFT side aligned with selection end (NOT right side)
-            // Position handle so its LEFT edge is at endX
-            // This means the handle is to the LEFT of the selection end
+            // ✅ Right handle: RIGHT side aligned with selection end
+            // Position: [SELECTED TEXT]●
+            // Handle's RIGHT edge is at endX, so handle is to the RIGHT of selection
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // ✅ CRITICAL FIX: Use endX - halfHandle so LEFT side of handle touches selection end
-                    params.leftMargin = (endX - halfHandle).toInt()
+                    // ✅ CRITICAL FIX: endX - HANDLE_SIZE so RIGHT side touches endX
+                    params.leftMargin = (endX - HANDLE_SIZE).toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
