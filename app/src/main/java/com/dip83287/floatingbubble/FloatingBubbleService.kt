@@ -969,7 +969,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FINAL FIX: Handles positioned OUTSIDE the selection box
+    // ✅ FINAL FIX: Both handles positioned OUTSIDE the selection box
     // Left handle: just left of text (leftMargin = startX - halfHandle)
     // Right handle: just right of text (leftMargin = endX)
     // Visual: ●[===== SELECTED TEXT =====]●
@@ -1012,13 +1012,12 @@ class FloatingBubbleService : Service() {
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ LEFT HANDLE: Positioned just to the LEFT of the selection start
+            // ✅ LEFT HANDLE: Just to the LEFT of the selection start
             // Visual: ●[===== TEXT =====]●
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Left handle: leftMargin = startX - halfHandle
-                    // Handle's right edge touches text's left edge
+                    // Left handle's right edge touches text's left edge
                     params.leftMargin = (startX - halfHandle).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
@@ -1027,13 +1026,13 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ RIGHT HANDLE: Positioned just to the RIGHT of the selection end
+            // ✅ RIGHT HANDLE: Just to the RIGHT of the selection end
             // Visual: ●[===== TEXT =====]●
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Right handle: leftMargin = endX (NOT endX - halfHandle)
-                    // Handle's left edge touches text's right edge
+                    // Right handle's left edge touches text's right edge
+                    // Using endX (NOT endX - halfHandle) so handle is completely outside
                     params.leftMargin = endX.toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
