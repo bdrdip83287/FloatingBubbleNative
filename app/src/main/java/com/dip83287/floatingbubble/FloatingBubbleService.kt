@@ -969,9 +969,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FINAL FIX: Handles positioned at BOTH ends of selection box
-    // Left handle: LEFT side aligned with selection start (handle is to the LEFT of start)
-    // Right handle: RIGHT side aligned with selection end (handle is to the RIGHT of end)
+    // ✅ FINAL FIX: Perfect handle positioning
+    // Left handle: LEFT of selection start (●[SELECTED TEXT]
+    // Right handle: RIGHT of selection end (SELECTED TEXT]●)
     // Visual: ●[===== SELECTED TEXT =====]●
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1006,19 +1006,21 @@ class FloatingBubbleService : Service() {
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // Get bottom Y position of the lines
+            // Get bottom Y position of the lines (handles at bottom of text)
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ Left handle: LEFT side aligned with selection start
-            // Position: ●[SELECTED TEXT]
-            // Handle's LEFT edge is at startX, so handle is to the LEFT of selection
+            // ✅ LEFT HANDLE: Positioned to the LEFT of selection start
+            // Visual: ●[SELECTED TEXT
+            // The handle's RIGHT edge touches the selection start
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    params.leftMargin = (startX - halfHandle).toInt()
+                    // Position handle so its RIGHT edge is at startX
+                    // So leftMargin = startX - HANDLE_SIZE
+                    params.leftMargin = (startX - HANDLE_SIZE).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
@@ -1026,14 +1028,15 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ Right handle: RIGHT side aligned with selection end
-            // Position: [SELECTED TEXT]●
-            // Handle's RIGHT edge is at endX, so handle is to the RIGHT of selection
+            // ✅ RIGHT HANDLE: Positioned to the RIGHT of selection end
+            // Visual: SELECTED TEXT]●
+            // The handle's LEFT edge touches the selection end
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // ✅ CRITICAL FIX: endX - HANDLE_SIZE so RIGHT side touches endX
-                    params.leftMargin = (endX - HANDLE_SIZE).toInt()
+                    // Position handle so its LEFT edge is at endX
+                    // So leftMargin = endX
+                    params.leftMargin = endX.toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
