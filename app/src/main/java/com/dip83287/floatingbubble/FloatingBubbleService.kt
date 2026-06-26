@@ -970,8 +970,8 @@ class FloatingBubbleService : Service() {
     }
     
     // ✅ FINAL FIX: Both handles positioned OUTSIDE the selection box
-    // Left handle: left of text (leftMargin = startX - halfHandle)
-    // Right handle: right of text (leftMargin = endX)
+    // Left handle: just left of text (leftMargin = startX - halfHandle)
+    // Right handle: just right of text (leftMargin = endX) 
     // Visual: ●[===== SELECTED TEXT =====]●
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1013,32 +1013,30 @@ class FloatingBubbleService : Service() {
             val halfHandle = HANDLE_SIZE / 2
 
             // ✅ LEFT HANDLE: Just to the LEFT of the selection start
-            // Visual: ●[===== TEXT =====]●
+            // leftMargin = startX - halfHandle (handle's right edge touches text's left edge)
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Left handle's right edge touches text's left edge
                     params.leftMargin = (startX - halfHandle).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
+                    EmergencyLog.log("Left handle: startX=$startX, leftMargin=${params.leftMargin}")
                 }
             }
             
             // ✅ RIGHT HANDLE: Just to the RIGHT of the selection end
-            // Visual: ●[===== TEXT =====]●
+            // leftMargin = endX (handle's left edge touches text's right edge)
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Right handle's left edge touches text's right edge
-                    // IMPORTANT: Use endX (NOT endX - halfHandle)
-                    // This places the handle completely to the right of the text
                     params.leftMargin = endX.toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
+                    EmergencyLog.log("Right handle: endX=$endX, leftMargin=${params.leftMargin}")
                 }
             }
             
