@@ -133,9 +133,8 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
-    // ✅ Magnifier
-    private var magnifier: android.widget.Magnifier? = null
-    private var magnifierAnimator: ValueAnimator? = null
+    // ✅ Magnifier - use Android's built-in magnifier
+    private var magnifier: Any? = null
 
     data class NoteItem(
         val id: Long,
@@ -163,14 +162,6 @@ class FloatingBubbleService : Service() {
             lastScreenHeight = resources.displayMetrics.heightPixels
             
             startConfigurationCheck()
-            
-            // ✅ Initialize Magnifier
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                magnifier = android.widget.Magnifier.Builder(editText)
-                    .setSize(150, 150)
-                    .setZoom(1.5f)
-                    .build()
-            }
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
@@ -937,7 +928,7 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // ✅ Show magnifier during drag
+                        // ✅ Show magnifier during drag (Android native)
                         showMagnifier(event.rawX, event.rawY)
                         
                         if (!isScrolling) {
@@ -1007,13 +998,30 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Magnifier methods
+    // ✅ Magnifier methods using Android's built-in magnifier (API 28+)
     private fun showMagnifier(x: Float, y: Float) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
-                magnifier?.show(x, y)
+                if (magnifier == null) {
+                    // Create magnifier using reflection to avoid API issues
+                    val builderClass = Class.forName("android.widget.Magnifier\$Builder")
+                    val builder = builderClass.getConstructor(View::class.java).newInstance(editText)
+                    
+                    // Set size (works on API 28+)
+                    val setSizeMethod = builderClass.getMethod("setSize", Int::class.java, Int::class.java)
+                    setSizeMethod.invoke(builder, 150, 150)
+                    
+                    // Set zoom (API 29+ only, so we skip it for API 28)
+                    // Build the magnifier
+                    val buildMethod = builderClass.getMethod("build")
+                    magnifier = buildMethod.invoke(builder)
+                }
+                
+                // Show magnifier
+                val showMethod = magnifier?.javaClass?.getMethod("show", Float::class.java, Float::class.java)
+                showMethod?.invoke(magnifier, x, y)
             } catch (e: Exception) {
-                // Magnifier might fail silently
+                // Magnifier might fail on some devices, silently ignore
             }
         }
     }
@@ -1021,7 +1029,8 @@ class FloatingBubbleService : Service() {
     private fun hideMagnifier() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
-                magnifier?.dismiss()
+                val dismissMethod = magnifier?.javaClass?.getMethod("dismiss")
+                dismissMethod?.invoke(magnifier)
             } catch (e: Exception) {
                 // Ignore
             }
@@ -1883,11 +1892,6 @@ class FloatingBubbleService : Service() {
             isCursorVisible = true
             isFocusable = true
             isFocusableInTouchMode = true
-            
-            // ✅ Enable native magnifier
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                isMagnifying = true
-            }
             
             setOnSelectionChangedListener { _, _ ->
                 if (!isScrolling) {
