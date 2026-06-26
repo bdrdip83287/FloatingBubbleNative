@@ -970,8 +970,8 @@ class FloatingBubbleService : Service() {
     }
     
     // ✅ FINAL FIX: Both handles positioned OUTSIDE the selection box
-    // Left handle: just left of text (leftMargin = startX - halfHandle)
-    // Right handle: just right of text (leftMargin = endX)
+    // Left handle: left of text (leftMargin = startX - halfHandle)
+    // Right handle: right of text (leftMargin = endX)
     // Visual: ●[===== SELECTED TEXT =====]●
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1032,7 +1032,8 @@ class FloatingBubbleService : Service() {
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     // Right handle's left edge touches text's right edge
-                    // Using endX (NOT endX - halfHandle) so handle is completely outside
+                    // IMPORTANT: Use endX (NOT endX - halfHandle)
+                    // This places the handle completely to the right of the text
                     params.leftMargin = endX.toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
