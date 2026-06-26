@@ -1609,6 +1609,10 @@ class FloatingBubbleService : Service() {
                         // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
+                        // ✅ CRITICAL FIX: Force recreate handles before showing
+                        leftHandleView = null
+                        rightHandleView = null
+                        
                         // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
@@ -1621,6 +1625,10 @@ class FloatingBubbleService : Service() {
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 150)
+                        
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            updateHandlePositionsImmediate()
+                        }, 300)
                         
                         EmergencyLog.log("Selected: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
                     }
