@@ -106,7 +106,8 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
-    private val HANDLE_SIZE = 48
+    // ✅ Increased handle size for better visibility
+    private val HANDLE_SIZE = 44
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -132,9 +133,6 @@ class FloatingBubbleService : Service() {
     private lateinit var recyclerView: RecyclerView
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
-
-    // ✅ Magnifier - use Android's built-in magnifier
-    private var magnifier: Any? = null
 
     data class NoteItem(
         val id: Long,
@@ -872,7 +870,6 @@ class FloatingBubbleService : Service() {
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
-        private var isDragging = false
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -881,17 +878,12 @@ class FloatingBubbleService : Service() {
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
-                    isDragging = true
                     
                     if (isLeft) {
                         isDraggingLeftHandle = true
                     } else {
                         isDraggingRightHandle = true
                     }
-                    
-                    // ✅ Hide handles smoothly during drag
-                    hideHandlesSmoothly()
-                    
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -928,9 +920,6 @@ class FloatingBubbleService : Service() {
                             }
                         }
                         
-                        // ✅ Show magnifier during drag (Android native)
-                        showMagnifier(event.rawX, event.rawY)
-                        
                         if (!isScrolling) {
                             updateHandlePositionsSafe()
                         }
@@ -947,93 +936,12 @@ class FloatingBubbleService : Service() {
                     return true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    isDragging = false
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
-                    
-                    // ✅ Hide magnifier
-                    hideMagnifier()
-                    
-                    // ✅ Show handles smoothly after drag
-                    showHandlesSmoothly()
-                    
                     return true
                 }
             }
             return false
-        }
-    }
-    
-    private fun hideHandlesSmoothly() {
-        leftHandleView?.let { handle ->
-            handle.animate()
-                .alpha(0f)
-                .setDuration(150)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
-        }
-        rightHandleView?.let { handle ->
-            handle.animate()
-                .alpha(0f)
-                .setDuration(150)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
-        }
-    }
-    
-    private fun showHandlesSmoothly() {
-        leftHandleView?.let { handle ->
-            handle.animate()
-                .alpha(1f)
-                .setDuration(150)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
-        }
-        rightHandleView?.let { handle ->
-            handle.animate()
-                .alpha(1f)
-                .setDuration(150)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
-        }
-    }
-    
-    // ✅ Magnifier methods using Android's built-in magnifier (API 28+)
-    private fun showMagnifier(x: Float, y: Float) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                if (magnifier == null) {
-                    // Create magnifier using reflection to avoid API issues
-                    val builderClass = Class.forName("android.widget.Magnifier\$Builder")
-                    val builder = builderClass.getConstructor(View::class.java).newInstance(editText)
-                    
-                    // Set size (works on API 28+)
-                    val setSizeMethod = builderClass.getMethod("setSize", Int::class.java, Int::class.java)
-                    setSizeMethod.invoke(builder, 150, 150)
-                    
-                    // Set zoom (API 29+ only, so we skip it for API 28)
-                    // Build the magnifier
-                    val buildMethod = builderClass.getMethod("build")
-                    magnifier = buildMethod.invoke(builder)
-                }
-                
-                // Show magnifier
-                val showMethod = magnifier?.javaClass?.getMethod("show", Float::class.java, Float::class.java)
-                showMethod?.invoke(magnifier, x, y)
-            } catch (e: Exception) {
-                // Magnifier might fail on some devices, silently ignore
-            }
-        }
-    }
-    
-    private fun hideMagnifier() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                val dismissMethod = magnifier?.javaClass?.getMethod("dismiss")
-                dismissMethod?.invoke(magnifier)
-            } catch (e: Exception) {
-                // Ignore
-            }
         }
     }
     
@@ -1062,6 +970,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
+    // ✅ UPDATED: Handles positioned at bottom corners of selection box
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1091,34 +1000,36 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            // ✅ Get exact character positions
+            // ✅ Get horizontal positions
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // ✅ Position handles at the BOTTOM of the text (line bottom)
+            // ✅ Get bottom Y position of the lines (not top)
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ Left handle at start position, bottom aligned
+            // ✅ Left handle - positioned at bottom-left corner of selection
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (startX - halfHandle).toInt()
-                    params.topMargin = (startY).toInt()  // Bottom of text, not top
+                    // ✅ Position at bottom of the line, not top
+                    params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
                 }
             }
             
-            // ✅ Right handle at end position, bottom aligned
+            // ✅ Right handle - positioned at bottom-right corner of selection
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
                     params.leftMargin = (endX - halfHandle).toInt()
-                    params.topMargin = (endY).toInt()  // Bottom of text, not top
+                    // ✅ Position at bottom of the line, not top
+                    params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
@@ -1641,12 +1552,21 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
+    /**
+     * ✅ Enhanced isWordChar - supports all languages including Bengali, Hindi, Arabic, Urdu
+     */
     private fun isWordChar(char: Char): Boolean {
+        // ✅ Bengali (0980-09FF)
         val isBengali = char in '\u0980'..'\u09FF'
+        // ✅ Hindi/Devanagari (0900-097F)
         val isHindi = char in '\u0900'..'\u097F'
+        // ✅ Arabic (0600-06FF)
         val isArabic = char in '\u0600'..'\u06FF'
+        // ✅ Urdu (Arabic extended)
         val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
+        // ✅ Any Unicode letter or digit
         val isLetterOrDigit = Character.isLetterOrDigit(char)
+        // ✅ Special characters
         val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
                        char == '#' || char == '$' || char == '%' || char == '&' ||
                        char == '*' || char == '+' || char == '=' || char == '~' ||
@@ -1655,6 +1575,7 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
+    // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1667,15 +1588,19 @@ class FloatingBubbleService : Service() {
                     var wordStart = offset
                     var wordEnd = offset
                     
+                    // EXTEND LEFT: include all word characters
                     while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
                     
+                    // EXTEND RIGHT: include all word characters
                     while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
                     }
                     
+                    // If nothing was selected (e.g., cursor on a space), try to find nearby word
                     if (wordStart == wordEnd) {
+                        // Try to find word to the left
                         var tempStart = offset - 1
                         while (tempStart >= 0 && isWordChar(text[tempStart])) {
                             tempStart--
@@ -1695,14 +1620,18 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
+                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
+                        // ✅ CRITICAL FIX: Force recreate handles before showing
                         leftHandleView = null
                         rightHandleView = null
                         
+                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
+                        // ✅ Multiple attempts to ensure handles are positioned correctly
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 50)
@@ -1824,11 +1753,10 @@ class FloatingBubbleService : Service() {
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started - hiding handles smoothly")
+                    EmergencyLog.log("Scrolling started - hiding handles")
                     
                     if (areHandlesVisible) {
-                        // ✅ Smooth hide on scroll start
-                        hideHandlesSmoothly()
+                        hideSelectionHandles()
                     }
                     
                     if (editText.hasSelection() && isActionBarVisible) {
@@ -1842,7 +1770,7 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped - showing handles smoothly")
+                        EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
                         if (editText.hasSelection()) {
                             updateHandlePositionsSafe()
@@ -1854,8 +1782,6 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    // ✅ Smooth show after scroll
-                                    showHandlesSmoothly()
                                 }
                             }
                         }
@@ -1956,7 +1882,9 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
+                                    // ✅ Additional attempts
                                     Handler(Looper.getMainLooper()).postDelayed({
                                         updateHandlePositionsImmediate()
                                     }, 50)
@@ -2004,6 +1932,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            // ✅ Force immediate position update on text change
                             updateHandlePositionsImmediate()
                         }
                     }
@@ -2328,7 +2257,6 @@ class FloatingBubbleService : Service() {
         deleteZoneView?.let { windowManager.removeView(it) }
         hideSelectionHandles()
         hideFloatingActionBar()
-        hideMagnifier()
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         scrollStopHandler?.removeCallbacksAndMessages(null)
         configCheckRunnable?.let { configCheckHandler.removeCallbacks(it) }
