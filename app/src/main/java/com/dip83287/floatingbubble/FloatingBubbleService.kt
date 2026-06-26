@@ -1010,36 +1010,78 @@ class FloatingBubbleService : Service() {
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ Left handle - positioned at bottom-left corner of selection
-            leftHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    params.leftMargin = (startX - halfHandle).toInt()
-                    // ✅ Position at bottom of the line, not top
-                    params.topMargin = (startY - halfHandle).toInt()
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                }
-            }
-            
-            // ✅ Right handle - positioned at bottom-right corner of selection
-            rightHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    params.leftMargin = (endX - halfHandle).toInt()
-                    // ✅ Position at bottom of the line, not top
-                    params.topMargin = (endY - halfHandle).toInt()
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                }
-            }
-            
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositions")
+// ✅ UPDATED: Handles positioned at bottom corners of selection box
+// Left handle: right edge aligns with selection start
+// Right handle: left edge aligns with selection end
+private fun updateHandlePositions() {
+    if (isScrolling) return
+    
+    try {
+        val currentLayout = editText.layout ?: return
+        if (leftHandleView == null || rightHandleView == null) {
+            recreateHandlesIfNeeded()
+            return
         }
+
+        val start = editText.selectionStart
+        val end = editText.selectionEnd
+        
+        if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+            return
+        }
+
+        val editLocation = IntArray(2)
+        editText.getLocationOnScreen(editLocation)
+        
+        val containerLocation = IntArray(2)
+        handleContainer?.getLocationOnScreen(containerLocation) ?: return
+        
+        val relativeX = editLocation[0] - containerLocation[0]
+        val relativeY = editLocation[1] - containerLocation[1]
+
+        val startLine = currentLayout.getLineForOffset(start)
+        val endLine = currentLayout.getLineForOffset(end)
+        
+        // Get horizontal positions
+        val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
+        val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
+        
+        // Get bottom Y position of the lines
+        val startY = currentLayout.getLineBottom(startLine) + relativeY
+        val endY = currentLayout.getLineBottom(endLine) + relativeY
+
+        val halfHandle = HANDLE_SIZE / 2
+
+        // ✅ Left handle - right edge aligns with selection start
+        // Position: startX - HANDLE_SIZE (so right edge at startX)
+        leftHandleView?.let { handle ->
+            val params = handle.layoutParams as? FrameLayout.LayoutParams
+            if (params != null) {
+                params.leftMargin = (startX - HANDLE_SIZE).toInt()
+                params.topMargin = (startY - halfHandle).toInt()
+                handle.layoutParams = params
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+            }
+        }
+        
+        // ✅ Right handle - left edge aligns with selection end
+        // Position: endX (so left edge at endX)
+        rightHandleView?.let { handle ->
+            val params = handle.layoutParams as? FrameLayout.LayoutParams
+            if (params != null) {
+                params.leftMargin = endX.toInt()
+                params.topMargin = (endY - halfHandle).toInt()
+                handle.layoutParams = params
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+            }
+        }
+        
+    } catch (e: Exception) {
+        EmergencyLog.logException(e, "updateHandlePositions")
     }
+}
     
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
