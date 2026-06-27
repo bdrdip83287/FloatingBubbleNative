@@ -969,9 +969,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FINAL FIX: Both handles positioned symmetrically OUTSIDE the selection box
-    // Both handles use the same logic - they sit at the edges of the text
-    // Visual: ●===== SELECTED TEXT =====●
+    // ✅ SIMPLEST SOLUTION: Both handles use exactly the same logic
+    // Left: leftMargin = startX - halfHandle  (handle's right edge touches text's left edge)
+    // Right: leftMargin = endX - halfHandle   (handle's left edge touches text's right edge)
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1001,23 +1001,22 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            // Get horizontal positions (start and end of selection)
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // Get bottom Y position of the lines
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ LEFT HANDLE: Positioned to the LEFT of the text
-            // Using the same logic as right handle - handle sits at the edge
+            // ✅ BOTH handles use the same formula: leftMargin = position - halfHandle
+            // Left handle: position = startX
+            // Right handle: position = endX
+            // Result: ●===== TEXT =====●
+            
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Left handle: leftMargin = startX - halfHandle
-                    // This puts the handle's right edge at the text's left edge
                     params.leftMargin = (startX - halfHandle).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
@@ -1026,14 +1025,10 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ RIGHT HANDLE: Positioned to the RIGHT of the text
-            // Using the same logic as left handle but mirrored
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // Right handle: leftMargin = endX - halfHandle
-                    // This puts the handle's left edge at the text's right edge
-                    // Same as left handle logic: leftMargin = position - halfHandle
+                    // 🔥 SAME LOGIC AS LEFT HANDLE: leftMargin = endX - halfHandle
                     params.leftMargin = (endX - halfHandle).toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
