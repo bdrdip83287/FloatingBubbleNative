@@ -969,7 +969,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ COMPLETE REWRITE: Handles positioned exactly at selection edges with no gaps
+    // ✅ FIXED: Left handle with zero padding/margin, right handle unchanged
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -987,64 +987,75 @@ class FloatingBubbleService : Service() {
                 return
             }
 
-            // Get EditText position on screen
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
             
-            // Get container position on screen
             val containerLocation = IntArray(2)
             handleContainer?.getLocationOnScreen(containerLocation) ?: return
             
-            // Calculate relative position
             val relativeX = editLocation[0] - containerLocation[0]
             val relativeY = editLocation[1] - containerLocation[1]
 
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
-            // Get exact pixel positions
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
-            // Get vertical center of the line
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // 🔥 LEFT HANDLE: Positioned so its RIGHT edge touches startX
-            // leftMargin = startX - HANDLE_SIZE (full handle width before text)
+            // ✅ LEFT HANDLE: Remove all padding and margin
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
+                    // Force zero padding on the handle itself
+                    handle.setPadding(0, 0, 0, 0)
+                    
+                    // Calculate position: right edge touches startX
+                    // leftMargin = startX - HANDLE_SIZE
                     params.leftMargin = (startX - HANDLE_SIZE).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
+                    
+                    // Ensure no extra margins
+                    params.rightMargin = 0
+                    params.bottomMargin = 0
+                    
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
+                    
                     // Force layout update
                     handle.requestLayout()
-                    EmergencyLog.log("LEFT: startX=$startX, leftMargin=${params.leftMargin}")
+                    
+                    EmergencyLog.log("LEFT FIXED: startX=$startX, leftMargin=${params.leftMargin}, HANDLE_SIZE=$HANDLE_SIZE")
                 }
             }
             
-            // 🔥 RIGHT HANDLE: Positioned so its LEFT edge touches endX
-            // leftMargin = endX (handle starts exactly at text's right edge)
+            // ✅ RIGHT HANDLE: Keep as is (working correctly)
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
+                    // Force zero padding
+                    handle.setPadding(0, 0, 0, 0)
+                    
                     params.leftMargin = endX.toInt()
                     params.topMargin = (endY - halfHandle).toInt()
+                    params.rightMargin = 0
+                    params.bottomMargin = 0
+                    
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
-                    // Force layout update
                     handle.requestLayout()
+                    
                     EmergencyLog.log("RIGHT: endX=$endX, leftMargin=${params.leftMargin}")
                 }
             }
             
-            // 🔥 Force container to redraw
+            // Force container to redraw
             handleContainer?.invalidate()
             
         } catch (e: Exception) {
