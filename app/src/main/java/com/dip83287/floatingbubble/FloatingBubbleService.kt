@@ -969,7 +969,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ CORRECTED: Left handle positioned correctly
+    // ✅ COMPLETE REWRITE: Using pixel-perfect positioning
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -987,67 +987,76 @@ class FloatingBubbleService : Service() {
                 return
             }
 
+            // Get EditText position on screen
             val editLocation = IntArray(2)
             editText.getLocationOnScreen(editLocation)
             
+            // Get container position on screen
             val containerLocation = IntArray(2)
             handleContainer?.getLocationOnScreen(containerLocation) ?: return
             
+            // Calculate relative position
             val relativeX = editLocation[0] - containerLocation[0]
             val relativeY = editLocation[1] - containerLocation[1]
 
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
+            // Get exact pixel positions from Layout
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
+            // Get vertical position (bottom of line for better alignment)
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ LEFT HANDLE: Positioned so center is at startX
-            // leftMargin = startX - halfHandle (center of handle at startX)
+            // 🔥 LEFT HANDLE: Using setX/setY for exact positioning
             leftHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    // Remove any padding
-                    handle.setPadding(0, 0, 0, 0)
-                    
-                    // Center of handle aligns with startX
-                    params.leftMargin = (startX - halfHandle).toInt()
-                    params.topMargin = (startY - halfHandle).toInt()
-                    
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                    handle.requestLayout()
-                    
-                    EmergencyLog.log("LEFT: startX=$startX, halfHandle=$halfHandle, leftMargin=${params.leftMargin}")
-                }
+                // Remove ALL padding and margins
+                handle.setPadding(0, 0, 0, 0)
+                
+                // Position: Right edge of handle touches startX
+                // So left edge = startX - HANDLE_SIZE
+                val leftPos = startX - HANDLE_SIZE
+                val topPos = startY - halfHandle
+                
+                // Use setX/setY for pixel-perfect positioning
+                handle.setX(leftPos)
+                handle.setY(topPos)
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+                
+                // Force layout
+                handle.requestLayout()
+                
+                EmergencyLog.log("LEFT: startX=$startX, leftPos=$leftPos, HANDLE_SIZE=$HANDLE_SIZE")
             }
             
-            // ✅ RIGHT HANDLE: Positioned so center is at endX
-            // leftMargin = endX - halfHandle (center of handle at endX)
+            // 🔥 RIGHT HANDLE: Using setX/setY for exact positioning
             rightHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    handle.setPadding(0, 0, 0, 0)
-                    
-                    // Center of handle aligns with endX
-                    params.leftMargin = (endX - halfHandle).toInt()
-                    params.topMargin = (endY - halfHandle).toInt()
-                    
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                    handle.requestLayout()
-                    
-                    EmergencyLog.log("RIGHT: endX=$endX, halfHandle=$halfHandle, leftMargin=${params.leftMargin}")
-                }
+                // Remove ALL padding and margins
+                handle.setPadding(0, 0, 0, 0)
+                
+                // Position: Left edge of handle touches endX
+                // So left edge = endX
+                val leftPos = endX
+                val topPos = endY - halfHandle
+                
+                // Use setX/setY for pixel-perfect positioning
+                handle.setX(leftPos)
+                handle.setY(topPos)
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+                
+                // Force layout
+                handle.requestLayout()
+                
+                EmergencyLog.log("RIGHT: endX=$endX, leftPos=$leftPos")
             }
             
+            // Force container to redraw
             handleContainer?.invalidate()
             
         } catch (e: Exception) {
