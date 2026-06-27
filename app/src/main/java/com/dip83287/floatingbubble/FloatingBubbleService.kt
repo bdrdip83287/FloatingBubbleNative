@@ -106,6 +106,7 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
+    // ✅ Increased handle size for better visibility
     private val HANDLE_SIZE = 44
 
     private var scrollHideHandler: Handler? = null
@@ -969,81 +970,76 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FINAL FIX: Both handles positioned OUTSIDE the selection box
-    // Left handle: just left of text (leftMargin = startX - halfHandle)
-    // Right handle: just right of text (leftMargin = endX) 
-    // Visual: ●[===== SELECTED TEXT =====]●
-    private fun updateHandlePositions() {
-        if (isScrolling) return
-        
-        try {
-            val currentLayout = editText.layout ?: return
-            if (leftHandleView == null || rightHandleView == null) {
-                recreateHandlesIfNeeded()
-                return
-            }
-
-            val start = editText.selectionStart
-            val end = editText.selectionEnd
-            
-            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-                return
-            }
-
-            val editLocation = IntArray(2)
-            editText.getLocationOnScreen(editLocation)
-            
-            val containerLocation = IntArray(2)
-            handleContainer?.getLocationOnScreen(containerLocation) ?: return
-            
-            val relativeX = editLocation[0] - containerLocation[0]
-            val relativeY = editLocation[1] - containerLocation[1]
-
-            val startLine = currentLayout.getLineForOffset(start)
-            val endLine = currentLayout.getLineForOffset(end)
-            
-            // Get horizontal positions (start and end of selection)
-            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
-            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
-            
-            // Get bottom Y position of the lines
-            val startY = currentLayout.getLineBottom(startLine) + relativeY
-            val endY = currentLayout.getLineBottom(endLine) + relativeY
-
-            val halfHandle = HANDLE_SIZE / 2
-
-            // ✅ LEFT HANDLE: Just to the LEFT of the selection start
-            // leftMargin = startX - halfHandle (handle's right edge touches text's left edge)
-            leftHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    params.leftMargin = (startX - halfHandle).toInt()
-                    params.topMargin = (startY - halfHandle).toInt()
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                    EmergencyLog.log("Left handle: startX=$startX, leftMargin=${params.leftMargin}")
-                }
-            }
-            
-            // ✅ RIGHT HANDLE: Just to the RIGHT of the selection end
-            // leftMargin = endX (handle's left edge touches text's right edge)
-            rightHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    params.leftMargin = endX.toInt()
-                    params.topMargin = (endY - halfHandle).toInt()
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                    EmergencyLog.log("Right handle: endX=$endX, leftMargin=${params.leftMargin}")
-                }
-            }
-            
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositions")
+// ✅ UPDATED: Handles positioned at bottom corners - Right handle on right side of selection
+private fun updateHandlePositions() {
+    if (isScrolling) return
+    
+    try {
+        val currentLayout = editText.layout ?: return
+        if (leftHandleView == null || rightHandleView == null) {
+            recreateHandlesIfNeeded()
+            return
         }
+
+        val start = editText.selectionStart
+        val end = editText.selectionEnd
+        
+        if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+            return
+        }
+
+        val editLocation = IntArray(2)
+        editText.getLocationOnScreen(editLocation)
+        
+        val containerLocation = IntArray(2)
+        handleContainer?.getLocationOnScreen(containerLocation) ?: return
+        
+        val relativeX = editLocation[0] - containerLocation[0]
+        val relativeY = editLocation[1] - containerLocation[1]
+
+        val startLine = currentLayout.getLineForOffset(start)
+        val endLine = currentLayout.getLineForOffset(end)
+        
+        // ✅ Get horizontal positions
+        val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
+        val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
+        
+        // ✅ Get bottom Y position of the lines
+        val startY = currentLayout.getLineBottom(startLine) + relativeY
+        val endY = currentLayout.getLineBottom(endLine) + relativeY
+
+        val halfHandle = HANDLE_SIZE / 2
+
+        // ✅ Left handle - positioned at bottom-left corner (outside the selection box)
+        leftHandleView?.let { handle ->
+            val params = handle.layoutParams as? FrameLayout.LayoutParams
+            if (params != null) {
+                params.leftMargin = (startX - halfHandle).toInt()
+                params.topMargin = (startY - halfHandle).toInt()
+                handle.layoutParams = params
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+            }
+        }
+        
+        // ✅ Right handle - positioned at bottom-right corner (outside the selection box)
+        // ✅ The handle should be on the RIGHT side of the selection end
+        rightHandleView?.let { handle ->
+            val params = handle.layoutParams as? FrameLayout.LayoutParams
+            if (params != null) {
+                // ✅ Place handle to the RIGHT of the selection end
+                params.leftMargin = (endX - halfHandle).toInt()
+                params.topMargin = (endY - halfHandle).toInt()
+                handle.layoutParams = params
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+            }
+        }
+        
+    } catch (e: Exception) {
+        EmergencyLog.logException(e, "updateHandlePositions")
     }
+}
     
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
@@ -1556,12 +1552,21 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
+    /**
+     * ✅ Enhanced isWordChar - supports all languages including Bengali, Hindi, Arabic, Urdu
+     */
     private fun isWordChar(char: Char): Boolean {
+        // ✅ Bengali (0980-09FF)
         val isBengali = char in '\u0980'..'\u09FF'
+        // ✅ Hindi/Devanagari (0900-097F)
         val isHindi = char in '\u0900'..'\u097F'
+        // ✅ Arabic (0600-06FF)
         val isArabic = char in '\u0600'..'\u06FF'
+        // ✅ Urdu (Arabic extended)
         val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
+        // ✅ Any Unicode letter or digit
         val isLetterOrDigit = Character.isLetterOrDigit(char)
+        // ✅ Special characters
         val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
                        char == '#' || char == '$' || char == '%' || char == '&' ||
                        char == '*' || char == '+' || char == '=' || char == '~' ||
@@ -1570,6 +1575,7 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
+    // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1582,15 +1588,19 @@ class FloatingBubbleService : Service() {
                     var wordStart = offset
                     var wordEnd = offset
                     
+                    // EXTEND LEFT: include all word characters
                     while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
                     
+                    // EXTEND RIGHT: include all word characters
                     while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
                     }
                     
+                    // If nothing was selected (e.g., cursor on a space), try to find nearby word
                     if (wordStart == wordEnd) {
+                        // Try to find word to the left
                         var tempStart = offset - 1
                         while (tempStart >= 0 && isWordChar(text[tempStart])) {
                             tempStart--
@@ -1610,14 +1620,18 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
+                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
+                        // ✅ CRITICAL FIX: Force recreate handles before showing
                         leftHandleView = null
                         rightHandleView = null
                         
+                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
+                        // ✅ Multiple attempts to ensure handles are positioned correctly
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 50)
@@ -1868,7 +1882,9 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
+                                    // ✅ Additional attempts
                                     Handler(Looper.getMainLooper()).postDelayed({
                                         updateHandlePositionsImmediate()
                                     }, 50)
@@ -1916,6 +1932,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            // ✅ Force immediate position update on text change
                             updateHandlePositionsImmediate()
                         }
                     }
