@@ -969,9 +969,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FINAL FIX: Both handles positioned OUTSIDE the selection box
-    // Left handle: just left of text (leftMargin = startX - halfHandle)
-    // Right handle: just right of text (leftMargin = endX) 
+    // ✅ FINAL FIX: Both handles positioned symmetrically outside the selection box
+    // Left handle: leftMargin = startX - halfHandle (handle's right edge touches text's left edge)
+    // Right handle: leftMargin = endX (handle's left edge touches text's right edge)
     // Visual: ●[===== SELECTED TEXT =====]●
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1012,8 +1012,8 @@ class FloatingBubbleService : Service() {
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ LEFT HANDLE: Just to the LEFT of the selection start
-            // leftMargin = startX - halfHandle (handle's right edge touches text's left edge)
+            // ✅ LEFT HANDLE: Positioned to the LEFT of the text
+            // leftMargin = startX - halfHandle
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1022,12 +1022,12 @@ class FloatingBubbleService : Service() {
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
-                    EmergencyLog.log("Left handle: startX=$startX, leftMargin=${params.leftMargin}")
                 }
             }
             
-            // ✅ RIGHT HANDLE: Just to the RIGHT of the selection end
-            // leftMargin = endX (handle's left edge touches text's right edge)
+            // ✅ RIGHT HANDLE: Positioned to the RIGHT of the text (mirror of left handle logic)
+            // Since left handle uses: leftMargin = startX - halfHandle
+            // Right handle should use: leftMargin = endX (the handle starts at the text's right edge)
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1036,7 +1036,6 @@ class FloatingBubbleService : Service() {
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
                     handle.alpha = 1f
-                    EmergencyLog.log("Right handle: endX=$endX, leftMargin=${params.leftMargin}")
                 }
             }
             
