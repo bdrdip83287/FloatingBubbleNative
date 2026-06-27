@@ -969,98 +969,35 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FIXED: Left handle with zero padding/margin, right handle unchanged
-    private fun updateHandlePositions() {
-        if (isScrolling) return
-        
-        try {
-            val currentLayout = editText.layout ?: return
-            if (leftHandleView == null || rightHandleView == null) {
-                recreateHandlesIfNeeded()
-                return
+    // ✅ UPDATED: Create handles with NO padding
+    private fun createSelectionHandles(): Pair<View, View> {
+        val leftHandle = ImageView(this).apply {
+            setImageDrawable(createCircleHandleDrawable())
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            // 🔥 CRITICAL: Remove all padding
+            setPadding(0, 0, 0, 0)
+            setOnTouchListener(HandleTouchListener(isLeft = true))
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE).apply {
+                // 🔥 CRITICAL: Ensure no margins
+                setMargins(0, 0, 0, 0)
             }
-
-            val start = editText.selectionStart
-            val end = editText.selectionEnd
-            
-            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-                return
-            }
-
-            val editLocation = IntArray(2)
-            editText.getLocationOnScreen(editLocation)
-            
-            val containerLocation = IntArray(2)
-            handleContainer?.getLocationOnScreen(containerLocation) ?: return
-            
-            val relativeX = editLocation[0] - containerLocation[0]
-            val relativeY = editLocation[1] - containerLocation[1]
-
-            val startLine = currentLayout.getLineForOffset(start)
-            val endLine = currentLayout.getLineForOffset(end)
-            
-            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
-            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
-            
-            val startY = currentLayout.getLineBottom(startLine) + relativeY
-            val endY = currentLayout.getLineBottom(endLine) + relativeY
-
-            val halfHandle = HANDLE_SIZE / 2
-
-            // ✅ LEFT HANDLE: Remove all padding and margin
-            leftHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    // Force zero padding on the handle itself
-                    handle.setPadding(0, 0, 0, 0)
-                    
-                    // Calculate position: right edge touches startX
-                    // leftMargin = startX - HANDLE_SIZE
-                    params.leftMargin = (startX - HANDLE_SIZE).toInt()
-                    params.topMargin = (startY - halfHandle).toInt()
-                    
-                    // Ensure no extra margins
-                    params.rightMargin = 0
-                    params.bottomMargin = 0
-                    
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                    
-                    // Force layout update
-                    handle.requestLayout()
-                    
-                    EmergencyLog.log("LEFT FIXED: startX=$startX, leftMargin=${params.leftMargin}, HANDLE_SIZE=$HANDLE_SIZE")
-                }
-            }
-            
-            // ✅ RIGHT HANDLE: Keep as is (working correctly)
-            rightHandleView?.let { handle ->
-                val params = handle.layoutParams as? FrameLayout.LayoutParams
-                if (params != null) {
-                    // Force zero padding
-                    handle.setPadding(0, 0, 0, 0)
-                    
-                    params.leftMargin = endX.toInt()
-                    params.topMargin = (endY - halfHandle).toInt()
-                    params.rightMargin = 0
-                    params.bottomMargin = 0
-                    
-                    handle.layoutParams = params
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-                    handle.requestLayout()
-                    
-                    EmergencyLog.log("RIGHT: endX=$endX, leftMargin=${params.leftMargin}")
-                }
-            }
-            
-            // Force container to redraw
-            handleContainer?.invalidate()
-            
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "updateHandlePositions")
         }
+        
+        val rightHandle = ImageView(this).apply {
+            setImageDrawable(createCircleHandleDrawable())
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            // 🔥 CRITICAL: Remove all padding
+            setPadding(0, 0, 0, 0)
+            setOnTouchListener(HandleTouchListener(isLeft = false))
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE).apply {
+                // 🔥 CRITICAL: Ensure no margins
+                setMargins(0, 0, 0, 0)
+            }
+        }
+        
+        return Pair(leftHandle, rightHandle)
     }
     
     private fun recreateHandlesIfNeeded() {
