@@ -969,9 +969,10 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ SIMPLEST SOLUTION: Both handles use exactly the same logic
-    // Left: leftMargin = startX - halfHandle  (handle's right edge touches text's left edge)
-    // Right: leftMargin = endX - halfHandle   (handle's left edge touches text's right edge)
+    // ✅ FINAL FIX: Both handles centered on the selection edges
+    // Left handle: center of handle at startX (left edge of selection)
+    // Right handle: center of handle at endX (right edge of selection)
+    // Visual: ●===== SELECTED TEXT =====●
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1001,19 +1002,18 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
+            // Get horizontal positions (start and end of selection)
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
+            // Get bottom Y position of the lines
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ BOTH handles use the same formula: leftMargin = position - halfHandle
-            // Left handle: position = startX
-            // Right handle: position = endX
-            // Result: ●===== TEXT =====●
-            
+            // ✅ LEFT HANDLE: Center of handle aligned with startX (left edge of selection)
+            // leftMargin = startX - halfHandle (so center is at startX)
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1025,10 +1025,11 @@ class FloatingBubbleService : Service() {
                 }
             }
             
+            // ✅ RIGHT HANDLE: Center of handle aligned with endX (right edge of selection)
+            // leftMargin = endX - halfHandle (so center is at endX)
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // 🔥 SAME LOGIC AS LEFT HANDLE: leftMargin = endX - halfHandle
                     params.leftMargin = (endX - halfHandle).toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
