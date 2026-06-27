@@ -969,7 +969,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ ALTERNATIVE: Right handle using same logic as left handle but mirrored
+    // ✅ FINAL FIX: Both handles positioned symmetrically OUTSIDE the selection box
+    // Both handles use the same logic - they sit at the edges of the text
+    // Visual: ●===== SELECTED TEXT =====●
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -999,18 +1001,23 @@ class FloatingBubbleService : Service() {
             val startLine = currentLayout.getLineForOffset(start)
             val endLine = currentLayout.getLineForOffset(end)
             
+            // Get horizontal positions (start and end of selection)
             val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
             val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
             
+            // Get bottom Y position of the lines
             val startY = currentLayout.getLineBottom(startLine) + relativeY
             val endY = currentLayout.getLineBottom(endLine) + relativeY
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ LEFT HANDLE: left of text
+            // ✅ LEFT HANDLE: Positioned to the LEFT of the text
+            // Using the same logic as right handle - handle sits at the edge
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
+                    // Left handle: leftMargin = startX - halfHandle
+                    // This puts the handle's right edge at the text's left edge
                     params.leftMargin = (startX - halfHandle).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
@@ -1019,15 +1026,15 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ RIGHT HANDLE: right of text (mirrored)
-            // Left handle: leftMargin = startX - halfHandle (half handle left of text)
-            // Right handle: leftMargin = endX (handle starts at text's right edge)
-            // OR leftMargin = endX (since handle width is HANDLE_SIZE, it extends to the right)
+            // ✅ RIGHT HANDLE: Positioned to the RIGHT of the text
+            // Using the same logic as left handle but mirrored
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    // 🔥 TRY THIS: endX (handle starts exactly at text's right edge)
-                    params.leftMargin = endX.toInt()
+                    // Right handle: leftMargin = endX - halfHandle
+                    // This puts the handle's left edge at the text's right edge
+                    // Same as left handle logic: leftMargin = position - halfHandle
+                    params.leftMargin = (endX - halfHandle).toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
