@@ -969,9 +969,9 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ FINAL FIX: Both handles centered on the selection edges
-    // Left handle: center of handle at startX (left edge of selection)
-    // Right handle: center of handle at endX (right edge of selection)
+    // ✅ FINAL FIX: Handles positioned exactly at selection edges
+    // Left handle: handle's right edge at startX (left edge of selection)
+    // Right handle: handle's left edge at endX (right edge of selection)
     // Visual: ●===== SELECTED TEXT =====●
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1012,12 +1012,12 @@ class FloatingBubbleService : Service() {
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ LEFT HANDLE: Center of handle aligned with startX (left edge of selection)
-            // leftMargin = startX - halfHandle (so center is at startX)
+            // ✅ LEFT HANDLE: Right edge touches startX (left edge of selection)
+            // leftMargin = startX - HANDLE_SIZE (full handle width to the left of text)
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    params.leftMargin = (startX - halfHandle).toInt()
+                    params.leftMargin = (startX - HANDLE_SIZE).toInt()
                     params.topMargin = (startY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
@@ -1025,12 +1025,12 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ RIGHT HANDLE: Center of handle aligned with endX (right edge of selection)
-            // leftMargin = endX - halfHandle (so center is at endX)
+            // ✅ RIGHT HANDLE: Left edge touches endX (right edge of selection)
+            // leftMargin = endX (handle starts exactly at text's right edge)
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    params.leftMargin = (endX - halfHandle).toInt()
+                    params.leftMargin = endX.toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     handle.visibility = View.VISIBLE
