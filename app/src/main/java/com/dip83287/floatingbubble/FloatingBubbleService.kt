@@ -1204,18 +1204,27 @@ private fun updateHandlePositions() {
         actionBarView.addView(createDivider())
         
         val copyBtn = TextView(this).apply {
-            text = "Copy"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = android.content.ClipData.newPlainText("text", selectedText)
-                clipboard.setPrimaryClip(clip)
-                hideFloatingActionBar()
-                Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
-            }
+    text = "Copy"
+    textSize = 13f
+    setTextColor(Color.WHITE)
+    setPadding(14, 8, 14, 8)
+    setOnClickListener {
+        val (start, end) = getSelection()
+        if (start != end) {
+            val selectedText = editText.text.substring(start, end)
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = android.content.ClipData.newPlainText("text", selectedText)
+            clipboard.setPrimaryClip(clip)
+            
+            // ✅ Clear selection and hide everything (same as Cut)
+            editText.setSelection(start, start)  // Deselect
+            hideSelectionHandles()
+            hideFloatingActionBar()
+            
+            Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
         }
+    }
+}
         actionBarView.addView(copyBtn)
         
         actionBarView.addView(createDivider())
