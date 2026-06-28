@@ -864,13 +864,14 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ UPDATED: Enhanced HandleTouchListener with full drag support for both handles
+    // ✅ FIXED: HandleTouchListener with improved touch handling - no premature release
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
+        private var isPointerDown = false
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -880,19 +881,29 @@ class FloatingBubbleService : Service() {
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
+                    isPointerDown = true
                     
                     if (isLeft) {
                         isDraggingLeftHandle = true
                     } else {
                         isDraggingRightHandle = true
                     }
+                    
+                    // ✅ Request parent to not intercept touch events
+                    v.parent.requestDisallowInterceptTouchEvent(true)
+                    
+                    EmergencyLog.log("Handle touch DOWN - isLeft: $isLeft")
                     return true
                 }
+                
                 MotionEvent.ACTION_MOVE -> {
+                    if (!isPointerDown) return true
+                    
                     val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastUpdateTime < 16) {
-                        return true
-                    }
+                    // ✅ Remove the time restriction - allow continuous updates
+                    // if (currentTime - lastUpdateTime < 16) {
+                    //     return true
+                    // }
                     lastUpdateTime = currentTime
                     
                     val currentLayout = editText.layout
@@ -901,39 +912,36 @@ class FloatingBubbleService : Service() {
                         val editLocation = IntArray(2)
                         editText.getLocationOnScreen(editLocation)
                         
-                        // ✅ Calculate delta X and Y
-                        val deltaX = event.rawX - initialTouchX
-                        val deltaY = event.rawY - initialTouchY
-                        
-                        // ✅ Convert delta to text offset changes
                         val textX = event.rawX - editLocation[0] + editText.scrollX
                         val textY = event.rawY - editLocation[1] + editText.scrollY
                         
-                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val line = currentLayout.getLineForVertical(
+                            textY.toInt().coerceIn(0, currentLayout.height - 1)
+                        )
                         val offset = currentLayout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
                         if (isLeft) {
-                            // ✅ Left handle: can drag left OR right, and up OR down
-                            // The new selection start should be the new offset
+                            // ✅ Left handle - selection start
                             if (newOffset < initialSelectionEnd) {
                                 editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
-                                // If dragged past the right handle, swap
+                                // ✅ If dragged past right handle, swap selection
                                 editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
-                            // ✅ Right handle: can drag right OR left, and up OR down
+                            // ✅ Right handle - selection end
                             if (newOffset > initialSelectionStart) {
                                 editText.setSelection(initialSelectionStart, newOffset)
                             } else {
-                                // If dragged past the left handle, swap
+                                // ✅ If dragged past left handle, swap selection
                                 editText.setSelection(newOffset, initialSelectionStart)
                             }
                         }
                         
+                        // ✅ Always update handles during drag
                         if (!isScrolling) {
-                            updateHandlePositionsSafe()
+                            updateHandlePositionsImmediate()
                         }
                         
                         val (start, end) = getSelection()
@@ -941,28 +949,41 @@ class FloatingBubbleService : Service() {
                             val selected = editText.text.substring(start, end)
                             if (selected.isNotEmpty()) {
                                 currentSelectedText = selected
+                                // ✅ Update action bar position
                                 showFloatingActionBar(selected)
                             }
                         }
                     }
                     return true
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    isDraggingLeftHandle = false
-                    isDraggingRightHandle = false
-                    
-                    // ✅ Update handles after drag ends
-                    if (editText.hasSelection()) {
-                        updateHandlePositionsImmediate()
-                        val (start, end) = getSelection()
-                        if (start != end) {
-                            val selected = editText.text.substring(start, end)
-                            if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                showFloatingActionBar(selected)
-                            }
-                        }
+                
+                MotionEvent.ACTION_UP -> {
+                    isPointerDown = false
+                    if (isLeft) {
+                        isDraggingLeftHandle = false
+                    } else {
+                        isDraggingRightHandle = false
                     }
+                    
+                    // ✅ Release parent intercept
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+                    
+                    EmergencyLog.log("Handle touch UP - isLeft: $isLeft")
+                    return true
+                }
+                
+                MotionEvent.ACTION_CANCEL -> {
+                    isPointerDown = false
+                    if (isLeft) {
+                        isDraggingLeftHandle = false
+                    } else {
+                        isDraggingRightHandle = false
+                    }
+                    
+                    // ✅ Release parent intercept
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+                    
+                    EmergencyLog.log("Handle touch CANCEL - isLeft: $isLeft")
                     return true
                 }
             }
