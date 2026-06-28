@@ -970,7 +970,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-// ✅ FINAL FIX: Right handle positioned correctly on the RIGHT side of selection
+// ✅ UPDATED: Handles positioned at bottom corners - Right handle on right side of selection
 private fun updateHandlePositions() {
     if (isScrolling) return
     
@@ -1000,43 +1000,41 @@ private fun updateHandlePositions() {
         val startLine = currentLayout.getLineForOffset(start)
         val endLine = currentLayout.getLineForOffset(end)
         
-        // ✅ Get the exact horizontal positions
+        // ✅ Get horizontal positions
         val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
         val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
         
-        // ✅ Get the bottom Y position
+        // ✅ Get bottom Y position of the lines
         val startY = currentLayout.getLineBottom(startLine) + relativeY
         val endY = currentLayout.getLineBottom(endLine) + relativeY
 
         val halfHandle = HANDLE_SIZE / 2
 
-        // ✅ LEFT HANDLE: positioned at the LEFT of selection start
+        // ✅ Left handle - positioned at bottom-left corner (outside the selection box)
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? FrameLayout.LayoutParams
             if (params != null) {
                 params.leftMargin = (startX - halfHandle).toInt()
-                params.topMargin = (endY - halfHandle).toInt()
+                params.topMargin = (startY - halfHandle).toInt()
                 handle.layoutParams = params
                 handle.visibility = View.VISIBLE
                 handle.alpha = 1f
             }
         }
         
-        // ✅ RIGHT HANDLE: positioned at the RIGHT of selection end
-        // ✅ The handle's LEFT edge should be at selection's RIGHT edge
-        // ✅ ALTERNATIVE: Right handle with small gap for better visibility
-rightHandleView?.let { handle ->
-    val params = handle.layoutParams as? FrameLayout.LayoutParams
-    if (params != null) {
-        // ✅ Add 2px gap so handle doesn't overlap with text
-        val gap = 13  // 4px gap for better visibility
-        params.leftMargin = (endX + gap).toInt()
-        params.topMargin = (endY - halfHandle).toInt()
-        handle.layoutParams = params
-        handle.visibility = View.VISIBLE
-        handle.alpha = 1f
-    }
-}
+        // ✅ Right handle - positioned at bottom-right corner (outside the selection box)
+        // ✅ The handle should be on the RIGHT side of the selection end
+        rightHandleView?.let { handle ->
+            val params = handle.layoutParams as? FrameLayout.LayoutParams
+            if (params != null) {
+                // ✅ Place handle to the RIGHT of the selection end
+                params.leftMargin = (endX - halfHandle).toInt()
+                params.topMargin = (endY - halfHandle).toInt()
+                handle.layoutParams = params
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+            }
+        }
         
     } catch (e: Exception) {
         EmergencyLog.logException(e, "updateHandlePositions")
