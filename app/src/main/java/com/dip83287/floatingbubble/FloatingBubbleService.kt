@@ -970,7 +970,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-// ✅ UPDATED: Handles positioned at bottom corners - Right handle on right side of selection
+// ✅ UPDATED: Handles positioned at bottom corners - Right handle on right side with gap
 private fun updateHandlePositions() {
     if (isScrolling) return
     
@@ -1010,7 +1010,7 @@ private fun updateHandlePositions() {
 
         val halfHandle = HANDLE_SIZE / 2
 
-        // ✅ Left handle - positioned at bottom-left corner (outside the selection box)
+        // ✅ Left handle - positioned at bottom-left corner
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? FrameLayout.LayoutParams
             if (params != null) {
@@ -1022,20 +1022,19 @@ private fun updateHandlePositions() {
             }
         }
         
-        // ✅ Right handle - positioned at bottom-right corner (outside the selection box)
-// ✅ ALTERNATIVE: Right handle with small gap for better visibility
-rightHandleView?.let { handle ->
-    val params = handle.layoutParams as? FrameLayout.LayoutParams
-    if (params != null) {
-        // ✅ Add 2px gap so handle doesn't overlap with text
-        val gap = 4  // 4px gap for better visibility
-        params.leftMargin = (endX + gap).toInt()
-        params.topMargin = (endY - halfHandle).toInt()
-        handle.layoutParams = params
-        handle.visibility = View.VISIBLE
-        handle.alpha = 1f
-    }
-}
+        // ✅ Right handle - positioned on RIGHT side of selection with gap
+        rightHandleView?.let { handle ->
+            val params = handle.layoutParams as? FrameLayout.LayoutParams
+            if (params != null) {
+                // ✅ Add 14px gap so handle doesn't overlap with text
+                val gap = 14
+                params.leftMargin = (endX + gap).toInt()
+                params.topMargin = (endY - halfHandle).toInt()
+                handle.layoutParams = params
+                handle.visibility = View.VISIBLE
+                handle.alpha = 1f
+            }
+        }
         
     } catch (e: Exception) {
         EmergencyLog.logException(e, "updateHandlePositions")
