@@ -970,7 +970,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-// ✅ COMPLETE FIX: Right handle left edge exactly at selection right edge
+// ✅ FINAL FIX: Right handle positioned correctly on the RIGHT side of selection
 private fun updateHandlePositions() {
     if (isScrolling) return
     
@@ -1000,15 +1000,17 @@ private fun updateHandlePositions() {
         val startLine = currentLayout.getLineForOffset(start)
         val endLine = currentLayout.getLineForOffset(end)
         
+        // ✅ Get the exact horizontal positions
         val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
         val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
         
+        // ✅ Get the bottom Y position
         val startY = currentLayout.getLineBottom(startLine) + relativeY
         val endY = currentLayout.getLineBottom(endLine) + relativeY
 
         val halfHandle = HANDLE_SIZE / 2
 
-        // ✅ Left handle - bottom-left corner
+        // ✅ LEFT HANDLE: positioned at the LEFT of selection start
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? FrameLayout.LayoutParams
             if (params != null) {
@@ -1020,12 +1022,14 @@ private fun updateHandlePositions() {
             }
         }
         
-        // ✅ Right handle - LEFT edge aligns with RIGHT edge of selection
-        // ✅ No subtraction of halfHandle - left edge of handle touches selection end
+        // ✅ RIGHT HANDLE: positioned at the RIGHT of selection end
+        // ✅ The handle's LEFT edge should be at selection's RIGHT edge
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? FrameLayout.LayoutParams
             if (params != null) {
-                // Use endX directly - this is the right edge of the selection
+                // ✅ IMPORTANT: endX is the right edge of the selection
+                // ✅ We want the handle's left edge to be at endX
+                // ✅ So no offset needed - just use endX directly
                 params.leftMargin = (endX).toInt()
                 params.topMargin = (endY - halfHandle).toInt()
                 handle.layoutParams = params
