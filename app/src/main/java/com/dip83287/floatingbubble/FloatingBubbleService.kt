@@ -1029,7 +1029,7 @@ rightHandleView?.let { handle ->
     val params = handle.layoutParams as? FrameLayout.LayoutParams
     if (params != null) {
         // ✅ Add 2px gap so handle doesn't overlap with text
-        val gap = 8  // 4px gap for better visibility
+        val gap = 13  // 4px gap for better visibility
         params.leftMargin = (endX + gap).toInt()
         params.topMargin = (endY - halfHandle).toInt()
         handle.layoutParams = params
