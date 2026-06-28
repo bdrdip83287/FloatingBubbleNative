@@ -864,7 +864,7 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ UPDATED: HandleTouchListener with enhanced drag functionality
+    // ✅ UPDATED: Enhanced HandleTouchListener with full drag support for both handles
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -901,43 +901,34 @@ class FloatingBubbleService : Service() {
                         val editLocation = IntArray(2)
                         editText.getLocationOnScreen(editLocation)
                         
+                        // ✅ Calculate delta X and Y
                         val deltaX = event.rawX - initialTouchX
                         val deltaY = event.rawY - initialTouchY
                         
-                        // Get current selection bounds
-                        val startLine = currentLayout.getLineForOffset(initialSelectionStart)
-                        val endLine = currentLayout.getLineForOffset(initialSelectionEnd)
+                        // ✅ Convert delta to text offset changes
+                        val textX = event.rawX - editLocation[0] + editText.scrollX
+                        val textY = event.rawY - editLocation[1] + editText.scrollY
                         
-                        val startX = currentLayout.getPrimaryHorizontal(initialSelectionStart)
-                        val endX = currentLayout.getPrimaryHorizontal(initialSelectionEnd)
+                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
+                        val newOffset = offset.coerceIn(0, editText.text.length)
                         
-                        val startY = currentLayout.getLineBottom(startLine)
-                        val endY = currentLayout.getLineBottom(endLine)
-                        
-                        // Calculate new offset based on drag direction
                         if (isLeft) {
-                            // Left handle: adjust start position
-                            val textX = startX + deltaX
-                            val line = currentLayout.getLineForVertical((startY + deltaY).toInt().coerceIn(0, currentLayout.height - 1))
-                            val newOffset = currentLayout.getOffsetForHorizontal(line, textX)
-                            val clampedOffset = newOffset.coerceIn(0, initialSelectionEnd)
-                            
-                            if (clampedOffset < initialSelectionEnd) {
-                                editText.setSelection(clampedOffset, initialSelectionEnd)
+                            // ✅ Left handle: can drag left OR right, and up OR down
+                            // The new selection start should be the new offset
+                            if (newOffset < initialSelectionEnd) {
+                                editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
-                                editText.setSelection(initialSelectionEnd, clampedOffset)
+                                // If dragged past the right handle, swap
+                                editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
-                            // Right handle: adjust end position
-                            val textX = endX + deltaX
-                            val line = currentLayout.getLineForVertical((endY + deltaY).toInt().coerceIn(0, currentLayout.height - 1))
-                            val newOffset = currentLayout.getOffsetForHorizontal(line, textX)
-                            val clampedOffset = newOffset.coerceIn(initialSelectionStart, editText.text.length)
-                            
-                            if (clampedOffset > initialSelectionStart) {
-                                editText.setSelection(initialSelectionStart, clampedOffset)
+                            // ✅ Right handle: can drag right OR left, and up OR down
+                            if (newOffset > initialSelectionStart) {
+                                editText.setSelection(initialSelectionStart, newOffset)
                             } else {
-                                editText.setSelection(clampedOffset, initialSelectionStart)
+                                // If dragged past the left handle, swap
+                                editText.setSelection(newOffset, initialSelectionStart)
                             }
                         }
                         
@@ -960,15 +951,16 @@ class FloatingBubbleService : Service() {
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
                     
-                    // ✅ Update selection one final time
-                    val (start, end) = getSelection()
-                    if (start != end && start >= 0 && end <= editText.text.length) {
-                        val selected = editText.text.substring(start, end)
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            showFloatingActionBar(selected)
-                            showSelectionHandles()
-                            updateHandlePositionsImmediate()
+                    // ✅ Update handles after drag ends
+                    if (editText.hasSelection()) {
+                        updateHandlePositionsImmediate()
+                        val (start, end) = getSelection()
+                        if (start != end) {
+                            val selected = editText.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
+                            }
                         }
                     }
                     return true
@@ -1246,6 +1238,7 @@ class FloatingBubbleService : Service() {
                     val clip = android.content.ClipData.newPlainText("text", selectedText)
                     clipboard.setPrimaryClip(clip)
                     
+                    // ✅ Clear selection and hide everything (same as Cut)
                     editText.setSelection(start, start)
                     hideSelectionHandles()
                     hideFloatingActionBar()
@@ -1613,7 +1606,7 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
-    // ✅ selectWordAtPosition with improved word boundary detection for all languages
+    // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1626,15 +1619,19 @@ class FloatingBubbleService : Service() {
                     var wordStart = offset
                     var wordEnd = offset
                     
+                    // EXTEND LEFT: include all word characters
                     while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
                     
+                    // EXTEND RIGHT: include all word characters
                     while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
                     }
                     
+                    // If nothing was selected (e.g., cursor on a space), try to find nearby word
                     if (wordStart == wordEnd) {
+                        // Try to find word to the left
                         var tempStart = offset - 1
                         while (tempStart >= 0 && isWordChar(text[tempStart])) {
                             tempStart--
@@ -1654,14 +1651,18 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
+                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
+                        // ✅ CRITICAL FIX: Force recreate handles before showing
                         leftHandleView = null
                         rightHandleView = null
                         
+                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
+                        // ✅ Multiple attempts to ensure handles are positioned correctly
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 50)
@@ -1785,6 +1786,7 @@ class FloatingBubbleService : Service() {
                     isScrolling = true
                     EmergencyLog.log("Scrolling started - hiding handles")
                     
+                    // ✅ Always hide handles when scrolling starts
                     if (areHandlesVisible) {
                         hideSelectionHandles()
                     }
@@ -1802,7 +1804,9 @@ class FloatingBubbleService : Service() {
                         isScrolling = false
                         EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
+                        // ✅ Always show handles when scrolling stops
                         if (editText.hasSelection()) {
+                            // ✅ Recreate handles to ensure fresh state
                             leftHandleView = null
                             rightHandleView = null
                             
@@ -1915,7 +1919,9 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
+                                    // ✅ Additional attempts
                                     Handler(Looper.getMainLooper()).postDelayed({
                                         updateHandlePositionsImmediate()
                                     }, 50)
@@ -1963,6 +1969,7 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            // ✅ Force immediate position update on text change
                             updateHandlePositionsImmediate()
                         }
                     }
