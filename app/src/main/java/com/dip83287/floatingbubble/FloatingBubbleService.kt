@@ -970,7 +970,7 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-// ✅ FIXED: Right handle - left edge exactly at right edge of selection (with proper offset)
+// ✅ FINAL FIX: Right handle - left edge positioned to the RIGHT of selection edge
 private fun updateHandlePositions() {
     if (isScrolling) return
     
@@ -1000,17 +1000,15 @@ private fun updateHandlePositions() {
         val startLine = currentLayout.getLineForOffset(start)
         val endLine = currentLayout.getLineForOffset(end)
         
-        // ✅ Get horizontal positions
         val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
         val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
         
-        // ✅ Get bottom Y position of the lines
         val startY = currentLayout.getLineBottom(startLine) + relativeY
         val endY = currentLayout.getLineBottom(endLine) + relativeY
 
         val halfHandle = HANDLE_SIZE / 2
 
-        // ✅ Left handle - positioned at bottom-left corner (outside the selection)
+        // ✅ Left handle - positioned at bottom-left corner (outside)
         leftHandleView?.let { handle ->
             val params = handle.layoutParams as? FrameLayout.LayoutParams
             if (params != null) {
@@ -1022,14 +1020,14 @@ private fun updateHandlePositions() {
             }
         }
         
-        // ✅ Right handle - LEFT edge exactly at RIGHT edge of selection
+        // ✅ Right handle - LEFT edge is to the RIGHT of selection RIGHT edge
         // ✅ Visual: [=====SELECTED=====]●
         rightHandleView?.let { handle ->
             val params = handle.layoutParams as? FrameLayout.LayoutParams
             if (params != null) {
-                // ✅ Handle's left edge = selection end position
-                // ✅ No offset needed since we want the left edge to touch the selection
-                params.leftMargin = (endX).toInt()
+                // ✅ Add small gap (2dp) between selection and handle for better visibility
+                val gap = 2
+                params.leftMargin = (endX + gap).toInt()
                 params.topMargin = (endY - halfHandle).toInt()
                 handle.layoutParams = params
                 handle.visibility = View.VISIBLE
