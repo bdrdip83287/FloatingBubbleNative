@@ -1793,7 +1793,7 @@ private fun updateHandlePositions() {
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
-            textSize = 15f
+            textSize = 10f
             gravity = Gravity.TOP or Gravity.START
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
