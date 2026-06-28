@@ -107,7 +107,7 @@ class FloatingBubbleService : Service() {
     private var handleContainer: FrameLayout? = null
     
     // ✅ Increased handle size for better visibility
-    private val HANDLE_SIZE = 35
+    private val HANDLE_SIZE = 40
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
