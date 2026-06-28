@@ -1024,19 +1024,19 @@ private fun updateHandlePositions() {
         
         // ✅ RIGHT HANDLE: positioned at the RIGHT of selection end
         // ✅ The handle's LEFT edge should be at selection's RIGHT edge
-        rightHandleView?.let { handle ->
-            val params = handle.layoutParams as? FrameLayout.LayoutParams
-            if (params != null) {
-                // ✅ IMPORTANT: endX is the right edge of the selection
-                // ✅ We want the handle's left edge to be at endX
-                // ✅ So no offset needed - just use endX directly
-                params.leftMargin = (endX).toInt()
-                params.topMargin = (endY - halfHandle).toInt()
-                handle.layoutParams = params
-                handle.visibility = View.VISIBLE
-                handle.alpha = 1f
-            }
-        }
+        // ✅ ALTERNATIVE: Right handle with small gap for better visibility
+rightHandleView?.let { handle ->
+    val params = handle.layoutParams as? FrameLayout.LayoutParams
+    if (params != null) {
+        // ✅ Add 2px gap so handle doesn't overlap with text
+        val gap = 4  // 4px gap for better visibility
+        params.leftMargin = (endX + gap).toInt()
+        params.topMargin = (endY - halfHandle).toInt()
+        handle.layoutParams = params
+        handle.visibility = View.VISIBLE
+        handle.alpha = 1f
+    }
+}
         
     } catch (e: Exception) {
         EmergencyLog.logException(e, "updateHandlePositions")
