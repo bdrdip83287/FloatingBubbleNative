@@ -106,8 +106,7 @@ class FloatingBubbleService : Service() {
     
     private var handleContainer: FrameLayout? = null
     
-    // ✅ Increased handle size for better visibility
-    private val HANDLE_SIZE = 40
+    private val HANDLE_SIZE = 44
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -970,76 +969,73 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-// ✅ UPDATED: Handles positioned at bottom corners - Right handle on right side with gap
-private fun updateHandlePositions() {
-    if (isScrolling) return
-    
-    try {
-        val currentLayout = editText.layout ?: return
-        if (leftHandleView == null || rightHandleView == null) {
-            recreateHandlesIfNeeded()
-            return
-        }
-
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
+    // ✅ UPDATED: Handles positioned at bottom corners with right handle on right side
+    private fun updateHandlePositions() {
+        if (isScrolling) return
         
-        if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
-            return
-        }
-
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
-        
-        val containerLocation = IntArray(2)
-        handleContainer?.getLocationOnScreen(containerLocation) ?: return
-        
-        val relativeX = editLocation[0] - containerLocation[0]
-        val relativeY = editLocation[1] - containerLocation[1]
-
-        val startLine = currentLayout.getLineForOffset(start)
-        val endLine = currentLayout.getLineForOffset(end)
-        
-        // ✅ Get horizontal positions
-        val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
-        val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
-        
-        // ✅ Get bottom Y position of the lines
-        val startY = currentLayout.getLineBottom(startLine) + relativeY
-        val endY = currentLayout.getLineBottom(endLine) + relativeY
-
-        val halfHandle = HANDLE_SIZE / 2
-
-        // ✅ Left handle - positioned at bottom-left corner
-        leftHandleView?.let { handle ->
-            val params = handle.layoutParams as? FrameLayout.LayoutParams
-            if (params != null) {
-                params.leftMargin = (startX - halfHandle).toInt()
-                params.topMargin = (startY - halfHandle).toInt()
-                handle.layoutParams = params
-                handle.visibility = View.VISIBLE
-                handle.alpha = 1f
+        try {
+            val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) {
+                recreateHandlesIfNeeded()
+                return
             }
-        }
-        
-        // ✅ Right handle - positioned on RIGHT side of selection with gap
-        rightHandleView?.let { handle ->
-            val params = handle.layoutParams as? FrameLayout.LayoutParams
-            if (params != null) {
-                // ✅ Add 14px gap so handle doesn't overlap with text
-                val gap = 14
-                params.leftMargin = (endX + gap).toInt()
-                params.topMargin = (endY - halfHandle).toInt()
-                handle.layoutParams = params
-                handle.visibility = View.VISIBLE
-                handle.alpha = 1f
+
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+            
+            if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
+                return
             }
+
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
+            
+            val containerLocation = IntArray(2)
+            handleContainer?.getLocationOnScreen(containerLocation) ?: return
+            
+            val relativeX = editLocation[0] - containerLocation[0]
+            val relativeY = editLocation[1] - containerLocation[1]
+
+            val startLine = currentLayout.getLineForOffset(start)
+            val endLine = currentLayout.getLineForOffset(end)
+            
+            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
+            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
+            
+            val startY = currentLayout.getLineBottom(startLine) + relativeY
+            val endY = currentLayout.getLineBottom(endLine) + relativeY
+
+            val halfHandle = HANDLE_SIZE / 2
+
+            // ✅ Left handle - bottom-left corner
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    params.leftMargin = (startX - halfHandle).toInt()
+                    params.topMargin = (startY - halfHandle).toInt()
+                    handle.layoutParams = params
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
+                }
+            }
+            
+            // ✅ Right handle - right side with 14px gap
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    val gap = 14
+                    params.leftMargin = (endX + gap).toInt()
+                    params.topMargin = (endY - halfHandle).toInt()
+                    handle.layoutParams = params
+                    handle.visibility = View.VISIBLE
+                    handle.alpha = 1f
+                }
+            }
+            
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
         }
-        
-    } catch (e: Exception) {
-        EmergencyLog.logException(e, "updateHandlePositions")
     }
-}
     
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
@@ -1204,27 +1200,27 @@ private fun updateHandlePositions() {
         actionBarView.addView(createDivider())
         
         val copyBtn = TextView(this).apply {
-    text = "Copy"
-    textSize = 13f
-    setTextColor(Color.WHITE)
-    setPadding(14, 8, 14, 8)
-    setOnClickListener {
-        val (start, end) = getSelection()
-        if (start != end) {
-            val selectedText = editText.text.substring(start, end)
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = android.content.ClipData.newPlainText("text", selectedText)
-            clipboard.setPrimaryClip(clip)
-            
-            // ✅ Clear selection and hide everything (same as Cut)
-            editText.setSelection(start, start)  // Deselect
-            hideSelectionHandles()
-            hideFloatingActionBar()
-            
-            Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
+            text = "Copy"
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            setPadding(14, 8, 14, 8)
+            setOnClickListener {
+                val (start, end) = getSelection()
+                if (start != end) {
+                    val selectedText = editText.text.substring(start, end)
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("text", selectedText)
+                    clipboard.setPrimaryClip(clip)
+                    
+                    // ✅ Clear selection and hide everything (same as Cut)
+                    editText.setSelection(start, start)
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                    
+                    Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
-    }
-}
         actionBarView.addView(copyBtn)
         
         actionBarView.addView(createDivider())
@@ -1764,6 +1760,7 @@ private fun updateHandlePositions() {
                     isScrolling = true
                     EmergencyLog.log("Scrolling started - hiding handles")
                     
+                    // ✅ Always hide handles when scrolling starts
                     if (areHandlesVisible) {
                         hideSelectionHandles()
                     }
@@ -1781,7 +1778,12 @@ private fun updateHandlePositions() {
                         isScrolling = false
                         EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
+                        // ✅ Always show handles when scrolling stops
                         if (editText.hasSelection()) {
+                            // ✅ Recreate handles to ensure fresh state
+                            leftHandleView = null
+                            rightHandleView = null
+                            
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
@@ -1802,7 +1804,7 @@ private fun updateHandlePositions() {
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
-            textSize = 10f
+            textSize = 15f
             gravity = Gravity.TOP or Gravity.START
             setPadding(18, 18, 18, 18)
             setBackgroundColor(Color.parseColor("#FFFFFF"))
