@@ -133,10 +133,10 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
-    // ✅ Store last valid selection to restore on CANCEL
-    private var lastValidSelectionStart = 0
-    private var lastValidSelectionEnd = 0
-    private var hasValidSelection = false
+    // ✅ Save last selection for restore
+    private var savedStart = 0
+    private var savedEnd = 0
+    private var hasSavedSelection = false
 
     data class NoteItem(
         val id: Long,
@@ -869,125 +869,116 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ ULTIMATE FIX: HandleTouchListener with seamless drag even outside viewport
+    // ✅ COMPLETE REWRITE - Uses getLocationInWindow and ignores CANCEL
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-        private var initialTouchX = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
-        private var isTouching = false
+        private var isActive = false
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    isTouching = true
-                    initialTouchX = event.rawX
+                    isActive = true
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
                     
-                    // ✅ Save initial selection for restore
-                    lastValidSelectionStart = initialSelectionStart
-                    lastValidSelectionEnd = initialSelectionEnd
-                    hasValidSelection = true
+                    // ✅ Save selection for restore
+                    savedStart = initialSelectionStart
+                    savedEnd = initialSelectionEnd
+                    hasSavedSelection = true
                     
-                    // ✅ CRITICAL: Prevent parent from intercepting touch
+                    // ✅ Block parent from intercepting
                     v.parent.requestDisallowInterceptTouchEvent(true)
                     
-                    if (isLeft) {
-                        isDraggingLeftHandle = true
-                    } else {
-                        isDraggingRightHandle = true
-                    }
+                    if (isLeft) isDraggingLeftHandle = true
+                    else isDraggingRightHandle = true
                     return true
                 }
                 
                 MotionEvent.ACTION_MOVE -> {
-                    if (!isTouching) return true
+                    if (!isActive) return true
                     
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastUpdateTime < 16) {
-                        return true
-                    }
-                    lastUpdateTime = currentTime
+                    val now = System.currentTimeMillis()
+                    if (now - lastUpdateTime < 16) return true
+                    lastUpdateTime = now
                     
-                    val currentLayout = editText.layout
+                    val layout = editText.layout ?: return true
                     
-                    if (currentLayout != null) {
-                        val editLocation = IntArray(2)
-                        editText.getLocationOnScreen(editLocation)
-                        
-                        // ✅ Calculate position - even if outside, we keep going
-                        val textX = event.rawX - editLocation[0] + editText.scrollX
-                        val textY = event.rawY - editLocation[1] + editText.scrollY
-                        
-                        // ✅ Soft clamp - keep selection even when outside
-                        val clampedX = textX.coerceIn(0f, currentLayout.width.toFloat())
-                        val clampedY = textY.coerceIn(0f, currentLayout.height.toFloat())
-                        
-                        val line = currentLayout.getLineForVertical(clampedY.toInt().coerceIn(0, currentLayout.height - 1))
-                        val offset = currentLayout.getOffsetForHorizontal(line, clampedX)
-                        val newOffset = offset.coerceIn(0, editText.text.length)
-                        
-                        if (isLeft) {
-                            if (newOffset < initialSelectionEnd) {
-                                editText.setSelection(newOffset, initialSelectionEnd)
-                            } else {
-                                editText.setSelection(initialSelectionEnd, newOffset)
-                            }
+                    // ✅ Use getLocationInWindow for more reliable positioning
+                    val editLocation = IntArray(2)
+                    editText.getLocationInWindow(editLocation)
+                    
+                    // ✅ Calculate position
+                    val rawX = event.rawX
+                    val rawY = event.rawY
+                    
+                    val textX = rawX - editLocation[0] + editText.scrollX
+                    val textY = rawY - editLocation[1] + editText.scrollY
+                    
+                    // ✅ Keep selection even if outside - use soft clamp
+                    val clampX = textX.coerceIn(0f, layout.width.toFloat())
+                    val clampY = textY.coerceIn(0f, layout.height.toFloat())
+                    
+                    val line = layout.getLineForVertical(clampY.toInt().coerceIn(0, layout.height - 1))
+                    val offset = layout.getOffsetForHorizontal(line, clampX)
+                    val newOffset = offset.coerceIn(0, editText.text.length)
+                    
+                    if (isLeft) {
+                        if (newOffset < initialSelectionEnd) {
+                            editText.setSelection(newOffset, initialSelectionEnd)
                         } else {
-                            if (newOffset > initialSelectionStart) {
-                                editText.setSelection(initialSelectionStart, newOffset)
-                            } else {
-                                editText.setSelection(newOffset, initialSelectionStart)
-                            }
+                            editText.setSelection(initialSelectionEnd, newOffset)
                         }
-                        
-                        // ✅ Update valid selection
-                        lastValidSelectionStart = editText.selectionStart
-                        lastValidSelectionEnd = editText.selectionEnd
-                        hasValidSelection = true
-                        
-                        if (!isScrolling) {
-                            updateHandlePositionsSafe()
+                    } else {
+                        if (newOffset > initialSelectionStart) {
+                            editText.setSelection(initialSelectionStart, newOffset)
+                        } else {
+                            editText.setSelection(newOffset, initialSelectionStart)
                         }
-                        
-                        val (start, end) = getSelection()
-                        if (start != end && start >= 0 && end <= editText.text.length) {
-                            val selected = editText.text.substring(start, end)
-                            if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                showFloatingActionBar(selected)
-                            }
+                    }
+                    
+                    // ✅ Save current selection
+                    savedStart = editText.selectionStart
+                    savedEnd = editText.selectionEnd
+                    hasSavedSelection = true
+                    
+                    if (!isScrolling) {
+                        updateHandlePositionsSafe()
+                    }
+                    
+                    val (start, end) = getSelection()
+                    if (start != end && start >= 0 && end <= editText.text.length) {
+                        val selected = editText.text.substring(start, end)
+                        if (selected.isNotEmpty()) {
+                            currentSelectedText = selected
+                            showFloatingActionBar(selected)
                         }
                     }
                     return true
                 }
                 
                 MotionEvent.ACTION_UP -> {
-                    isTouching = false
+                    isActive = false
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
-                    
-                    // ✅ Release touch interception
                     v.parent.requestDisallowInterceptTouchEvent(false)
                     return true
                 }
                 
-                // ✅ CRITICAL: On CANCEL, restore selection and continue
+                // ✅ CRITICAL: On CANCEL, restore the saved selection
                 MotionEvent.ACTION_CANCEL -> {
-                    EmergencyLog.log("ACTION_CANCEL - restoring selection")
-                    
-                    isTouching = false
+                    EmergencyLog.log("CANCEL - restoring selection: $savedStart-$savedEnd")
+                    isActive = false
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
                     
-                    // ✅ Restore last valid selection
-                    if (hasValidSelection) {
-                        editText.setSelection(lastValidSelectionStart, lastValidSelectionEnd)
+                    // ✅ Restore saved selection
+                    if (hasSavedSelection) {
+                        editText.setSelection(savedStart, savedEnd)
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
-                        EmergencyLog.log("Restored: $lastValidSelectionStart - $lastValidSelectionEnd")
                     }
                     
                     v.parent.requestDisallowInterceptTouchEvent(false)
@@ -1659,10 +1650,10 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // ✅ Save valid selection
-                        lastValidSelectionStart = wordStart
-                        lastValidSelectionEnd = wordEnd
-                        hasValidSelection = true
+                        // ✅ Save for restore
+                        savedStart = wordStart
+                        savedEnd = wordEnd
+                        hasSavedSelection = true
                         
                         showFloatingActionBar(selectedWord)
                         
