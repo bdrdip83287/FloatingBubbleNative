@@ -133,6 +133,11 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
+    // ✅ Store last valid selection to restore on CANCEL
+    private var lastValidSelectionStart = 0
+    private var lastValidSelectionEnd = 0
+    private var hasValidSelection = false
+
     data class NoteItem(
         val id: Long,
         var title: String,
@@ -864,113 +869,140 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-// ✅ COMPLETELY FIXED: HandleTouchListener - Ignores ACTION_CANCEL completely
-inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-    private var initialTouchX = 0f
-    private var initialSelectionStart = 0
-    private var initialSelectionEnd = 0
-    private var lastUpdateTime = 0L
-    private var isTouching = false
-    
-    override fun onTouch(v: View, event: MotionEvent): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                isTouching = true
-                initialTouchX = event.rawX
-                initialSelectionStart = editText.selectionStart
-                initialSelectionEnd = editText.selectionEnd
-                lastUpdateTime = System.currentTimeMillis()
-                
-                // ✅ Request parent not to intercept touch events
-                v.parent.requestDisallowInterceptTouchEvent(true)
-                
-                if (isLeft) {
-                    isDraggingLeftHandle = true
-                } else {
-                    isDraggingRightHandle = true
-                }
-                return true
-            }
-            
-            MotionEvent.ACTION_MOVE -> {
-                if (!isTouching) return true
-                
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastUpdateTime < 16) {
-                    return true
-                }
-                lastUpdateTime = currentTime
-                
-                val currentLayout = editText.layout
-                
-                if (currentLayout != null) {
-                    val editLocation = IntArray(2)
-                    editText.getLocationOnScreen(editLocation)
+    // ✅ COMPLETELY REWRITTEN: HandleTouchListener with robust CANCEL handling
+    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
+        private var initialTouchX = 0f
+        private var initialSelectionStart = 0
+        private var initialSelectionEnd = 0
+        private var lastUpdateTime = 0L
+        private var isTouching = false
+        private var wasDragging = false
+        
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    isTouching = true
+                    wasDragging = false
+                    initialTouchX = event.rawX
+                    initialSelectionStart = editText.selectionStart
+                    initialSelectionEnd = editText.selectionEnd
+                    lastUpdateTime = System.currentTimeMillis()
                     
-                    // ✅ Calculate position relative to EditText
-                    val textX = event.rawX - editLocation[0] + editText.scrollX
-                    val textY = event.rawY - editLocation[1] + editText.scrollY
+                    // ✅ Save initial selection for restore
+                    lastValidSelectionStart = initialSelectionStart
+                    lastValidSelectionEnd = initialSelectionEnd
+                    hasValidSelection = true
                     
-                    // ✅ Clamp to valid range but don't cancel touch
-                    val clampedX = textX.coerceIn(0f, currentLayout.width.toFloat())
-                    val clampedY = textY.coerceIn(0f, currentLayout.height.toFloat())
-                    
-                    val line = currentLayout.getLineForVertical(clampedY.toInt().coerceIn(0, currentLayout.height - 1))
-                    val offset = currentLayout.getOffsetForHorizontal(line, clampedX)
-                    val newOffset = offset.coerceIn(0, editText.text.length)
+                    // ✅ Request parent not to intercept touch events
+                    v.parent.requestDisallowInterceptTouchEvent(true)
                     
                     if (isLeft) {
-                        if (newOffset < initialSelectionEnd) {
-                            editText.setSelection(newOffset, initialSelectionEnd)
-                        } else {
-                            editText.setSelection(initialSelectionEnd, newOffset)
-                        }
+                        isDraggingLeftHandle = true
                     } else {
-                        if (newOffset > initialSelectionStart) {
-                            editText.setSelection(initialSelectionStart, newOffset)
-                        } else {
-                            editText.setSelection(newOffset, initialSelectionStart)
-                        }
+                        isDraggingRightHandle = true
                     }
-                    
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
-                    }
-                    
-                    val (start, end) = getSelection()
-                    if (start != end && start >= 0 && end <= editText.text.length) {
-                        val selected = editText.text.substring(start, end)
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            showFloatingActionBar(selected)
-                        }
-                    }
+                    return true
                 }
-                return true
-            }
-            
-            MotionEvent.ACTION_UP -> {
-                isTouching = false
-                isDraggingLeftHandle = false
-                isDraggingRightHandle = false
                 
-                // ✅ Release touch interception
-                v.parent.requestDisallowInterceptTouchEvent(false)
-                return true
+                MotionEvent.ACTION_MOVE -> {
+                    if (!isTouching) return true
+                    wasDragging = true
+                    
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastUpdateTime < 16) {
+                        return true
+                    }
+                    lastUpdateTime = currentTime
+                    
+                    val currentLayout = editText.layout
+                    
+                    if (currentLayout != null) {
+                        val editLocation = IntArray(2)
+                        editText.getLocationOnScreen(editLocation)
+                        
+                        // ✅ Calculate position relative to EditText
+                        val textX = event.rawX - editLocation[0] + editText.scrollX
+                        val textY = event.rawY - editLocation[1] + editText.scrollY
+                        
+                        // ✅ Clamp to valid range but don't cancel touch
+                        val clampedX = textX.coerceIn(0f, currentLayout.width.toFloat())
+                        val clampedY = textY.coerceIn(0f, currentLayout.height.toFloat())
+                        
+                        val line = currentLayout.getLineForVertical(clampedY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val offset = currentLayout.getOffsetForHorizontal(line, clampedX)
+                        val newOffset = offset.coerceIn(0, editText.text.length)
+                        
+                        if (isLeft) {
+                            if (newOffset < initialSelectionEnd) {
+                                editText.setSelection(newOffset, initialSelectionEnd)
+                            } else {
+                                editText.setSelection(initialSelectionEnd, newOffset)
+                            }
+                        } else {
+                            if (newOffset > initialSelectionStart) {
+                                editText.setSelection(initialSelectionStart, newOffset)
+                            } else {
+                                editText.setSelection(newOffset, initialSelectionStart)
+                            }
+                        }
+                        
+                        // ✅ Update valid selection
+                        lastValidSelectionStart = editText.selectionStart
+                        lastValidSelectionEnd = editText.selectionEnd
+                        hasValidSelection = true
+                        
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
+                        
+                        val (start, end) = getSelection()
+                        if (start != end && start >= 0 && end <= editText.text.length) {
+                            val selected = editText.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
+                            }
+                        }
+                    }
+                    return true
+                }
+                
+                MotionEvent.ACTION_UP -> {
+                    isTouching = false
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    
+                    // ✅ Release touch interception
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+                    return true
+                }
+                
+                // ✅ CRITICAL FIX: On CANCEL, restore the last valid selection
+                MotionEvent.ACTION_CANCEL -> {
+                    EmergencyLog.log("ACTION_CANCEL received - restoring selection")
+                    
+                    isTouching = false
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    
+                    // ✅ Restore the last valid selection if it was lost
+                    if (hasValidSelection && !editText.hasSelection()) {
+                        editText.setSelection(lastValidSelectionStart, lastValidSelectionEnd)
+                        EmergencyLog.log("Restored selection: $lastValidSelectionStart - $lastValidSelectionEnd")
+                        
+                        // ✅ Show handles again
+                        showSelectionHandles()
+                        updateHandlePositionsImmediate()
+                    }
+                    
+                    // ✅ Release touch interception
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+                    return true
+                }
             }
-            
-            // ✅ CRITICAL FIX: Completely ignore ACTION_CANCEL
-            // This prevents touch from being released when moving outside viewport
-            MotionEvent.ACTION_CANCEL -> {
-                // ✅ DO NOTHING - keep selection active
-                // The user might have just moved outside the viewport temporarily
-                // We want to keep the selection active until they actually lift their finger
-                return true
-            }
+            return false
         }
-        return false
     }
-}
     
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
@@ -1003,8 +1035,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
             val currentLayout = editText.layout ?: return
             if (leftHandleView == null || rightHandleView == null) {
                 recreateHandlesIfNeeded()
-                return
-            }
+                return            }
 
             val start = editText.selectionStart
             val end = editText.selectionEnd
@@ -1632,6 +1663,11 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                         val selectedWord = text.substring(wordStart, wordEnd)
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
+                        
+                        // ✅ Save valid selection
+                        lastValidSelectionStart = wordStart
+                        lastValidSelectionEnd = wordEnd
+                        hasValidSelection = true
                         
                         showFloatingActionBar(selectedWord)
                         
