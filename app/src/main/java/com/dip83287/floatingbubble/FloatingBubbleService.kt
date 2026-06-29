@@ -120,6 +120,9 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
+    
+    // ✅ Track if handles were visible before scrolling
+    private var wereHandlesVisibleBeforeScroll = false
 
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
@@ -753,6 +756,7 @@ class FloatingBubbleService : Service() {
         leftHandleView = null
         rightHandleView = null
         areHandlesVisible = false
+        wereHandlesVisibleBeforeScroll = false
         EmergencyLog.log("Handle references reset")
     }
 
@@ -956,7 +960,6 @@ class FloatingBubbleService : Service() {
         }
     }
     
-    // ✅ Force immediate handle position update without debounce
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
@@ -969,7 +972,6 @@ class FloatingBubbleService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
     
-    // ✅ UPDATED: Handles positioned at bottom corners with right handle on right side
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1007,7 +1009,6 @@ class FloatingBubbleService : Service() {
 
             val halfHandle = HANDLE_SIZE / 2
 
-            // ✅ Left handle - bottom-left corner
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1019,7 +1020,6 @@ class FloatingBubbleService : Service() {
                 }
             }
             
-            // ✅ Right handle - right side with 14px gap
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1102,7 +1102,6 @@ class FloatingBubbleService : Service() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
-            // ✅ Force immediate position update
             updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
@@ -1138,6 +1137,65 @@ class FloatingBubbleService : Service() {
                     ?.start()
             }
             areHandlesVisible = false
+        } catch (e: Exception) { }
+    }
+    
+    // ✅ Fade out handles smoothly during scroll
+    private fun fadeOutHandlesDuringScroll() {
+        try {
+            leftHandleView?.let { handle ->
+                if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
+                    handle.animate()
+                        ?.alpha(0f)
+                        ?.setDuration(150)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.start()
+                }
+            }
+            rightHandleView?.let { handle ->
+                if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
+                    handle.animate()
+                        ?.alpha(0f)
+                        ?.setDuration(150)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.start()
+                }
+            }
+        } catch (e: Exception) { }
+    }
+    
+    // ✅ Fade in handles smoothly after scroll stops
+    private fun fadeInHandlesAfterScroll() {
+        try {
+            // Only show handles if there is an active selection
+            if (editText.hasSelection()) {
+                val (start, end) = getSelection()
+                if (start != end) {
+                    // First update handle positions
+                    updateHandlePositionsImmediate()
+                    
+                    // Then fade in
+                    leftHandleView?.let { handle ->
+                        if (handle.visibility == View.VISIBLE) {
+                            handle.animate()
+                                ?.alpha(1f)
+                                ?.setDuration(200)
+                                ?.setInterpolator(DecelerateInterpolator())
+                                ?.start()
+                        }
+                    }
+                    rightHandleView?.let { handle ->
+                        if (handle.visibility == View.VISIBLE) {
+                            handle.animate()
+                                ?.alpha(1f)
+                                ?.setDuration(200)
+                                ?.setInterpolator(DecelerateInterpolator())
+                                ?.start()
+                        }
+                    }
+                    areHandlesVisible = true
+                }
+            }
         } catch (e: Exception) { }
     }
 
@@ -1212,7 +1270,6 @@ class FloatingBubbleService : Service() {
                     val clip = android.content.ClipData.newPlainText("text", selectedText)
                     clipboard.setPrimaryClip(clip)
                     
-                    // ✅ Clear selection and hide everything (same as Cut)
                     editText.setSelection(start, start)
                     hideSelectionHandles()
                     hideFloatingActionBar()
@@ -1557,21 +1614,12 @@ class FloatingBubbleService : Service() {
         openEditorForNote(newNote)
     }
 
-    /**
-     * ✅ Enhanced isWordChar - supports all languages including Bengali, Hindi, Arabic, Urdu
-     */
     private fun isWordChar(char: Char): Boolean {
-        // ✅ Bengali (0980-09FF)
         val isBengali = char in '\u0980'..'\u09FF'
-        // ✅ Hindi/Devanagari (0900-097F)
         val isHindi = char in '\u0900'..'\u097F'
-        // ✅ Arabic (0600-06FF)
         val isArabic = char in '\u0600'..'\u06FF'
-        // ✅ Urdu (Arabic extended)
         val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
-        // ✅ Any Unicode letter or digit
         val isLetterOrDigit = Character.isLetterOrDigit(char)
-        // ✅ Special characters
         val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
                        char == '#' || char == '$' || char == '%' || char == '&' ||
                        char == '*' || char == '+' || char == '=' || char == '~' ||
@@ -1580,7 +1628,6 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
-    // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1593,19 +1640,15 @@ class FloatingBubbleService : Service() {
                     var wordStart = offset
                     var wordEnd = offset
                     
-                    // EXTEND LEFT: include all word characters
                     while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
                     
-                    // EXTEND RIGHT: include all word characters
                     while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
                     }
                     
-                    // If nothing was selected (e.g., cursor on a space), try to find nearby word
                     if (wordStart == wordEnd) {
-                        // Try to find word to the left
                         var tempStart = offset - 1
                         while (tempStart >= 0 && isWordChar(text[tempStart])) {
                             tempStart--
@@ -1625,18 +1668,14 @@ class FloatingBubbleService : Service() {
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ CRITICAL FIX: Force recreate handles before showing
                         leftHandleView = null
                         rightHandleView = null
                         
-                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
-                        // ✅ Multiple attempts to ensure handles are positioned correctly
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 50)
@@ -1758,11 +1797,14 @@ class FloatingBubbleService : Service() {
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started - hiding handles")
+                    EmergencyLog.log("Scrolling started - fading out handles")
                     
-                    // ✅ Always hide handles when scrolling starts
+                    // ✅ Save current handle visibility state
+                    wereHandlesVisibleBeforeScroll = areHandlesVisible
+                    
+                    // ✅ Fade out handles with animation
                     if (areHandlesVisible) {
-                        hideSelectionHandles()
+                        fadeOutHandlesDuringScroll()
                     }
                     
                     if (editText.hasSelection() && isActionBarVisible) {
@@ -1776,14 +1818,9 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped - showing handles with fade")
+                        EmergencyLog.log("Scrolling stopped - fading in handles")
                         
-                        // ✅ Always show handles when scrolling stops
                         if (editText.hasSelection()) {
-                            // ✅ Recreate handles to ensure fresh state
-                            leftHandleView = null
-                            rightHandleView = null
-                            
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
                             if (start != end) {
@@ -1792,10 +1829,17 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
-                                    showSelectionHandles()
+                                    
+                                    // ✅ Fade in handles with animation
+                                    if (wereHandlesVisibleBeforeScroll) {
+                                        fadeInHandlesAfterScroll()
+                                    } else {
+                                        showSelectionHandles()
+                                    }
                                 }
                             }
                         }
+                        wereHandlesVisibleBeforeScroll = false
                     }
                 }, SCROLL_STOP_DELAY)
             }
@@ -1893,9 +1937,7 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
-                                    // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
-                                    // ✅ Additional attempts
                                     Handler(Looper.getMainLooper()).postDelayed({
                                         updateHandlePositionsImmediate()
                                     }, 50)
@@ -1943,7 +1985,6 @@ class FloatingBubbleService : Service() {
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
-                            // ✅ Force immediate position update on text change
                             updateHandlePositionsImmediate()
                         }
                     }
