@@ -869,20 +869,18 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ COMPLETELY REWRITTEN: HandleTouchListener with robust CANCEL handling
+    // ✅ ULTIMATE FIX: HandleTouchListener with seamless drag even outside viewport
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
         private var isTouching = false
-        private var wasDragging = false
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     isTouching = true
-                    wasDragging = false
                     initialTouchX = event.rawX
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
@@ -893,7 +891,7 @@ class FloatingBubbleService : Service() {
                     lastValidSelectionEnd = initialSelectionEnd
                     hasValidSelection = true
                     
-                    // ✅ Request parent not to intercept touch events
+                    // ✅ CRITICAL: Prevent parent from intercepting touch
                     v.parent.requestDisallowInterceptTouchEvent(true)
                     
                     if (isLeft) {
@@ -906,7 +904,6 @@ class FloatingBubbleService : Service() {
                 
                 MotionEvent.ACTION_MOVE -> {
                     if (!isTouching) return true
-                    wasDragging = true
                     
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - lastUpdateTime < 16) {
@@ -920,11 +917,11 @@ class FloatingBubbleService : Service() {
                         val editLocation = IntArray(2)
                         editText.getLocationOnScreen(editLocation)
                         
-                        // ✅ Calculate position relative to EditText
+                        // ✅ Calculate position - even if outside, we keep going
                         val textX = event.rawX - editLocation[0] + editText.scrollX
                         val textY = event.rawY - editLocation[1] + editText.scrollY
                         
-                        // ✅ Clamp to valid range but don't cancel touch
+                        // ✅ Soft clamp - keep selection even when outside
                         val clampedX = textX.coerceIn(0f, currentLayout.width.toFloat())
                         val clampedY = textY.coerceIn(0f, currentLayout.height.toFloat())
                         
@@ -977,25 +974,22 @@ class FloatingBubbleService : Service() {
                     return true
                 }
                 
-                // ✅ CRITICAL FIX: On CANCEL, restore the last valid selection
+                // ✅ CRITICAL: On CANCEL, restore selection and continue
                 MotionEvent.ACTION_CANCEL -> {
-                    EmergencyLog.log("ACTION_CANCEL received - restoring selection")
+                    EmergencyLog.log("ACTION_CANCEL - restoring selection")
                     
                     isTouching = false
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
                     
-                    // ✅ Restore the last valid selection if it was lost
-                    if (hasValidSelection && !editText.hasSelection()) {
+                    // ✅ Restore last valid selection
+                    if (hasValidSelection) {
                         editText.setSelection(lastValidSelectionStart, lastValidSelectionEnd)
-                        EmergencyLog.log("Restored selection: $lastValidSelectionStart - $lastValidSelectionEnd")
-                        
-                        // ✅ Show handles again
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
+                        EmergencyLog.log("Restored: $lastValidSelectionStart - $lastValidSelectionEnd")
                     }
                     
-                    // ✅ Release touch interception
                     v.parent.requestDisallowInterceptTouchEvent(false)
                     return true
                 }
@@ -1035,7 +1029,8 @@ class FloatingBubbleService : Service() {
             val currentLayout = editText.layout ?: return
             if (leftHandleView == null || rightHandleView == null) {
                 recreateHandlesIfNeeded()
-                return            }
+                return
+            }
 
             val start = editText.selectionStart
             val end = editText.selectionEnd
