@@ -133,6 +133,10 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
+    // ✅ Track handle drag state to prevent accidental release
+    private var isHandleDragging = false
+    private var dragHandleIsLeft = false
+
     data class NoteItem(
         val id: Long,
         var title: String,
@@ -753,6 +757,7 @@ class FloatingBubbleService : Service() {
         leftHandleView = null
         rightHandleView = null
         areHandlesVisible = false
+        isHandleDragging = false
         EmergencyLog.log("Handle references reset")
     }
 
@@ -864,7 +869,7 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ FIXED: HandleTouchListener with improved touch handling - prevents accidental release
+    // ✅ COMPLETELY FIXED: HandleTouchListener with robust touch handling
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialTouchY = 0f
@@ -872,7 +877,7 @@ class FloatingBubbleService : Service() {
         private var initialSelectionEnd = 0
         private var lastUpdateTime = 0L
         private var isDragging = false
-        private var dragStartTime = 0L
+        private var hasMoved = false
         
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -882,8 +887,12 @@ class FloatingBubbleService : Service() {
                     initialSelectionStart = editText.selectionStart
                     initialSelectionEnd = editText.selectionEnd
                     lastUpdateTime = System.currentTimeMillis()
-                    dragStartTime = System.currentTimeMillis()
                     isDragging = false
+                    hasMoved = false
+                    
+                    // ✅ IMPORTANT: Set global drag flag
+                    isHandleDragging = true
+                    dragHandleIsLeft = isLeft
                     
                     if (isLeft) {
                         isDraggingLeftHandle = true
@@ -891,9 +900,10 @@ class FloatingBubbleService : Service() {
                         isDraggingRightHandle = true
                     }
                     
-                    // ✅ Request to keep touch events even when outside view bounds
+                    // ✅ Prevent parent from intercepting touch events
                     v.parent.requestDisallowInterceptTouchEvent(true)
                     
+                    EmergencyLog.log("Handle touch START: isLeft=$isLeft")
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -902,8 +912,14 @@ class FloatingBubbleService : Service() {
                     val dy = Math.abs(event.rawY - initialTouchY)
                     
                     // ✅ Detect drag start after some movement
-                    if (dx > 15 || dy > 15) {
+                    if (dx > 10 || dy > 10) {
                         isDragging = true
+                        hasMoved = true
+                    }
+                    
+                    // ✅ Keep parent from intercepting while dragging
+                    if (isDragging) {
+                        v.parent.requestDisallowInterceptTouchEvent(true)
                     }
                     
                     // ✅ Update selection frequently but with rate limiting
@@ -961,21 +977,34 @@ class FloatingBubbleService : Service() {
                     return true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    // ✅ Reset drag state
-                    isDragging = false
-                    
-                    if (isLeft) {
-                        isDraggingLeftHandle = false
+                    // ✅ Only reset if this is the actual end of drag
+                    // Don't reset on ACTION_CANCEL if we're still dragging
+                    if (event.action == MotionEvent.ACTION_UP || 
+                        (event.action == MotionEvent.ACTION_CANCEL && !isDragging)) {
+                        
+                        // ✅ Reset drag state
+                        isDragging = false
+                        isHandleDragging = false
+                        
+                        if (isLeft) {
+                            isDraggingLeftHandle = false
+                        } else {
+                            isDraggingRightHandle = false
+                        }
+                        
+                        // ✅ Allow parent to intercept touch events again
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                        
+                        // ✅ Final position update
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
+                        
+                        EmergencyLog.log("Handle touch END: isLeft=$isLeft, hasMoved=$hasMoved")
                     } else {
-                        isDraggingRightHandle = false
-                    }
-                    
-                    // ✅ Allow parent to intercept touch events again
-                    v.parent.requestDisallowInterceptTouchEvent(false)
-                    
-                    // ✅ Final position update
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
+                        // ✅ If ACTION_CANCEL but we're dragging, ignore it (keep dragging)
+                        EmergencyLog.log("Handle touch CANCEL ignored - still dragging: isLeft=$isLeft")
+                        return true
                     }
                     
                     return true
