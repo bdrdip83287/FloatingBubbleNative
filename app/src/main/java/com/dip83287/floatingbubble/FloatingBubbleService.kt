@@ -133,11 +133,6 @@ class FloatingBubbleService : Service() {
     private val saveHandler = Handler(Looper.getMainLooper())
     private var saveRunnable: Runnable? = null
 
-    // ✅ Save last selection for restore
-    private var savedStart = 0
-    private var savedEnd = 0
-    private var hasSavedSelection = false
-
     data class NoteItem(
         val id: Long,
         var title: String,
@@ -869,127 +864,85 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-// ✅ UPDATED: HandleTouchListener with proper touch handling - IGNORES ACTION_CANCEL
-inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-    private var initialTouchX = 0f
-    private var initialSelectionStart = 0
-    private var initialSelectionEnd = 0
-    private var lastUpdateTime = 0L
-    private var isTouching = false
-    private var isCancelled = false
-    
-    override fun onTouch(v: View, event: MotionEvent): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                isTouching = true
-                isCancelled = false
-                initialTouchX = event.rawX
-                initialSelectionStart = editText.selectionStart
-                initialSelectionEnd = editText.selectionEnd
-                lastUpdateTime = System.currentTimeMillis()
-                
-                // ✅ Request to keep touch events even when moving outside
-                v.parent.requestDisallowInterceptTouchEvent(true)
-                
-                if (isLeft) {
-                    isDraggingLeftHandle = true
-                } else {
-                    isDraggingRightHandle = true
-                }
-                return true
-            }
-            
-            MotionEvent.ACTION_MOVE -> {
-                if (!isTouching || isCancelled) return true
-                
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastUpdateTime < 16) {
-                    return true
-                }
-                lastUpdateTime = currentTime
-                
-                val currentLayout = editText.layout
-                
-                if (currentLayout != null) {
-                    val editLocation = IntArray(2)
-                    editText.getLocationOnScreen(editLocation)
-                    
-                    // ✅ Allow drag beyond viewport boundaries - NO CLAMPING
-                    val textX = event.rawX - editLocation[0] + editText.scrollX
-                    val textY = event.rawY - editLocation[1] + editText.scrollY
-                    
-                    // ✅ Still calculate offset but don't clamp too aggressively
-                    val line = try {
-                        currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
-                    } catch (e: Exception) {
-                        // If out of bounds, use nearest valid line
-                        if (textY < 0) 0 else currentLayout.lineCount - 1
-                    }
-                    
-                    val offset = try {
-                        currentLayout.getOffsetForHorizontal(line, textX.coerceIn(0f, currentLayout.width.toFloat()))
-                    } catch (e: Exception) {
-                        // If out of bounds, use nearest valid offset
-                        if (textX < 0) currentLayout.getOffsetForHorizontal(line, 0f)
-                        else currentLayout.getOffsetForHorizontal(line, currentLayout.width.toFloat())
-                    }
-                    
-                    val newOffset = offset.coerceIn(0, editText.text.length)
+    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
+        private var initialTouchX = 0f
+        private var initialSelectionStart = 0
+        private var initialSelectionEnd = 0
+        private var lastUpdateTime = 0L
+        
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialTouchX = event.rawX
+                    initialSelectionStart = editText.selectionStart
+                    initialSelectionEnd = editText.selectionEnd
+                    lastUpdateTime = System.currentTimeMillis()
                     
                     if (isLeft) {
-                        if (newOffset < initialSelectionEnd) {
-                            editText.setSelection(newOffset, initialSelectionEnd)
-                        } else {
-                            editText.setSelection(initialSelectionEnd, newOffset)
-                        }
+                        isDraggingLeftHandle = true
                     } else {
-                        if (newOffset > initialSelectionStart) {
-                            editText.setSelection(initialSelectionStart, newOffset)
-                        } else {
-                            editText.setSelection(newOffset, initialSelectionStart)
-                        }
+                        isDraggingRightHandle = true
                     }
-                    
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
-                    }
-                    
-                    val (start, end) = getSelection()
-                    if (start != end && start >= 0 && end <= editText.text.length) {
-                        val selected = editText.text.substring(start, end)
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            showFloatingActionBar(selected)
-                        }
-                    }
+                    return true
                 }
-                return true
+                MotionEvent.ACTION_MOVE -> {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastUpdateTime < 16) {
+                        return true
+                    }
+                    lastUpdateTime = currentTime
+                    
+                    val currentLayout = editText.layout
+                    
+                    if (currentLayout != null) {
+                        val editLocation = IntArray(2)
+                        editText.getLocationOnScreen(editLocation)
+                        
+                        val textX = event.rawX - editLocation[0] + editText.scrollX
+                        val textY = event.rawY - editLocation[1] + editText.scrollY
+                        
+                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
+                        val newOffset = offset.coerceIn(0, editText.text.length)
+                        
+                        if (isLeft) {
+                            if (newOffset < initialSelectionEnd) {
+                                editText.setSelection(newOffset, initialSelectionEnd)
+                            } else {
+                                editText.setSelection(initialSelectionEnd, newOffset)
+                            }
+                        } else {
+                            if (newOffset > initialSelectionStart) {
+                                editText.setSelection(initialSelectionStart, newOffset)
+                            } else {
+                                editText.setSelection(newOffset, initialSelectionStart)
+                            }
+                        }
+                        
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
+                        }
+                        
+                        val (start, end) = getSelection()
+                        if (start != end && start >= 0 && end <= editText.text.length) {
+                            val selected = editText.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
+                            }
+                        }
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    return true
+                }
             }
-            
-            // ✅ ACTION_CANCEL - IGNORE IT! Do NOT stop selection
-            MotionEvent.ACTION_CANCEL -> {
-                EmergencyLog.log("HandleTouchListener: ACTION_CANCEL received - IGNORING!")
-                // ✅ Do NOT reset isTouching or isDragging flags
-                // ✅ Keep selection active
-                return true
-            }
-            
-            // ✅ Only ACTION_UP should stop selection
-            MotionEvent.ACTION_UP -> {
-                EmergencyLog.log("HandleTouchListener: ACTION_UP received - stopping selection")
-                isTouching = false
-                isCancelled = false
-                isDraggingLeftHandle = false
-                isDraggingRightHandle = false
-                
-                // ✅ Reset touch interception
-                v.parent.requestDisallowInterceptTouchEvent(false)
-                return true
-            }
+            return false
         }
-        return false
     }
-}
     
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
@@ -1003,6 +956,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
         }
     }
     
+    // ✅ Force immediate handle position update without debounce
     private fun updateHandlePositionsImmediate() {
         try {
             updateHandlePositions()
@@ -1015,6 +969,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
         return (dp * resources.displayMetrics.density).toInt()
     }
     
+    // ✅ UPDATED: Handles positioned at bottom corners with right handle on right side
     private fun updateHandlePositions() {
         if (isScrolling) return
         
@@ -1052,6 +1007,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
 
             val halfHandle = HANDLE_SIZE / 2
 
+            // ✅ Left handle - bottom-left corner
             leftHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1063,6 +1019,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                 }
             }
             
+            // ✅ Right handle - right side with 14px gap
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
@@ -1145,6 +1102,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                 EmergencyLog.log("Handles created and added to container")
             }
             
+            // ✅ Force immediate position update
             updateHandlePositionsImmediate()
             
             leftHandleView?.visibility = View.VISIBLE
@@ -1254,6 +1212,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                     val clip = android.content.ClipData.newPlainText("text", selectedText)
                     clipboard.setPrimaryClip(clip)
                     
+                    // ✅ Clear selection and hide everything (same as Cut)
                     editText.setSelection(start, start)
                     hideSelectionHandles()
                     hideFloatingActionBar()
@@ -1598,12 +1557,21 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
         openEditorForNote(newNote)
     }
 
+    /**
+     * ✅ Enhanced isWordChar - supports all languages including Bengali, Hindi, Arabic, Urdu
+     */
     private fun isWordChar(char: Char): Boolean {
+        // ✅ Bengali (0980-09FF)
         val isBengali = char in '\u0980'..'\u09FF'
+        // ✅ Hindi/Devanagari (0900-097F)
         val isHindi = char in '\u0900'..'\u097F'
+        // ✅ Arabic (0600-06FF)
         val isArabic = char in '\u0600'..'\u06FF'
+        // ✅ Urdu (Arabic extended)
         val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
+        // ✅ Any Unicode letter or digit
         val isLetterOrDigit = Character.isLetterOrDigit(char)
+        // ✅ Special characters
         val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
                        char == '#' || char == '$' || char == '%' || char == '&' ||
                        char == '*' || char == '+' || char == '=' || char == '~' ||
@@ -1612,6 +1580,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
+    // ✅ FIXED: selectWordAtPosition with improved word boundary detection for all languages
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1624,15 +1593,19 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                     var wordStart = offset
                     var wordEnd = offset
                     
+                    // EXTEND LEFT: include all word characters
                     while (wordStart > 0 && isWordChar(text[wordStart - 1])) {
                         wordStart--
                     }
                     
+                    // EXTEND RIGHT: include all word characters
                     while (wordEnd < text.length && isWordChar(text[wordEnd])) {
                         wordEnd++
                     }
                     
+                    // If nothing was selected (e.g., cursor on a space), try to find nearby word
                     if (wordStart == wordEnd) {
+                        // Try to find word to the left
                         var tempStart = offset - 1
                         while (tempStart >= 0 && isWordChar(text[tempStart])) {
                             tempStart--
@@ -1652,19 +1625,18 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                         currentSelectedText = selectedWord
                         isActionBarTemporarilyHidden = false
                         
-                        // ✅ Save for restore
-                        savedStart = wordStart
-                        savedEnd = wordEnd
-                        hasSavedSelection = true
-                        
+                        // ✅ Show action bar immediately
                         showFloatingActionBar(selectedWord)
                         
+                        // ✅ CRITICAL FIX: Force recreate handles before showing
                         leftHandleView = null
                         rightHandleView = null
                         
+                        // ✅ Show handles and force immediate position update
                         showSelectionHandles()
                         updateHandlePositionsImmediate()
                         
+                        // ✅ Multiple attempts to ensure handles are positioned correctly
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
                         }, 50)
@@ -1788,6 +1760,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                     isScrolling = true
                     EmergencyLog.log("Scrolling started - hiding handles")
                     
+                    // ✅ Always hide handles when scrolling starts
                     if (areHandlesVisible) {
                         hideSelectionHandles()
                     }
@@ -1805,7 +1778,9 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                         isScrolling = false
                         EmergencyLog.log("Scrolling stopped - showing handles with fade")
                         
+                        // ✅ Always show handles when scrolling stops
                         if (editText.hasSelection()) {
+                            // ✅ Recreate handles to ensure fresh state
                             leftHandleView = null
                             rightHandleView = null
                             
@@ -1918,7 +1893,9 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     showSelectionHandles()
+                                    // ✅ Force immediate position update on touch release
                                     updateHandlePositionsImmediate()
+                                    // ✅ Additional attempts
                                     Handler(Looper.getMainLooper()).postDelayed({
                                         updateHandlePositionsImmediate()
                                     }, 50)
@@ -1966,6 +1943,7 @@ inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListe
                             currentSelectedText = selected
                             showFloatingActionBar(selected)
                             showSelectionHandles()
+                            // ✅ Force immediate position update on text change
                             updateHandlePositionsImmediate()
                         }
                     }
