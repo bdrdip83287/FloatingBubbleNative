@@ -27,8 +27,8 @@ class MainActivity : AppCompatActivity() {
                 startBubbleService()
                 finish()
             } else {
-                EmergencyLog.log("Opening overlay permission settings")
-                openOverlaySettings()
+                EmergencyLog.log("Opening app settings page")
+                openAppSettings()
             }
         } else {
             startBubbleService()
@@ -36,43 +36,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * ✅ Android 10+ (API 29+) - Realme সহ সকল ডিভাইসে কাজ করবে
-     * ✅ Android 6-9 (API 23-28) - App Details পেজ
-     */
-    private fun openOverlaySettings() {
+    private fun openAppSettings() {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // ✅ Android 10+ - Realme, Samsung, MIUI সহ সকল ডিভাইসের জন্য
-                EmergencyLog.log("Android 10+: Opening overlay permission with ACTION_MANAGE_OVERLAY_PERMISSION")
-                
-                // ✅ এই Intent টি Realme সহ সকল ডিভাইসে কাজ করে
+            // ✅ প্রথমে অ্যাপের ডিটেইল সেটিংস পেজ ওপেন করব
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            intent.data = Uri.parse("package:$packageName")
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+            Toast.makeText(this, "🔵 Go to 'Display over other apps' and enable permission", Toast.LENGTH_LONG).show()
+            EmergencyLog.log("Opened app details settings")
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "openAppSettings - App Details failed")
+            // Fallback: সরাসরি Display over other apps পেজ
+            try {
                 val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
                 intent.data = Uri.parse("package:$packageName")
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
-                
                 Toast.makeText(this, "🔵 Please enable 'Allow display over other apps'", Toast.LENGTH_LONG).show()
-            } else {
-                // ✅ Android 6-9 - App Details পেজ
-                EmergencyLog.log("Android 6-9: Opening app details page")
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                intent.data = Uri.parse("package:$packageName")
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
-                Toast.makeText(this, "Go to 'Display over other apps' and enable permission", Toast.LENGTH_LONG).show()
-            }
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "openOverlaySettings")
-            // Fallback: App Details পেজ
-            try {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                intent.data = Uri.parse("package:$packageName")
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
-                Toast.makeText(this, "Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
+                EmergencyLog.log("Fallback: Opened overlay permission page")
             } catch (e2: Exception) {
-                EmergencyLog.logException(e2, "openOverlaySettings fallback")
+                EmergencyLog.logException(e2, "openAppSettings - Fallback failed")
                 Toast.makeText(this, "Please manually enable overlay permission from Settings", Toast.LENGTH_LONG).show()
                 finish()
             }
