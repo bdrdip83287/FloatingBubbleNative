@@ -1621,6 +1621,7 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
+    // ✅ selectWordAtPosition - selects entire word (for single tap/long press initial selection)
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1681,7 +1682,7 @@ class FloatingBubbleService : Service() {
                             updateHandlePositionsImmediate()
                         }, 300)
                         
-                        EmergencyLog.log("Selected: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
+                        EmergencyLog.log("Selected word: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
                     }
                 }
             }
@@ -1887,8 +1888,8 @@ class FloatingBubbleService : Service() {
                 private var longPressRunnable: Runnable? = null
                 private val longPressHandler = Handler(Looper.getMainLooper())
                 private var isSelecting = false
-                private var initialSelectionStart = -1
-                private var initialSelectionEnd = -1
+                // ✅ Store initial selection offset for character-by-character drag
+                private var initialDragOffset = -1
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
@@ -1902,21 +1903,27 @@ class FloatingBubbleService : Service() {
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
+                                // ✅ Double tap - select word
                                 isSelecting = true
                                 selectWordAtPosition(this@apply, x, y, true)
+                                initialDragOffset = -1
                             } else {
+                                // ✅ Long press - store initial offset for character selection
                                 val runnable = Runnable {
                                     isSelecting = true
-                                    // ✅ Store initial selection position for character-by-character dragging
+                                    // ✅ Store the initial cursor position for character-by-character selection
                                     val currentLayout = this@apply.layout
                                     if (currentLayout != null) {
                                         val line = currentLayout.getLineForVertical(this@apply.scrollY + y.toInt())
                                         val offset = currentLayout.getOffsetForHorizontal(line, x + this@apply.scrollX)
-                                        initialSelectionStart = offset
-                                        initialSelectionEnd = offset
-                                        this@apply.setSelection(offset, offset)
+                                        initialDragOffset = offset.coerceIn(0, this@apply.text.length)
+                                        // ✅ Start with a single character selection
+                                        this@apply.setSelection(initialDragOffset, initialDragOffset + 1)
+                                        
+                                        // ✅ Show handles immediately
+                                        showSelectionHandles()
+                                        updateHandlePositionsImmediate()
                                     }
-                                    selectWordAtPosition(this@apply, x, y, true)
                                 }
                                 longPressRunnable = runnable
                                 longPressHandler.postDelayed(runnable, 300)
@@ -1942,15 +1949,19 @@ class FloatingBubbleService : Service() {
                                     val offset = currentLayout.getOffsetForHorizontal(line, event.x + this@apply.scrollX)
                                     val newOffset = offset.coerceIn(0, this@apply.text.length)
                                     
-                                    // ✅ Extend selection character by character
-                                    if (initialSelectionStart >= 0 && initialSelectionEnd >= 0) {
-                                        if (newOffset < initialSelectionStart) {
-                                            this@apply.setSelection(newOffset, initialSelectionEnd)
+                                    // ✅ If we have initial drag offset, use it for character selection
+                                    if (initialDragOffset >= 0 && initialDragOffset <= this@apply.text.length) {
+                                        // ✅ Character-by-character selection from initial point
+                                        if (newOffset < initialDragOffset) {
+                                            this@apply.setSelection(newOffset, initialDragOffset + 1)
+                                        } else if (newOffset > initialDragOffset) {
+                                            this@apply.setSelection(initialDragOffset, newOffset)
                                         } else {
-                                            this@apply.setSelection(initialSelectionStart, newOffset)
+                                            // Same position, select single character
+                                            this@apply.setSelection(initialDragOffset, initialDragOffset + 1)
                                         }
                                     } else {
-                                        // Fallback: use current selection
+                                        // ✅ Fallback: use existing selection
                                         val currentStart = this@apply.selectionStart
                                         val currentEnd = this@apply.selectionEnd
                                         if (currentStart != currentEnd) {
@@ -1960,15 +1971,15 @@ class FloatingBubbleService : Service() {
                                                 this@apply.setSelection(currentStart, newOffset)
                                             }
                                         } else {
-                                            this@apply.setSelection(newOffset, newOffset)
+                                            this@apply.setSelection(newOffset, newOffset + 1)
                                         }
                                     }
                                     
                                     // ✅ Show handles and action bar while dragging
                                     if (this@apply.hasSelection()) {
                                         val selected = this@apply.text.substring(
-                                            this@apply.selectionStart, 
-                                            this@apply.selectionEnd
+                                            this@apply.selectionStart.coerceAtLeast(0),
+                                            this@apply.selectionEnd.coerceAtMost(this@apply.text.length)
                                         )
                                         if (selected.isNotEmpty()) {
                                             currentSelectedText = selected
@@ -1989,28 +2000,28 @@ class FloatingBubbleService : Service() {
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                             cancelLongPress()
                             
-                            if (!isSelecting && this@apply.hasSelection()) {
-                                val selected = this@apply.text.substring(
-                                    this@apply.selectionStart, 
-                                    this@apply.selectionEnd
-                                )
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
-                                    isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                    updateHandlePositionsImmediate()
-                                    Handler(Looper.getMainLooper()).postDelayed({
+                            if (this@apply.hasSelection()) {
+                                val start = this@apply.selectionStart.coerceAtLeast(0)
+                                val end = this@apply.selectionEnd.coerceAtMost(this@apply.text.length)
+                                if (start != end && start < this@apply.text.length) {
+                                    val selected = this@apply.text.substring(start, end)
+                                    if (selected.isNotEmpty()) {
+                                        currentSelectedText = selected
+                                        isActionBarTemporarilyHidden = false
+                                        showFloatingActionBar(selected)
+                                        showSelectionHandles()
                                         updateHandlePositionsImmediate()
-                                    }, 50)
+                                        Handler(Looper.getMainLooper()).postDelayed({
+                                            updateHandlePositionsImmediate()
+                                        }, 50)
+                                    }
                                 }
-                            } else if (!isSelecting && !this@apply.hasSelection()) {
+                            } else {
                                 hideSelectionHandles()
                                 hideFloatingActionBar()
                             }
                             isSelecting = false
-                            initialSelectionStart = -1
-                            initialSelectionEnd = -1
+                            initialDragOffset = -1
                         }
                     }
                     return false
@@ -2033,12 +2044,16 @@ class FloatingBubbleService : Service() {
                         hideSelectionHandles()
                         hideFloatingActionBar()
                     } else {
-                        val selected = s?.substring(selectionStart, selectionEnd) ?: ""
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            showFloatingActionBar(selected)
-                            showSelectionHandles()
-                            updateHandlePositionsImmediate()
+                        val selStart = this@apply.selectionStart.coerceAtLeast(0)
+                        val selEnd = this@apply.selectionEnd.coerceAtMost(this@apply.text.length)
+                        if (selStart != selEnd && selStart < this@apply.text.length) {
+                            val selected = s?.substring(selStart, selEnd) ?: ""
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
+                                showSelectionHandles()
+                                updateHandlePositionsImmediate()
+                            }
                         }
                     }
                     
