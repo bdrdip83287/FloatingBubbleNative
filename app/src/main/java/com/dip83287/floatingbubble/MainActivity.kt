@@ -27,9 +27,9 @@ class MainActivity : AppCompatActivity() {
                 startBubbleService()
                 finish()
             } else {
-                EmergencyLog.log("Opening app settings page")
-                // সরাসরি অ্যাপের detail settings পেজে নিয়ে যান
-                openAppSettings()
+                EmergencyLog.log("Opening overlay permission settings")
+                // ✅ Android 10+ এ সরাসরি টগল পেজ, Android 6-9 এ App Details
+                requestOverlayPermission()
             }
         } else {
             startBubbleService()
@@ -37,25 +37,42 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openAppSettings() {
+    /**
+     * ✅ Android 10+ (API 29+) -> সরাসরি "Allow display over other apps" টগল পেজ
+     * ✅ Android 6-9 (API 23-28) -> App Details পেজ (যেখানে ম্যানুয়ালি ক্লিক করতে হবে)
+     */
+    private fun requestOverlayPermission() {
         try {
-            // সরাসরি অ্যাপের settings পেজে নিয়ে যান (যেখানে toggle থাকে)
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-            intent.data = Uri.parse("package:$packageName")
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
-            Toast.makeText(this, "Go to 'Display over other apps' and enable permission", Toast.LENGTH_LONG).show()
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "openAppSettings")
-            // Fallback
-            try {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // ✅ Android 10+ (API 29+) - সরাসরি টগল পেজ
+                EmergencyLog.log("Android 10+: Opening overlay toggle directly")
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                intent.data = Uri.parse("package:$packageName")
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+                Toast.makeText(this, "✅ Please enable 'Allow display over other apps'", Toast.LENGTH_LONG).show()
+            } else {
+                // ✅ Android 6-9 (API 23-28) - App Details পেজ
+                EmergencyLog.log("Android 6-9: Opening app details page")
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                intent.data = Uri.parse("package:$packageName")
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+                Toast.makeText(this, "Please go to 'Display over other apps' and enable permission", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "requestOverlayPermission")
+            // Fallback: App Details পেজ
+            try {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                intent.data = Uri.parse("package:$packageName")
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+                Toast.makeText(this, "Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
             } catch (e2: Exception) {
+                EmergencyLog.logException(e2, "requestOverlayPermission fallback")
                 Toast.makeText(this, "Please manually enable overlay permission from Settings", Toast.LENGTH_LONG).show()
+                finish()
             }
         }
     }
@@ -83,12 +100,16 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "✅ Permission granted!", Toast.LENGTH_SHORT).show()
                         EmergencyLog.log("Overlay permission granted")
                         startBubbleService()
+                        finish()
                     } else {
                         Toast.makeText(this, "❌ Please enable 'Display over other apps' permission", Toast.LENGTH_LONG).show()
                         EmergencyLog.logError("Overlay permission still denied")
+                        // ✅ Permission না দিলে আবার Permission রিকোয়েস্ট করুন
+                        requestOverlayPermission()
                     }
+                } else {
+                    finish()
                 }
-                finish()
             }, 500)
         }
     }
