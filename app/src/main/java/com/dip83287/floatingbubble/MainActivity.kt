@@ -28,7 +28,6 @@ class MainActivity : AppCompatActivity() {
                 finish()
             } else {
                 EmergencyLog.log("Opening overlay permission settings")
-                // ✅ Android 10+ এ সরাসরি টগল পেজ, Android 6-9 এ App Details
                 requestOverlayPermission()
             }
         } else {
@@ -38,18 +37,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * ✅ Android 10+ (API 29+) -> সরাসরি "Allow display over other apps" টগল পেজ
-     * ✅ Android 6-9 (API 23-28) -> App Details পেজ (যেখানে ম্যানুয়ালি ক্লিক করতে হবে)
+     * ✅ Android 10+ (API 29+) -> সরাসরি অ্যাপের "Display over other apps" টগল পেজ
+     * ✅ Android 6-9 (API 23-28) -> App Details পেজ
      */
     private fun requestOverlayPermission() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // ✅ Android 10+ (API 29+) - সরাসরি টগল পেজ
-                EmergencyLog.log("Android 10+: Opening overlay toggle directly")
+                // ✅ Android 10+ (API 29+) - অ্যাপের নির্দিষ্ট টগল পেজ
+                EmergencyLog.log("Android 10+: Opening app-specific overlay toggle")
+                
+                // ✅ Method 1: ACTION_MANAGE_OVERLAY_PERMISSION with package
                 val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
                 intent.data = Uri.parse("package:$packageName")
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
+                
                 Toast.makeText(this, "✅ Please enable 'Allow display over other apps'", Toast.LENGTH_LONG).show()
             } else {
                 // ✅ Android 6-9 (API 23-28) - App Details পেজ
