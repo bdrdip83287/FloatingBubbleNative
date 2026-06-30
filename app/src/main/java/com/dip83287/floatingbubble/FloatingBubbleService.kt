@@ -121,7 +121,6 @@ class FloatingBubbleService : Service() {
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
     
-    // ✅ Track if handles were visible before scrolling
     private var wereHandlesVisibleBeforeScroll = false
 
     private var lastFontScale = 0f
@@ -1140,7 +1139,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
     
-    // ✅ Fade out handles smoothly during scroll
     private fun fadeOutHandlesDuringScroll() {
         try {
             leftHandleView?.let { handle ->
@@ -1164,17 +1162,13 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
     
-    // ✅ Fade in handles smoothly after scroll stops
     private fun fadeInHandlesAfterScroll() {
         try {
-            // Only show handles if there is an active selection
             if (editText.hasSelection()) {
                 val (start, end) = getSelection()
                 if (start != end) {
-                    // First update handle positions
                     updateHandlePositionsImmediate()
                     
-                    // Then fade in
                     leftHandleView?.let { handle ->
                         if (handle.visibility == View.VISIBLE) {
                             handle.animate()
@@ -1628,6 +1622,27 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
+    // ✅ For LONG PRESS + DRAG: Select character by character (not word by word)
+    private fun selectCharAtPosition(editText: EditText, x: Float, y: Float) {
+        try {
+            val currentLayout = editText.layout
+            if (currentLayout != null) {
+                val line = currentLayout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = currentLayout.getOffsetForHorizontal(line, x)
+                val clampedOffset = offset.coerceIn(0, editText.text.length)
+                
+                // ✅ Simply place cursor at the character position
+                // The selection will be handled by the calling method
+                editText.setSelection(clampedOffset, clampedOffset)
+                
+                EmergencyLog.log("Char selection at offset: $clampedOffset")
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "selectCharAtPosition")
+        }
+    }
+
+    // ✅ For DOUBLE TAP / SHORT TAP: Select complete word
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1688,7 +1703,7 @@ class FloatingBubbleService : Service() {
                             updateHandlePositionsImmediate()
                         }, 300)
                         
-                        EmergencyLog.log("Selected: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
+                        EmergencyLog.log("Selected word: '$selectedWord' (${selectedWord.length} chars) at offset $offset")
                     }
                 }
             }
@@ -1799,10 +1814,8 @@ class FloatingBubbleService : Service() {
                     isScrolling = true
                     EmergencyLog.log("Scrolling started - fading out handles")
                     
-                    // ✅ Save current handle visibility state
                     wereHandlesVisibleBeforeScroll = areHandlesVisible
                     
-                    // ✅ Fade out handles with animation
                     if (areHandlesVisible) {
                         fadeOutHandlesDuringScroll()
                     }
@@ -1830,7 +1843,6 @@ class FloatingBubbleService : Service() {
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
                                     
-                                    // ✅ Fade in handles with animation
                                     if (wereHandlesVisibleBeforeScroll) {
                                         fadeInHandlesAfterScroll()
                                     } else {
@@ -1897,6 +1909,8 @@ class FloatingBubbleService : Service() {
                 private var longPressRunnable: Runnable? = null
                 private val longPressHandler = Handler(Looper.getMainLooper())
                 private var isSelecting = false
+                private var initialCharOffset = -1
+                private var isDragging = false
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
@@ -1907,15 +1921,23 @@ class FloatingBubbleService : Service() {
                             
                             cancelLongPress()
                             
+                            // ✅ Check if it's a double tap
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
                                 isSelecting = true
+                                isDragging = false
+                                // ✅ Double tap: select complete word
                                 selectWordAtPosition(this@apply, x, y, true)
                             } else {
+                                // ✅ Single tap: prepare for long press
                                 val runnable = Runnable {
                                     isSelecting = true
-                                    selectWordAtPosition(this@apply, x, y, true)
+                                    isDragging = false
+                                    // ✅ Long press: select character at position
+                                    selectCharAtPosition(this@apply, x, y)
+                                    initialCharOffset = this@apply.selectionStart
+                                    EmergencyLog.log("Long press started at char: $initialCharOffset")
                                 }
                                 longPressRunnable = runnable
                                 longPressHandler.postDelayed(runnable, 300)
@@ -1927,10 +1949,50 @@ class FloatingBubbleService : Service() {
                             v.parent.requestDisallowInterceptTouchEvent(false)
                         }
                         
+                        MotionEvent.ACTION_MOVE -> {
+                            val dx = Math.abs(event.x - lastTouchX)
+                            val dy = Math.abs(event.y - lastTouchY)
+                            
+                            // ✅ If moving after long press, start character-by-character selection
+                            if (dx > 10 || dy > 10) {
+                                cancelLongPress()
+                                
+                                if (isSelecting && initialCharOffset >= 0) {
+                                    isDragging = true
+                                    val currentLayout = this@apply.layout
+                                    if (currentLayout != null) {
+                                        val line = currentLayout.getLineForVertical(this@apply.scrollY + event.y.toInt())
+                                        val offset = currentLayout.getOffsetForHorizontal(line, event.x)
+                                        val clampedOffset = offset.coerceIn(0, this@apply.text.length)
+                                        
+                                        // ✅ Character by character selection during drag
+                                        val start = minOf(initialCharOffset, clampedOffset)
+                                        val end = maxOf(initialCharOffset, clampedOffset)
+                                        
+                                        if (start != end) {
+                                            this@apply.setSelection(start, end)
+                                            val selected = this@apply.text.substring(start, end)
+                                            if (selected.isNotEmpty()) {
+                                                currentSelectedText = selected
+                                                isActionBarTemporarilyHidden = false
+                                                showFloatingActionBar(selected)
+                                                showSelectionHandles()
+                                                updateHandlePositionsImmediate()
+                                            }
+                                            EmergencyLog.log("Char-by-char selection: $start to $end")
+                                        }
+                                    }
+                                } else if (this@apply.hasSelection() && !isScrolling) {
+                                    updateHandlePositionsSafe()
+                                }
+                            }
+                        }
+                        
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                             cancelLongPress()
                             
-                            if (!isSelecting && this@apply.hasSelection()) {
+                            // ✅ If selection exists after drag/release
+                            if (this@apply.hasSelection() && !isDragging) {
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
@@ -1942,25 +2004,17 @@ class FloatingBubbleService : Service() {
                                         updateHandlePositionsImmediate()
                                     }, 50)
                                 }
-                            } else if (!isSelecting && !this@apply.hasSelection()) {
+                            } else if (!this@apply.hasSelection() && !isDragging) {
                                 hideSelectionHandles()
                                 hideFloatingActionBar()
                             }
+                            
                             isSelecting = false
-                        }
-                        
-                        MotionEvent.ACTION_MOVE -> {
-                            val dx = Math.abs(event.x - lastTouchX)
-                            val dy = Math.abs(event.y - lastTouchY)
-                            if (dx > 20 || dy > 20) {
-                                cancelLongPress()
-                                if (this@apply.hasSelection() && !isScrolling) {
-                                    updateHandlePositionsSafe()
-                                }
-                            }
+                            isDragging = false
+                            initialCharOffset = -1
                         }
                     }
-                    return false
+                    return true
                 }
                 
                 private fun cancelLongPress() {
