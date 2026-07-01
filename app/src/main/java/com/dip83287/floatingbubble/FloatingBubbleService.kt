@@ -848,7 +848,8 @@ class FloatingBubbleService : Service() {
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createCircleHandleDrawable())
-            scaleType = ImageView.ScaleType.FIT_CENTER            setPadding(0, 0, 0, 0)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        setPadding(0, 0, 0, 0)
             setOnTouchListener(HandleTouchListener(isLeft = true))
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(HANDLE_SIZE, HANDLE_SIZE)
