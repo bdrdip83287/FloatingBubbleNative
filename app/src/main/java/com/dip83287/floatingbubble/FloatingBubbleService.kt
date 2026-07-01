@@ -867,7 +867,7 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ UPDATED: Character by character selection during drag (not word by word)
+    // ✅ UPDATED: Character by character selection during drag
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
         private var initialTouchX = 0f
         private var initialSelectionStart = 0
@@ -887,6 +887,9 @@ class FloatingBubbleService : Service() {
                     } else {
                         isDraggingRightHandle = true
                     }
+                    
+                    // ✅ Disable default text selection to prevent word-by-word
+                    editText.setCustomSelectionActionModeCallback(null)
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -909,28 +912,23 @@ class FloatingBubbleService : Service() {
                         val offset = currentLayout.getOffsetForHorizontal(line, textX)
                         val newOffset = offset.coerceIn(0, editText.text.length)
                         
-                        // ✅ Character by character selection (not word by word)
-                        // Just set the selection directly based on the exact character position
+                        // ✅ Character by character selection
                         if (isLeft) {
                             if (newOffset < initialSelectionEnd) {
-                                // ✅ Extend selection from newOffset to initialSelectionEnd (character by character)
                                 editText.setSelection(newOffset, initialSelectionEnd)
                             } else {
-                                // If dragged past the right handle, swap selection
                                 editText.setSelection(initialSelectionEnd, newOffset)
                             }
                         } else {
                             if (newOffset > initialSelectionStart) {
-                                // ✅ Extend selection from initialSelectionStart to newOffset (character by character)
                                 editText.setSelection(initialSelectionStart, newOffset)
                             } else {
-                                // If dragged past the left handle, swap selection
                                 editText.setSelection(newOffset, initialSelectionStart)
                             }
                         }
                         
                         if (!isScrolling) {
-                            updateHandlePositionsSafe()
+                            updateHandlePositionsImmediate()
                         }
                         
                         val (start, end) = getSelection()
@@ -947,6 +945,15 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     isDraggingLeftHandle = false
                     isDraggingRightHandle = false
+                    // ✅ Restore default selection mode
+                    editText.setCustomSelectionActionModeCallback(object : android.view.ActionMode.Callback {
+                        override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
+                            return true
+                        }
+                        override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?) = false
+                        override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?) = false
+                        override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
+                    })
                     return true
                 }
             }
