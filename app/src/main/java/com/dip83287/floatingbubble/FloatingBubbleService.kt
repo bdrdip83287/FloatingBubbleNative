@@ -867,87 +867,94 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    // ✅ FIXED: Character by character selection during drag
-    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-        private var initialTouchX = 0f
-        private var initialSelectionStart = 0
-        private var initialSelectionEnd = 0
-        private var lastUpdateTime = 0L
-        
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialTouchX = event.rawX
-                    initialSelectionStart = editText.selectionStart
-                    initialSelectionEnd = editText.selectionEnd
-                    lastUpdateTime = System.currentTimeMillis()
-                    
-                    if (isLeft) {
-                        isDraggingLeftHandle = true
-                    } else {
-                        isDraggingRightHandle = true
-                    }
-                    return true
+// ✅ FIXED: Character by character selection during drag
+inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
+    private var initialTouchX = 0f
+    private var initialSelectionStart = 0
+    private var initialSelectionEnd = 0
+    private var lastUpdateTime = 0L
+    
+    override fun onTouch(v: View, event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                initialTouchX = event.rawX
+                initialSelectionStart = editText.selectionStart
+                initialSelectionEnd = editText.selectionEnd
+                lastUpdateTime = System.currentTimeMillis()
+                
+                if (isLeft) {
+                    isDraggingLeftHandle = true
+                } else {
+                    isDraggingRightHandle = true
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastUpdateTime < 16) {
-                        return true
-                    }
-                    lastUpdateTime = currentTime
-                    
-                    val currentLayout = editText.layout
-                    
-                    if (currentLayout != null) {
-                        val editLocation = IntArray(2)
-                        editText.getLocationOnScreen(editLocation)
-                        
-                        val textX = event.rawX - editLocation[0] + editText.scrollX
-                        val textY = event.rawY - editLocation[1] + editText.scrollY
-                        
-                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
-                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
-                        val newOffset = offset.coerceIn(0, editText.text.length)
-                        
-                        // ✅ CHARACTER BY CHARACTER SELECTION
-                        if (isLeft) {
-                            if (newOffset <= initialSelectionEnd) {
-                                editText.setSelection(newOffset, initialSelectionEnd)
-                            } else {
-                                editText.setSelection(initialSelectionEnd, newOffset)
-                            }
-                        } else {
-                            if (newOffset >= initialSelectionStart) {
-                                editText.setSelection(initialSelectionStart, newOffset)
-                            } else {
-                                editText.setSelection(newOffset, initialSelectionStart)
-                            }
-                        }
-                        
-                        if (!isScrolling) {
-                            updateHandlePositionsSafe()
-                        }
-                        
-                        val (start, end) = getSelection()
-                        if (start != end && start >= 0 && end <= editText.text.length) {
-                            val selected = editText.text.substring(start, end)
-                            if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                showFloatingActionBar(selected)
-                            }
-                        }
-                    }
-                    return true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    isDraggingLeftHandle = false
-                    isDraggingRightHandle = false
-                    return true
-                }
+                return true
             }
-            return false
+            MotionEvent.ACTION_MOVE -> {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastUpdateTime < 16) {
+                    return true
+                }
+                lastUpdateTime = currentTime
+                
+                val currentLayout = editText.layout
+                
+                if (currentLayout != null) {
+                    val editLocation = IntArray(2)
+                    editText.getLocationOnScreen(editLocation)
+                    
+                    val textX = event.rawX - editLocation[0] + editText.scrollX
+                    val textY = event.rawY - editLocation[1] + editText.scrollY
+                    
+                    val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                    val offset = currentLayout.getOffsetForHorizontal(line, textX)
+                    val newOffset = offset.coerceIn(0, editText.text.length)
+                    
+                    // ✅ CHARACTER BY CHARACTER SELECTION
+                    // Directly set selection based on character position
+                    if (isLeft) {
+                        // Left handle: move the start position character by character
+                        if (newOffset <= initialSelectionEnd) {
+                            editText.setSelection(newOffset, initialSelectionEnd)
+                        } else {
+                            // If dragged past right handle, swap
+                            editText.setSelection(initialSelectionEnd, newOffset)
+                        }
+                    } else {
+                        // Right handle: move the end position character by character
+                        if (newOffset >= initialSelectionStart) {
+                            editText.setSelection(initialSelectionStart, newOffset)
+                        } else {
+                            // If dragged past left handle, swap
+                            editText.setSelection(newOffset, initialSelectionStart)
+                        }
+                    }
+                    
+                    // Update handle positions
+                    if (!isScrolling) {
+                        updateHandlePositionsSafe()
+                    }
+                    
+                    // Show action bar with selected text
+                    val (start, end) = getSelection()
+                    if (start != end && start >= 0 && end <= editText.text.length) {
+                        val selected = editText.text.substring(start, end)
+                        if (selected.isNotEmpty()) {
+                            currentSelectedText = selected
+                            showFloatingActionBar(selected)
+                        }
+                    }
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isDraggingLeftHandle = false
+                isDraggingRightHandle = false
+                return true
+            }
         }
+        return false
     }
+}
     
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
