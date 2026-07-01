@@ -1046,7 +1046,8 @@ class FloatingBubbleService : Service() {
             
             handleContainer?.addView(leftHandleView)
             handleContainer?.addView(rightHandleView)
-            areHandlesVisible = true            EmergencyLog.log("Handles recreated")
+            areHandlesVisible = true
+        EmergencyLog.log("Handles recreated")
             
             updateHandlePositionsImmediate()
         }
