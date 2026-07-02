@@ -1881,7 +1881,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-// ✅ FIXED: OnTouchListener with proper single tap deselect
+// ✅ FIXED: OnTouchListener with proper single tap deselect and scroll support
 setOnTouchListener(object : View.OnTouchListener {
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
@@ -1892,6 +1892,7 @@ setOnTouchListener(object : View.OnTouchListener {
     private var isDragging = false
     private var isScrollingGesture = false
     private var isSingleTap = false
+    private var hasMoved = false
     
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.action) {
@@ -1906,6 +1907,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 isDragging = false
                 isScrollingGesture = false
                 isSingleTap = true
+                hasMoved = false
                 
                 // Check for double tap
                 if (currentTime - lastTouchTime < 300 && 
@@ -1943,6 +1945,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 // If moved significantly, it's not a single tap
                 if (dx > 15 || dy > 15) {
                     isSingleTap = false
+                    hasMoved = true
                 }
                 
                 // Check if this is a scrolling gesture (vertical movement)
@@ -2023,13 +2026,19 @@ setOnTouchListener(object : View.OnTouchListener {
                 // Allow scroll after touch ends
                 v.parent.requestDisallowInterceptTouchEvent(false)
                 
-                // ✅ Single tap - deselect if there's a selection
-                if (isSingleTap && this@apply.hasSelection()) {
+                // ✅ Single tap - deselect if there's a selection (only if no movement happened)
+                if (isSingleTap && !hasMoved && !isScrollingGesture && this@apply.hasSelection()) {
                     // Clear selection
                     val currentPosition = this@apply.selectionStart
                     this@apply.setSelection(currentPosition, currentPosition)
                     hideSelectionHandles()
                     hideFloatingActionBar()
+                    isSingleTap = false
+                    return true
+                }
+                
+                // ✅ If scrolling happened, don't deselect
+                if (isScrollingGesture) {
                     isSingleTap = false
                     return true
                 }
@@ -2063,6 +2072,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 isDragging = false
                 isScrollingGesture = false
                 isSingleTap = false
+                hasMoved = false
                 return true
             }
         }
