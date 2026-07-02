@@ -1881,158 +1881,174 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ COMPLETELY NEW OnTouchListener for character by character selection
-            setOnTouchListener(object : View.OnTouchListener {
-                private var lastTouchTime = 0L
-                private var lastTouchX = 0f
-                private var lastTouchY = 0f
-                private var longPressRunnable: Runnable? = null
-                private val longPressHandler = Handler(Looper.getMainLooper())
-                private var isLongPressTriggered = false
-                private var isDragging = false
+// ✅ FIXED: OnTouchListener with proper scroll support
+setOnTouchListener(object : View.OnTouchListener {
+    private var lastTouchTime = 0L
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var longPressRunnable: Runnable? = null
+    private val longPressHandler = Handler(Looper.getMainLooper())
+    private var isLongPressTriggered = false
+    private var isDragging = false
+    private var isScrollingGesture = false
+    
+    override fun onTouch(v: View, event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                val currentTime = System.currentTimeMillis()
+                val x = event.x
+                val y = event.y
                 
-                override fun onTouch(v: View, event: MotionEvent): Boolean {
-                    when (event.action) {
-                        MotionEvent.ACTION_DOWN -> {
-                            val currentTime = System.currentTimeMillis()
-                            val x = event.x
-                            val y = event.y
-                            
-                            // Cancel any pending long press
-                            longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                            isLongPressTriggered = false
-                            isDragging = false
-                            
-                            // Check for double tap
-                            if (currentTime - lastTouchTime < 300 && 
-                                Math.abs(x - lastTouchX) < 50 && 
-                                Math.abs(y - lastTouchY) < 50) {
-                                // Double tap - select word
-                                selectWordAtPosition(this@apply, x, y, true)
+                // Cancel any pending long press
+                longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                isLongPressTriggered = false
+                isDragging = false
+                isScrollingGesture = false
+                
+                // Check for double tap
+                if (currentTime - lastTouchTime < 300 && 
+                    Math.abs(x - lastTouchX) < 50 && 
+                    Math.abs(y - lastTouchY) < 50) {
+                    // Double tap - select word
+                    selectWordAtPosition(this@apply, x, y, true)
+                    // Don't block scroll for double tap
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+                } else {
+                    // Schedule long press
+                    val runnable = Runnable {
+                        isLongPressTriggered = true
+                        // Long press - select word at position
+                        selectWordAtPosition(this@apply, x, y, true)
+                        // Block scroll only after long press is triggered
+                        v.parent.requestDisallowInterceptTouchEvent(true)
+                    }
+                    longPressRunnable = runnable
+                    longPressHandler.postDelayed(runnable, 300)
+                }
+                
+                lastTouchTime = currentTime
+                lastTouchX = x
+                lastTouchY = y
+                return true
+            }
+            
+            MotionEvent.ACTION_MOVE -> {
+                val dx = Math.abs(event.x - lastTouchX)
+                val dy = Math.abs(event.y - lastTouchY)
+                
+                // Check if this is a scrolling gesture (vertical movement)
+                if (dy > dx && dy > 20 && !isLongPressTriggered) {
+                    isScrollingGesture = true
+                    // Allow parent (ScrollView) to intercept touch for scrolling
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+                    return false
+                }
+                
+                // If long press was triggered and user is dragging horizontally
+                if (isLongPressTriggered && (dx > 20 || dy > 20) && !isScrollingGesture) {
+                    isDragging = true
+                    // Block parent from intercepting during drag selection
+                    v.parent.requestDisallowInterceptTouchEvent(true)
+                    
+                    // ✅ Character by character selection
+                    val currentLayout = this@apply.layout
+                    if (currentLayout != null) {
+                        val editLocation = IntArray(2)
+                        this@apply.getLocationOnScreen(editLocation)
+                        
+                        val textX = event.rawX - editLocation[0] + this@apply.scrollX
+                        val textY = event.rawY - editLocation[1] + this@apply.scrollY
+                        
+                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
+                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
+                        val newOffset = offset.coerceIn(0, this@apply.text.length)
+                        
+                        // ✅ Character by character using the selection handles logic
+                        val currentStart = this@apply.selectionStart
+                        val currentEnd = this@apply.selectionEnd
+                        
+                        if (newOffset < currentStart) {
+                            this@apply.setSelection(newOffset, currentEnd)
+                        } else if (newOffset > currentEnd) {
+                            this@apply.setSelection(currentStart, newOffset)
+                        } else {
+                            val distToStart = abs(newOffset - currentStart)
+                            val distToEnd = abs(newOffset - currentEnd)
+                            if (distToStart < distToEnd) {
+                                this@apply.setSelection(newOffset, currentEnd)
                             } else {
-                                // Schedule long press
-                                val runnable = Runnable {
-                                    isLongPressTriggered = true
-                                    // Long press - select word at position
-                                    selectWordAtPosition(this@apply, x, y, true)
-                                }
-                                longPressRunnable = runnable
-                                longPressHandler.postDelayed(runnable, 300)
+                                this@apply.setSelection(currentStart, newOffset)
                             }
-                            
-                            lastTouchTime = currentTime
-                            lastTouchX = x
-                            lastTouchY = y
-                            v.parent.requestDisallowInterceptTouchEvent(true)
-                            return true
                         }
                         
-                        MotionEvent.ACTION_MOVE -> {
-                            val dx = Math.abs(event.x - lastTouchX)
-                            val dy = Math.abs(event.y - lastTouchY)
-                            
-                            // If long press was triggered and user is dragging
-                            if (isLongPressTriggered && (dx > 20 || dy > 20)) {
-                                isDragging = true
-                                
-                                // ✅ Character by character selection
-                                val currentLayout = this@apply.layout
-                                if (currentLayout != null) {
-                                    val editLocation = IntArray(2)
-                                    this@apply.getLocationOnScreen(editLocation)
-                                    
-                                    val textX = event.rawX - editLocation[0] + this@apply.scrollX
-                                    val textY = event.rawY - editLocation[1] + this@apply.scrollY
-                                    
-                                    val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
-                                    val offset = currentLayout.getOffsetForHorizontal(line, textX)
-                                    val newOffset = offset.coerceIn(0, this@apply.text.length)
-                                    
-                                    // ✅ Character by character using the selection handles logic
-                                    val currentStart = this@apply.selectionStart
-                                    val currentEnd = this@apply.selectionEnd
-                                    
-                                    if (newOffset < currentStart) {
-                                        // Dragging left from start
-                                        this@apply.setSelection(newOffset, currentEnd)
-                                    } else if (newOffset > currentEnd) {
-                                        // Dragging right from end
-                                        this@apply.setSelection(currentStart, newOffset)
-                                    } else {
-                                        // Inside selection - keep the closer boundary fixed
-                                        val distToStart = abs(newOffset - currentStart)
-                                        val distToEnd = abs(newOffset - currentEnd)
-                                        if (distToStart < distToEnd) {
-                                            this@apply.setSelection(newOffset, currentEnd)
-                                        } else {
-                                            this@apply.setSelection(currentStart, newOffset)
-                                        }
-                                    }
-                                    
-                                    // Update handles and action bar
-                                    if (!isScrolling) {
-                                        updateHandlePositionsSafe()
-                                    }
-                                    
-                                    val (start, end) = getSelection()
-                                    if (start != end && start >= 0 && end <= this@apply.text.length) {
-                                        val selected = this@apply.text.substring(start, end)
-                                        if (selected.isNotEmpty()) {
-                                            currentSelectedText = selected
-                                            showFloatingActionBar(selected)
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Update handles during any selection
-                            if (this@apply.hasSelection() && !isScrolling) {
-                                updateHandlePositionsSafe()
-                            }
-                            return true
+                        // Update handles and action bar
+                        if (!isScrolling) {
+                            updateHandlePositionsSafe()
                         }
                         
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            // Cancel long press
-                            longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                            longPressRunnable = null
-                            
-                            if (!isLongPressTriggered && !isDragging && this@apply.hasSelection()) {
-                                // Regular selection (from double tap or click)
-                                val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
-                                    isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                    updateHandlePositionsImmediate()
-                                    Handler(Looper.getMainLooper()).postDelayed({
-                                        updateHandlePositionsImmediate()
-                                    }, 50)
-                                }
-                            } else if (isDragging && this@apply.hasSelection()) {
-                                // Drag ended - show handles and action bar
-                                val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
-                                    isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                    updateHandlePositionsImmediate()
-                                }
-                            } else if (!this@apply.hasSelection()) {
-                                hideSelectionHandles()
-                                hideFloatingActionBar()
+                        val (start, end) = getSelection()
+                        if (start != end && start >= 0 && end <= this@apply.text.length) {
+                            val selected = this@apply.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                showFloatingActionBar(selected)
                             }
-                            
-                            isLongPressTriggered = false
-                            isDragging = false
-                            return true
                         }
                     }
-                    return true
                 }
-            })
+                
+                // Update handles during any selection
+                if (this@apply.hasSelection() && !isScrolling) {
+                    updateHandlePositionsSafe()
+                }
+                return true
+            }
+            
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // Cancel long press
+                longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                longPressRunnable = null
+                
+                // Allow scroll after touch ends
+                v.parent.requestDisallowInterceptTouchEvent(false)
+                
+                if (!isLongPressTriggered && !isDragging && this@apply.hasSelection()) {
+                    // Regular selection (from double tap or click)
+                    val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
+                    if (selected.isNotEmpty()) {
+                        currentSelectedText = selected
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selected)
+                        showSelectionHandles()
+                        updateHandlePositionsImmediate()
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            updateHandlePositionsImmediate()
+                        }, 50)
+                    }
+                } else if (isDragging && this@apply.hasSelection()) {
+                    // Drag ended - show handles and action bar
+                    val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
+                    if (selected.isNotEmpty()) {
+                        currentSelectedText = selected
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selected)
+                        showSelectionHandles()
+                        updateHandlePositionsImmediate()
+                    }
+                } else if (!this@apply.hasSelection()) {
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                }
+                
+                isLongPressTriggered = false
+                isDragging = false
+                isScrollingGesture = false
+                return true
+            }
+        }
+        return true
+    }
+})
             
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
