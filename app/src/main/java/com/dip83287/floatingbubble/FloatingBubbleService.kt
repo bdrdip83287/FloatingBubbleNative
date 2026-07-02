@@ -1918,7 +1918,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     v.parent.requestDisallowInterceptTouchEvent(false)
                 } else {
                     // ✅ Schedule single tap detection (for deselect)
-                    val runnable = Runnable {
+                    val singleTapRunnable = Runnable {
                         if (!isLongPressTriggered && !isDragging && !isScrollingGesture) {
                             // ✅ Single tap - deselect if there is selection
                             isSingleTap = true
@@ -1942,23 +1942,19 @@ setOnTouchListener(object : View.OnTouchListener {
                             v.parent.requestDisallowInterceptTouchEvent(false)
                         }
                     }
-                    longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 150) // 150ms delay for single tap
+                    longPressRunnable = singleTapRunnable
+                    longPressHandler.postDelayed(singleTapRunnable, 150) // 150ms delay for single tap
                     
-                    // Schedule long press (300ms)
-                    val longPressRunnable = Runnable {
+                    // ✅ Schedule long press (300ms) - use a separate variable
+                    val longPressTask = Runnable {
                         isLongPressTriggered = true
                         // Long press - select word at position
                         selectWordAtPosition(this@apply, x, y, true)
                         // Block scroll only after long press is triggered
                         v.parent.requestDisallowInterceptTouchEvent(true)
                     }
-                    // Store the long press runnable separately
-                    val lpRunnable = longPressRunnable
-                    // We'll use a separate handler or combine
-                    longPressHandler.postDelayed(lpRunnable, 300)
-                    // Store it to cancel later
-                    longPressRunnable = lpRunnable
+                    // Use a separate handler or post directly
+                    longPressHandler.postDelayed(longPressTask, 300)
                 }
                 
                 lastTouchTime = currentTime
