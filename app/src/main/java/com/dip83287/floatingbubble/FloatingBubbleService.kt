@@ -2451,3 +2451,15 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
+    // ✅ Get offset at position for cursor placement
+    private fun getOffsetAtPosition(editText: EditText, x: Float, y: Float): Int {
+        try {
+            val currentLayout = editText.layout ?: return -1
+            val line = currentLayout.getLineForVertical(editText.scrollY + y.toInt())
+            val offset = currentLayout.getOffsetForHorizontal(line, x)
+            return offset.coerceIn(0, editText.text.length)
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "getOffsetAtPosition")
+            return -1
+        }
+    }
