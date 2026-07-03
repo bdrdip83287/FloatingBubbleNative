@@ -120,6 +120,10 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
+    
+    private var wereHandlesVisibleBeforeScroll = false
+    private var savedSelectionStart = -1
+    private var savedSelectionEnd = -1
 
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
@@ -1810,10 +1814,19 @@ class FloatingBubbleService : Service() {
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started - fading handles")
+                    EmergencyLog.log("Scrolling started - saving selection")
                     
-                    // ✅ Only fade alpha, don't hide
-                    handleScrollStart()
+                    // ✅ Save current selection before scrolling
+                    if (editText.hasSelection()) {
+                        savedSelectionStart = editText.selectionStart
+                        savedSelectionEnd = editText.selectionEnd
+                        wereHandlesVisibleBeforeScroll = areHandlesVisible
+                    }
+                    
+                    // Only fade handles, don't hide
+                    if (areHandlesVisible) {
+                        handleScrollStart()
+                    }
                     
                     if (editText.hasSelection() && isActionBarVisible) {
                         hideFloatingActionBar()
@@ -1826,9 +1839,20 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped - restoring handles")
+                        EmergencyLog.log("Scrolling stopped - restoring selection")
                         
-                        // ✅ Restore handles visibility
+                        // ✅ Restore selection if it was cleared
+                        if (savedSelectionStart >= 0 && savedSelectionEnd >= 0 && 
+                            savedSelectionStart != savedSelectionEnd) {
+                            if (!editText.hasSelection() || 
+                                editText.selectionStart != savedSelectionStart || 
+                                editText.selectionEnd != savedSelectionEnd) {
+                                editText.setSelection(savedSelectionStart, savedSelectionEnd)
+                                EmergencyLog.log("Selection restored: $savedSelectionStart - $savedSelectionEnd")
+                            }
+                        }
+                        
+                        // ✅ Show handles and action bar
                         if (editText.hasSelection()) {
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
@@ -1838,10 +1862,19 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
-                                    handleScrollEnd()
+                                    
+                                    // Always show handles
+                                    if (wereHandlesVisibleBeforeScroll || true) {
+                                        showSelectionHandles()
+                                        handleScrollEnd()
+                                        updateHandlePositionsImmediate()
+                                    }
                                 }
                             }
                         }
+                        savedSelectionStart = -1
+                        savedSelectionEnd = -1
+                        wereHandlesVisibleBeforeScroll = false
                     }
                 }, SCROLL_STOP_DELAY)
             }
@@ -1922,6 +1955,8 @@ class FloatingBubbleService : Service() {
                             touchStartX = x
                             touchStartY = y
                             
+                            // If there's a selection and user taps, we'll handle in ACTION_UP
+                            
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
@@ -1954,11 +1989,14 @@ class FloatingBubbleService : Service() {
                                 isSingleTap = false
                             }
                             
+                            // ✅ Detect scroll but don't let it clear selection
                             if (dy > dx && dy > 20 && !isLongPressTriggered) {
                                 isScrollingGesture = true
                                 isSingleTap = false
+                                // Don't return false - let scroll happen but keep selection
                                 v.parent.requestDisallowInterceptTouchEvent(false)
-                                return false
+                                // Return true to keep touch handling
+                                return true
                             }
                             
                             if (isLongPressTriggered && (dx > 20 || dy > 20) && !isScrollingGesture) {
