@@ -120,8 +120,6 @@ class FloatingBubbleService : Service() {
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
-    
-    private var wereHandlesVisibleBeforeScroll = false
 
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
@@ -755,7 +753,6 @@ class FloatingBubbleService : Service() {
         leftHandleView = null
         rightHandleView = null
         areHandlesVisible = false
-        wereHandlesVisibleBeforeScroll = false
         EmergencyLog.log("Handle references reset")
     }
 
@@ -1107,6 +1104,7 @@ class FloatingBubbleService : Service() {
             leftHandleView?.alpha = 1f
             rightHandleView?.visibility = View.VISIBLE
             rightHandleView?.alpha = 1f
+            areHandlesVisible = true
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -1139,37 +1137,39 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) { }
     }
     
-    private fun fadeOutHandlesDuringScroll() {
+    // ✅ Scroll handling - only fade alpha, don't hide views
+    private fun handleScrollStart() {
         try {
-            leftHandleView?.let { handle ->
-                if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
-                    handle.animate()
-                        ?.alpha(0f)
-                        ?.setDuration(150)
-                        ?.setInterpolator(DecelerateInterpolator())
-                        ?.start()
+            if (areHandlesVisible) {
+                leftHandleView?.let { handle ->
+                    if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
+                        handle.animate()
+                            ?.alpha(0.3f)
+                            ?.setDuration(150)
+                            ?.setInterpolator(DecelerateInterpolator())
+                            ?.start()
+                    }
                 }
-            }
-            rightHandleView?.let { handle ->
-                if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
-                    handle.animate()
-                        ?.alpha(0f)
-                        ?.setDuration(150)
-                        ?.setInterpolator(DecelerateInterpolator())
-                        ?.start()
+                rightHandleView?.let { handle ->
+                    if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
+                        handle.animate()
+                            ?.alpha(0.3f)
+                            ?.setDuration(150)
+                            ?.setInterpolator(DecelerateInterpolator())
+                            ?.start()
+                    }
                 }
             }
         } catch (e: Exception) { }
     }
     
-    private fun fadeInHandlesAfterScroll() {
+    private fun handleScrollEnd() {
         try {
             if (editText.hasSelection()) {
                 val (start, end) = getSelection()
                 if (start != end) {
                     updateHandlePositionsImmediate()
                     
-                    // Show handles with fade in
                     leftHandleView?.let { handle ->
                         if (handle.visibility == View.VISIBLE) {
                             handle.animate()
@@ -1810,14 +1810,10 @@ class FloatingBubbleService : Service() {
                 
                 if (!isScrolling) {
                     isScrolling = true
-                    EmergencyLog.log("Scrolling started - fading out handles")
+                    EmergencyLog.log("Scrolling started - fading handles")
                     
-                    wereHandlesVisibleBeforeScroll = areHandlesVisible
-                    
-                    // ✅ Only hide if handles are visible
-                    if (areHandlesVisible) {
-                        fadeOutHandlesDuringScroll()
-                    }
+                    // ✅ Only fade alpha, don't hide
+                    handleScrollStart()
                     
                     if (editText.hasSelection() && isActionBarVisible) {
                         hideFloatingActionBar()
@@ -1830,9 +1826,9 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
                         isScrolling = false
-                        EmergencyLog.log("Scrolling stopped - showing handles with fade")
+                        EmergencyLog.log("Scrolling stopped - restoring handles")
                         
-                        // ✅ Always show handles if there is a selection
+                        // ✅ Restore handles visibility
                         if (editText.hasSelection()) {
                             updateHandlePositionsSafe()
                             val (start, end) = getSelection()
@@ -1842,14 +1838,10 @@ class FloatingBubbleService : Service() {
                                     currentSelectedText = selected
                                     isActionBarTemporarilyHidden = false
                                     showFloatingActionBar(selected)
-                                    
-                                    // ✅ Always show handles after scrolling
-                                    showSelectionHandles()
-                                    updateHandlePositionsImmediate()
+                                    handleScrollEnd()
                                 }
                             }
                         }
-                        wereHandlesVisibleBeforeScroll = false
                     }
                 }, SCROLL_STOP_DELAY)
             }
@@ -1900,7 +1892,6 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ FIXED: OnTouchListener with proper single tap deselect
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1963,7 +1954,6 @@ class FloatingBubbleService : Service() {
                                 isSingleTap = false
                             }
                             
-                            // ✅ Detect scroll gesture
                             if (dy > dx && dy > 20 && !isLongPressTriggered) {
                                 isScrollingGesture = true
                                 isSingleTap = false
