@@ -1925,7 +1925,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-// ✅ COMPLETELY FIXED: Scrolling preserves selection
+// ✅ COMPLETELY FIXED: Scrolling preserves selection with proper variables
 setOnTouchListener(object : View.OnTouchListener {
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
@@ -1937,6 +1937,8 @@ setOnTouchListener(object : View.OnTouchListener {
     private var isScrollingGesture = false
     private var isSingleTap = false
     private var hasMoved = false
+    private var touchStartX = 0f  // ✅ যোগ করা হয়েছে
+    private var touchStartY = 0f  // ✅ যোগ করা হয়েছে
     private var savedSelectionStart = -1
     private var savedSelectionEnd = -1
     
@@ -2002,7 +2004,6 @@ setOnTouchListener(object : View.OnTouchListener {
                 // ✅ Check if this is a scrolling gesture
                 if (dy > dx && dy > 20 && !isLongPressTriggered) {
                     isScrollingGesture = true
-                    // ✅ Allow parent to intercept for scrolling
                     v.parent.requestDisallowInterceptTouchEvent(false)
                     return false
                 }
@@ -2069,12 +2070,10 @@ setOnTouchListener(object : View.OnTouchListener {
                 
                 // ✅ If it was a scroll gesture, restore selection
                 if (isScrollingGesture) {
-                    // Restore selection if it was lost
                     if (!this@apply.hasSelection() && savedSelectionStart >= 0 && savedSelectionEnd >= 0) {
                         this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
                         EmergencyLog.log("Selection restored after scroll")
                     }
-                    // Update handles
                     if (this@apply.hasSelection()) {
                         updateHandlePositionsSafe()
                         val (start, end) = getSelection()
