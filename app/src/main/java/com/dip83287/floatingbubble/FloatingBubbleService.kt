@@ -1925,7 +1925,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-// ✅ COMPLETELY FIXED: Scrolling preserves selection
+// ✅ COMPLETELY FIXED: Scrolling preserves selection with proper restore
 setOnTouchListener(object : View.OnTouchListener {
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
@@ -1942,6 +1942,7 @@ setOnTouchListener(object : View.OnTouchListener {
     private var savedSelectionStart = -1
     private var savedSelectionEnd = -1
     private var isRestoringSelection = false
+    private var scrollEndHandled = false
     
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.action) {
@@ -1957,6 +1958,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSingleTap = false
                 hasMoved = false
                 isRestoringSelection = false
+                scrollEndHandled = false
                 touchStartX = x
                 touchStartY = y
                 
@@ -2006,7 +2008,10 @@ setOnTouchListener(object : View.OnTouchListener {
                 
                 // ✅ Check if this is a scrolling gesture
                 if (dy > dx && dy > 20 && !isLongPressTriggered) {
-                    isScrollingGesture = true
+                    if (!isScrollingGesture) {
+                        isScrollingGesture = true
+                        EmergencyLog.log("Scrolling gesture detected")
+                    }
                     v.parent.requestDisallowInterceptTouchEvent(false)
                     return false
                 }
@@ -2065,7 +2070,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     if (!this@apply.hasSelection() && !isRestoringSelection) {
                         isRestoringSelection = true
                         this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
-                        EmergencyLog.log("Selection restored during scroll")
+                        EmergencyLog.log("Selection restored during scroll: $savedSelectionStart - $savedSelectionEnd")
                         Handler(Looper.getMainLooper()).postDelayed({
                             isRestoringSelection = false
                         }, 50)
@@ -2083,32 +2088,49 @@ setOnTouchListener(object : View.OnTouchListener {
                 longPressRunnable = null
                 v.parent.requestDisallowInterceptTouchEvent(false)
                 
-                // ✅ If it was a scroll gesture, restore and show handles
+                // ✅ If it was a scroll gesture, restore and show everything
                 if (isScrollingGesture) {
+                    EmergencyLog.log("Scroll ended - restoring selection and showing handles")
+                    
                     // Restore selection if needed
                     if (!this@apply.hasSelection() && savedSelectionStart >= 0 && savedSelectionEnd >= 0) {
                         this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
-                        EmergencyLog.log("Selection restored after scroll")
+                        EmergencyLog.log("Selection restored after scroll: $savedSelectionStart - $savedSelectionEnd")
                     }
                     
-                    // Show handles and action bar if there is selection
+                    // ✅ Show handles and action bar if there is selection
                     if (this@apply.hasSelection()) {
                         val (start, end) = getSelection()
-                        if (start != end) {
+                        if (start != end && start >= 0 && end <= this@apply.text.length) {
                             val selected = this@apply.text.substring(start, end)
                             if (selected.isNotEmpty()) {
                                 currentSelectedText = selected
                                 isActionBarTemporarilyHidden = false
+                                
+                                // ✅ Show action bar
                                 showFloatingActionBar(selected)
+                                
+                                // ✅ Show handles with animation
                                 showSelectionHandles()
+                                
+                                // ✅ Force position update
                                 updateHandlePositionsImmediate()
+                                
+                                // ✅ Additional update after layout
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    updateHandlePositionsImmediate()
+                                }, 100)
+                                
+                                EmergencyLog.log("Handles and action bar shown after scroll")
                             }
                         }
                     }
+                    
                     isScrollingGesture = false
                     savedSelectionStart = -1
                     savedSelectionEnd = -1
                     isRestoringSelection = false
+                    scrollEndHandled = true
                     return true
                 }
                 
