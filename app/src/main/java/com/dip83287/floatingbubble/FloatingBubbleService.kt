@@ -1924,7 +1924,7 @@ class FloatingBubbleService : Service() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
-  // ✅ COMPLETELY FIXED: Only clear selection on definite single tap
+// ✅ FINAL FIX: Scrolling preserves selection, only single tap deselects
 setOnTouchListener(object : View.OnTouchListener {
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
@@ -1940,7 +1940,7 @@ setOnTouchListener(object : View.OnTouchListener {
     private var touchStartY = 0f
     private var savedSelectionStart = -1
     private var savedSelectionEnd = -1
-    private var isDefiniteSingleTap = false
+    private var shouldDeselect = false
     
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.action) {
@@ -1954,8 +1954,8 @@ setOnTouchListener(object : View.OnTouchListener {
                 isDragging = false
                 isScrollingGesture = false
                 isSingleTap = false
-                isDefiniteSingleTap = false
                 hasMoved = false
+                shouldDeselect = false
                 touchStartX = x
                 touchStartY = y
                 
@@ -1963,6 +1963,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 if (this@apply.hasSelection()) {
                     savedSelectionStart = this@apply.selectionStart
                     savedSelectionEnd = this@apply.selectionEnd
+                    EmergencyLog.log("Selection saved: $savedSelectionStart - $savedSelectionEnd")
                 } else {
                     savedSelectionStart = -1
                     savedSelectionEnd = -1
@@ -1980,7 +1981,6 @@ setOnTouchListener(object : View.OnTouchListener {
                     val runnable = Runnable {
                         isLongPressTriggered = true
                         isSingleTap = false
-                        isDefiniteSingleTap = false
                         selectWordAtPosition(this@apply, x, y, true)
                         v.parent.requestDisallowInterceptTouchEvent(true)
                     }
@@ -1998,17 +1998,18 @@ setOnTouchListener(object : View.OnTouchListener {
                 val dx = Math.abs(event.x - touchStartX)
                 val dy = Math.abs(event.y - touchStartY)
                 
+                // If user moves significantly
                 if (dx > 15 || dy > 15) {
                     hasMoved = true
                     isSingleTap = false
-                    isDefiniteSingleTap = false
                 }
                 
-                // ✅ Check if this is a scrolling gesture
+                // ✅ Check if this is a scrolling gesture (vertical movement)
                 if (dy > dx && dy > 20 && !isLongPressTriggered) {
                     isScrollingGesture = true
                     isSingleTap = false
-                    isDefiniteSingleTap = false
+                    shouldDeselect = false
+                    EmergencyLog.log("Scrolling detected - will preserve selection")
                     v.parent.requestDisallowInterceptTouchEvent(false)
                     return false
                 }
@@ -2017,7 +2018,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 if (isLongPressTriggered && (dx > 20 || dy > 20) && !isScrollingGesture) {
                     isDragging = true
                     isSingleTap = false
-                    isDefiniteSingleTap = false
+                    shouldDeselect = false
                     v.parent.requestDisallowInterceptTouchEvent(true)
                     
                     val currentLayout = this@apply.layout
@@ -2075,12 +2076,15 @@ setOnTouchListener(object : View.OnTouchListener {
                 longPressRunnable = null
                 v.parent.requestDisallowInterceptTouchEvent(false)
                 
-                // ✅ If it was a scroll gesture, restore selection
+                // ✅ If it was a scroll gesture, RESTORE selection and DO NOT deselect
                 if (isScrollingGesture) {
+                    EmergencyLog.log("Scroll ended - restoring selection if needed")
+                    // Restore selection if it was lost
                     if (!this@apply.hasSelection() && savedSelectionStart >= 0 && savedSelectionEnd >= 0) {
                         this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
-                        EmergencyLog.log("Selection restored after scroll")
+                        EmergencyLog.log("Selection restored: $savedSelectionStart - $savedSelectionEnd")
                     }
+                    // Update handles
                     if (this@apply.hasSelection()) {
                         updateHandlePositionsSafe()
                         val (start, end) = getSelection()
@@ -2099,9 +2103,9 @@ setOnTouchListener(object : View.OnTouchListener {
                     return true
                 }
                 
-                // ✅ Only clear selection on definite single tap (no movement, no long press, no drag)
+                // ✅ ONLY deselect on definite single tap (no movement, no long press, no drag)
                 if (isSingleTap && !isLongPressTriggered && !isDragging && !hasMoved) {
-                    isDefiniteSingleTap = true
+                    shouldDeselect = true
                     if (this@apply.hasSelection()) {
                         val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
                         if (offset >= 0 && offset <= this@apply.text.length) {
@@ -2120,7 +2124,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 }
                 
                 // Show handles for selection (not from scroll)
-                if (!isScrollingGesture && this@apply.hasSelection() && !isLongPressTriggered && !isDragging && !isDefiniteSingleTap) {
+                if (!isScrollingGesture && this@apply.hasSelection() && !isLongPressTriggered && !isDragging && !shouldDeselect) {
                     val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                     if (selected.isNotEmpty()) {
                         currentSelectedText = selected
@@ -2143,7 +2147,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 isLongPressTriggered = false
                 isDragging = false
                 isSingleTap = false
-                isDefiniteSingleTap = false
+                shouldDeselect = false
                 hasMoved = false
                 return true
             }
