@@ -1909,22 +1909,39 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            setOnSelectionChangedListener { _, _ ->
-                if (!isScrolling) {
-                    updateHandlePositionsSafe()
+            // ✅ FIXED: Don't hide handles during scrolling
+setOnSelectionChangedListener { _, _ ->
+    if (!isScrolling) {
+        updateHandlePositionsSafe()
+    }
+}
+
+addTextChangedListener(object : TextWatcher {
+    override fun afterTextChanged(s: Editable?) {
+        if (!isScrolling) {
+            updateHandlePositionsSafe()
+        }
+    }
+    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+        // ✅ Don't hide handles during scrolling
+        if (!isScrollingGesture) {
+            if (!this@apply.hasSelection()) {
+                hideSelectionHandles()
+                hideFloatingActionBar()
+            } else {
+                val selected = s?.substring(selectionStart, selectionEnd) ?: ""
+                if (selected.isNotEmpty()) {
+                    currentSelectedText = selected
+                    showFloatingActionBar(selected)
+                    showSelectionHandles()
+                    updateHandlePositionsImmediate()
                 }
             }
-            
-            addTextChangedListener(object : TextWatcher {
-                override fun afterTextChanged(s: Editable?) {
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
-                    }
-                }
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            })
-// ✅ FINAL FIX: Scrolling preserves selection, only single tap deselects
+        }
+    }
+})
+// ✅ FINAL FIX: Complete solution with proper scroll handling
 setOnTouchListener(object : View.OnTouchListener {
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
@@ -2004,14 +2021,23 @@ setOnTouchListener(object : View.OnTouchListener {
                     isSingleTap = false
                 }
                 
-                // ✅ Check if this is a scrolling gesture (vertical movement)
+                // ✅ Check if this is a scrolling gesture - FIXED: return true instead of false
                 if (dy > dx && dy > 20 && !isLongPressTriggered) {
                     isScrollingGesture = true
                     isSingleTap = false
                     shouldDeselect = false
-                    EmergencyLog.log("Scrolling detected - will preserve selection")
+                    
+                    // Cancel long press if pending
+                    longPressRunnable?.let {
+                        longPressHandler.removeCallbacks(it)
+                        longPressRunnable = null
+                    }
+                    
+                    // Allow parent (ScrollView) to intercept touch for scrolling
                     v.parent.requestDisallowInterceptTouchEvent(false)
-                    return false
+                    
+                    // ✅ Consume event ourselves to keep selection intact
+                    return true
                 }
                 
                 // Long press + drag for character by character selection
@@ -2065,6 +2091,15 @@ setOnTouchListener(object : View.OnTouchListener {
                     }
                 }
                 
+                // ✅ If scrolling, update handles but don't hide them
+                if (isScrollingGesture) {
+                    if (this@apply.hasSelection()) {
+                        updateHandlePositionsSafe()
+                    }
+                    return true
+                }
+                
+                // Update handles during any selection
                 if (this@apply.hasSelection() && !isScrolling) {
                     updateHandlePositionsSafe()
                 }
@@ -2076,27 +2111,44 @@ setOnTouchListener(object : View.OnTouchListener {
                 longPressRunnable = null
                 v.parent.requestDisallowInterceptTouchEvent(false)
                 
-                // ✅ If it was a scroll gesture, RESTORE selection and DO NOT deselect
+                // ✅ If it was a scroll gesture, restore selection with post
                 if (isScrollingGesture) {
-                    EmergencyLog.log("Scroll ended - restoring selection if needed")
-                    // Restore selection if it was lost
-                    if (!this@apply.hasSelection() && savedSelectionStart >= 0 && savedSelectionEnd >= 0) {
-                        this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
-                        EmergencyLog.log("Selection restored: $savedSelectionStart - $savedSelectionEnd")
-                    }
-                    // Update handles
-                    if (this@apply.hasSelection()) {
-                        updateHandlePositionsSafe()
-                        val (start, end) = getSelection()
-                        if (start != end) {
-                            val selected = this@apply.text.substring(start, end)
-                            if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                showFloatingActionBar(selected)
-                                showSelectionHandles()
+                    EmergencyLog.log("Scroll ended - restoring selection with post")
+                    
+                    // Use post to ensure selection is restored after all events
+                    this@apply.post {
+                        if (!this@apply.hasSelection() && 
+                            savedSelectionStart >= 0 && 
+                            savedSelectionEnd >= 0) {
+                            
+                            this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
+                            EmergencyLog.log("Selection restored: $savedSelectionStart - $savedSelectionEnd")
+                            
+                            // Update handles and show action bar
+                            updateHandlePositionsImmediate()
+                            showSelectionHandles()
+                            
+                            val text = this@apply.text.substring(savedSelectionStart, savedSelectionEnd)
+                            if (text.isNotEmpty()) {
+                                currentSelectedText = text
+                                showFloatingActionBar(text)
+                            }
+                        } else if (this@apply.hasSelection()) {
+                            // Selection already exists, just update handles
+                            updateHandlePositionsImmediate()
+                            showSelectionHandles()
+                            
+                            val (start, end) = getSelection()
+                            if (start != end) {
+                                val selected = this@apply.text.substring(start, end)
+                                if (selected.isNotEmpty()) {
+                                    currentSelectedText = selected
+                                    showFloatingActionBar(selected)
+                                }
                             }
                         }
                     }
+                    
                     isScrollingGesture = false
                     savedSelectionStart = -1
                     savedSelectionEnd = -1
