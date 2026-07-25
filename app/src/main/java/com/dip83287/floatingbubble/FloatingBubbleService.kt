@@ -119,7 +119,7 @@ class FloatingBubbleService : Service() {
     private var isScrolling = false
     private var isScrollingGesture = false
     private var scrollStopHandler: Handler? = null
-    private val SCROLL_STOP_DELAY = 300L
+    private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
     
     private var wereHandlesVisibleBeforeScroll = false
@@ -2018,7 +2018,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         v.parent.requestDisallowInterceptTouchEvent(true)
                     }
                     longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 300)
+                    longPressHandler.postDelayed(runnable, 400)
                 }
                 
                 lastTouchTime = currentTime
@@ -2037,13 +2037,13 @@ setOnTouchListener(object : View.OnTouchListener {
                 totalDy += Math.abs(currentDy)
                 
                 // If user moves significantly
-                if (dx > 10 || dy > 10) {
+                if (dx > 15 || dy > 15) {
                     hasMoved = true
                     isSingleTap = false
                 }
                 
                 // ✅ আরও সহজ স্ক্রলিং ডিটেকশন - থ্রেশহোল্ড কম করা হয়েছে
-                if (dy > dx && dy > 8 && !isLongPressTriggered) {
+                if (dy > dx && dy > 13 && !isLongPressTriggered) {
                     consecutiveScrollMoves++
                     
                     // ভেলোসিটি চেক
@@ -2051,7 +2051,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     val velY = velocityTracker?.yVelocity ?: 0f
                     
                     // ✅ কম ভেলোসিতিতেও ডিটেক্ট
-                    if (abs(velY) > 30 || moveCount > 2 || consecutiveScrollMoves > 1) {
+                    if (abs(velY) > 60 || moveCount > 3 || consecutiveScrollMoves > 2) {
                         if (!scrollDetected) {
                             scrollDetected = true
                             isScrollingGesture = true
