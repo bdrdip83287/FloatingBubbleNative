@@ -117,6 +117,7 @@ class FloatingBubbleService : Service() {
     private var handleUpdatePending = false
     
     private var isScrolling = false
+    private var isScrollingGesture = false
     private var scrollStopHandler: Handler? = null
     private val SCROLL_STOP_DELAY = 500L
     private var lastScrollTime = 0L
