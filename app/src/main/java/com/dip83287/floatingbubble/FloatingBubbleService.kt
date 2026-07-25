@@ -119,7 +119,7 @@ class FloatingBubbleService : Service() {
     private var isScrolling = false
     private var isScrollingGesture = false
     private var scrollStopHandler: Handler? = null
-    private val SCROLL_STOP_DELAY = 500L
+    private val SCROLL_STOP_DELAY = 300L
     private var lastScrollTime = 0L
     
     private var wereHandlesVisibleBeforeScroll = false
@@ -1943,7 +1943,7 @@ addTextChangedListener(object : TextWatcher {
     }
 })
 
-// ✅ উন্নত স্ক্রলিং ডিটেকশন - দ্রুত স্ক্রলিং হ্যান্ডেল করে
+// ✅ এডজাস্টেড স্ক্রলিং ডিটেকশন - কম থ্রেশহোল্ড
 setOnTouchListener(object : View.OnTouchListener {
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
@@ -1963,6 +1963,8 @@ setOnTouchListener(object : View.OnTouchListener {
     private var moveCount = 0
     private var velocityY = 0f
     private var velocityTracker: VelocityTracker? = null
+    private var totalDy = 0f
+    private var consecutiveScrollMoves = 0
     
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.action) {
@@ -1985,6 +1987,8 @@ setOnTouchListener(object : View.OnTouchListener {
                 scrollDetected = false
                 moveCount = 0
                 velocityY = 0f
+                totalDy = 0f
+                consecutiveScrollMoves = 0
                 touchStartX = x
                 touchStartY = y
                 
@@ -2029,21 +2033,25 @@ setOnTouchListener(object : View.OnTouchListener {
                 
                 val dx = Math.abs(event.x - touchStartX)
                 val dy = Math.abs(event.y - touchStartY)
+                val currentDy = event.y - touchStartY
+                totalDy += Math.abs(currentDy)
                 
                 // If user moves significantly
-                if (dx > 15 || dy > 15) {
+                if (dx > 10 || dy > 10) {
                     hasMoved = true
                     isSingleTap = false
                 }
                 
-                // ✅ উন্নত স্ক্রলিং ডিটেকশন - কম থ্রেশহোল্ড এবং মাল্টিপল চেক
-                if (dy > dx && dy > 12 && !isLongPressTriggered) {
-                    // ভেলোসিটি চেক - জোরে স্ক্রলিং ডিটেক্ট করতে
+                // ✅ আরও সহজ স্ক্রলিং ডিটেকশন - থ্রেশহোল্ড কম করা হয়েছে
+                if (dy > dx && dy > 8 && !isLongPressTriggered) {
+                    consecutiveScrollMoves++
+                    
+                    // ভেলোসিটি চেক
                     velocityTracker?.computeCurrentVelocity(1000)
                     val velY = velocityTracker?.yVelocity ?: 0f
                     
-                    // যদি ভেলোসিটি বেশি হয় অথবা মাল্টিপল মুভমেন্ট হয়
-                    if (abs(velY) > 200 || moveCount > 3) {
+                    // ✅ কম ভেলোসিতিতেও ডিটেক্ট
+                    if (abs(velY) > 30 || moveCount > 2 || consecutiveScrollMoves > 1) {
                         if (!scrollDetected) {
                             scrollDetected = true
                             isScrollingGesture = true
@@ -2056,12 +2064,17 @@ setOnTouchListener(object : View.OnTouchListener {
                                 longPressRunnable = null
                             }
                             
-                            EmergencyLog.log("Fast scrolling detected - velocity: $velY")
+                            EmergencyLog.log("Scrolling detected - velY: $velY, moveCount: $moveCount, consecutive: $consecutiveScrollMoves")
                         }
                         
                         // Allow parent (ScrollView) to intercept touch for scrolling
                         v.parent.requestDisallowInterceptTouchEvent(false)
                         return true
+                    }
+                } else {
+                    // যদি অনুভূমিক মুভমেন্ট হয়, স্ক্রলিং রিসেট
+                    if (dx > dy) {
+                        consecutiveScrollMoves = 0
                     }
                 }
                 
@@ -2142,7 +2155,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 
                 // ✅ If it was a scroll gesture, restore selection with post
                 if (isScrollingGesture || scrollDetected) {
-                    EmergencyLog.log("Scroll ended - restoring selection with post")
+                    EmergencyLog.log("Scroll ended - restoring selection")
                     
                     // Use post to ensure selection is restored after all events
                     this@apply.post {
