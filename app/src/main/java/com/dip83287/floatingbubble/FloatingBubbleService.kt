@@ -2018,7 +2018,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         v.parent.requestDisallowInterceptTouchEvent(true)
                     }
                     longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 400)
+                    longPressHandler.postDelayed(runnable, 150)
                 }
                 
                 lastTouchTime = currentTime
@@ -2037,13 +2037,13 @@ setOnTouchListener(object : View.OnTouchListener {
                 totalDy += Math.abs(currentDy)
                 
                 // If user moves significantly
-                if (dx > 15 || dy > 15) {
+                if (dx > 10 || dy > 10) {
                     hasMoved = true
                     isSingleTap = false
                 }
                 
                 // ✅ আরও সহজ স্ক্রলিং ডিটেকশন - থ্রেশহোল্ড কম করা হয়েছে
-                if (dy > dx && dy > 13 && !isLongPressTriggered) {
+                if (dy > dx && dy > 10 && !isLongPressTriggered) {
                     consecutiveScrollMoves++
                     
                     // ভেলোসিটি চেক
@@ -2051,7 +2051,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     val velY = velocityTracker?.yVelocity ?: 0f
                     
                     // ✅ কম ভেলোসিতিতেও ডিটেক্ট
-                    if (abs(velY) > 60 || moveCount > 3 || consecutiveScrollMoves > 2) {
+                    if (abs(velY) > 30 || moveCount > 2 || consecutiveScrollMoves > 0) {
                         if (!scrollDetected) {
                             scrollDetected = true
                             isScrollingGesture = true
