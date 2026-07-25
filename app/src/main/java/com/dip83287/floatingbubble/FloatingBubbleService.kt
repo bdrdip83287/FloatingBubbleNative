@@ -1910,16 +1910,16 @@ class FloatingBubbleService : Service() {
             isFocusable = true
             isFocusableInTouchMode = true
             
-            // ✅ FIXED: Don't hide handles during scrolling
+// ✅ FIXED: Don't hide handles during scrolling
 setOnSelectionChangedListener { _, _ ->
-    if (!isScrolling) {
+    if (!isScrolling && !isScrollingGesture) {
         updateHandlePositionsSafe()
     }
 }
 
 addTextChangedListener(object : TextWatcher {
     override fun afterTextChanged(s: Editable?) {
-        if (!isScrolling) {
+        if (!isScrolling && !isScrollingGesture) {
             updateHandlePositionsSafe()
         }
     }
@@ -1942,7 +1942,8 @@ addTextChangedListener(object : TextWatcher {
         }
     }
 })
-// ✅ FINAL FIX: Complete solution with proper scroll handling
+
+// ✅ উন্নত স্ক্রলিং ডিটেকশন - দ্রুত স্ক্রলিং হ্যান্ডেল করে
 setOnTouchListener(object : View.OnTouchListener {
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
@@ -1951,14 +1952,17 @@ setOnTouchListener(object : View.OnTouchListener {
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var isLongPressTriggered = false
     private var isDragging = false
-    private var isScrollingGesture = false
-    private var isSingleTap = false
     private var hasMoved = false
     private var touchStartX = 0f
     private var touchStartY = 0f
     private var savedSelectionStart = -1
     private var savedSelectionEnd = -1
     private var shouldDeselect = false
+    private var isSingleTap = false
+    private var scrollDetected = false
+    private var moveCount = 0
+    private var velocityY = 0f
+    private var velocityTracker: VelocityTracker? = null
     
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.action) {
@@ -1967,6 +1971,10 @@ setOnTouchListener(object : View.OnTouchListener {
                 val x = event.x
                 val y = event.y
                 
+                // Initialize velocity tracker
+                velocityTracker = VelocityTracker.obtain()
+                velocityTracker?.addMovement(event)
+                
                 longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
                 isLongPressTriggered = false
                 isDragging = false
@@ -1974,6 +1982,9 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSingleTap = false
                 hasMoved = false
                 shouldDeselect = false
+                scrollDetected = false
+                moveCount = 0
+                velocityY = 0f
                 touchStartX = x
                 touchStartY = y
                 
@@ -2013,6 +2024,9 @@ setOnTouchListener(object : View.OnTouchListener {
             }
             
             MotionEvent.ACTION_MOVE -> {
+                velocityTracker?.addMovement(event)
+                moveCount++
+                
                 val dx = Math.abs(event.x - touchStartX)
                 val dy = Math.abs(event.y - touchStartY)
                 
@@ -2022,23 +2036,33 @@ setOnTouchListener(object : View.OnTouchListener {
                     isSingleTap = false
                 }
                 
-                // ✅ Check if this is a scrolling gesture - FIXED: return true instead of false
-                if (dy > dx && dy > 20 && !isLongPressTriggered) {
-                    isScrollingGesture = true
-                    isSingleTap = false
-                    shouldDeselect = false
+                // ✅ উন্নত স্ক্রলিং ডিটেকশন - কম থ্রেশহোল্ড এবং মাল্টিপল চেক
+                if (dy > dx && dy > 12 && !isLongPressTriggered) {
+                    // ভেলোসিটি চেক - জোরে স্ক্রলিং ডিটেক্ট করতে
+                    velocityTracker?.computeCurrentVelocity(1000)
+                    val velY = velocityTracker?.yVelocity ?: 0f
                     
-                    // Cancel long press if pending
-                    longPressRunnable?.let {
-                        longPressHandler.removeCallbacks(it)
-                        longPressRunnable = null
+                    // যদি ভেলোসিটি বেশি হয় অথবা মাল্টিপল মুভমেন্ট হয়
+                    if (abs(velY) > 200 || moveCount > 3) {
+                        if (!scrollDetected) {
+                            scrollDetected = true
+                            isScrollingGesture = true
+                            isSingleTap = false
+                            shouldDeselect = false
+                            
+                            // লং প্রেস ক্যান্সেল
+                            longPressRunnable?.let {
+                                longPressHandler.removeCallbacks(it)
+                                longPressRunnable = null
+                            }
+                            
+                            EmergencyLog.log("Fast scrolling detected - velocity: $velY")
+                        }
+                        
+                        // Allow parent (ScrollView) to intercept touch for scrolling
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                        return true
                     }
-                    
-                    // Allow parent (ScrollView) to intercept touch for scrolling
-                    v.parent.requestDisallowInterceptTouchEvent(false)
-                    
-                    // ✅ Consume event ourselves to keep selection intact
-                    return true
                 }
                 
                 // Long press + drag for character by character selection
@@ -2092,7 +2116,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     }
                 }
                 
-                // ✅ If scrolling, update handles but don't hide them
+                // If scrolling, update handles but don't hide them
                 if (isScrollingGesture) {
                     if (this@apply.hasSelection()) {
                         updateHandlePositionsSafe()
@@ -2108,12 +2132,16 @@ setOnTouchListener(object : View.OnTouchListener {
             }
             
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // Clean up velocity tracker
+                velocityTracker?.recycle()
+                velocityTracker = null
+                
                 longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
                 longPressRunnable = null
                 v.parent.requestDisallowInterceptTouchEvent(false)
                 
                 // ✅ If it was a scroll gesture, restore selection with post
-                if (isScrollingGesture) {
+                if (isScrollingGesture || scrollDetected) {
                     EmergencyLog.log("Scroll ended - restoring selection with post")
                     
                     // Use post to ensure selection is restored after all events
@@ -2151,6 +2179,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     }
                     
                     isScrollingGesture = false
+                    scrollDetected = false
                     savedSelectionStart = -1
                     savedSelectionEnd = -1
                     return true
