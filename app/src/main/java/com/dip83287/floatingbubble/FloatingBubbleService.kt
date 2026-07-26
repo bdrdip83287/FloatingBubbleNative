@@ -119,7 +119,7 @@ class FloatingBubbleService : Service() {
     private var isScrolling = false
     private var isScrollingGesture = false
     private var scrollStopHandler: Handler? = null
-    private val SCROLL_STOP_DELAY = 500L
+    private val SCROLL_STOP_DELAY = 200L
     private var lastScrollTime = 0L
     
     private var wereHandlesVisibleBeforeScroll = false
@@ -2018,7 +2018,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         v.parent.requestDisallowInterceptTouchEvent(true)
                     }
                     longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 150)
+                    longPressHandler.postDelayed(runnable, 350)
                 }
                 
                 lastTouchTime = currentTime
@@ -2037,7 +2037,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 totalDy += Math.abs(currentDy)
                 
                 // If user moves significantly
-                if (dx > 4 || dy > 4) {
+                if (dx > 2 || dy > 2) {
                     hasMoved = true
                     isSingleTap = false
                 }
