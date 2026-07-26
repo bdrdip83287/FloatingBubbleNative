@@ -2037,13 +2037,13 @@ setOnTouchListener(object : View.OnTouchListener {
                 totalDy += Math.abs(currentDy)
                 
                 // If user moves significantly
-                if (dx > 0 || dy > 0) {
+                if (dx > 1 || dy > 1) {
                     hasMoved = true
                     isSingleTap = false
                 }
                 
                 // ✅ আরও সহজ স্ক্রলিং ডিটেকশন - থ্রেশহোল্ড কম করা হয়েছে
-                if (dy > dx && dy > 20 && !isLongPressTriggered) {
+                if (dy > dx && dy > 1 && !isLongPressTriggered) {
                     consecutiveScrollMoves++
                     
                     // ভেলোসিটি চেক
