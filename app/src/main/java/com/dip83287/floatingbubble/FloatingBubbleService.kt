@@ -1997,7 +1997,7 @@ class FloatingBubbleService : Service() {
                                 velocityTracker?.computeCurrentVelocity(1000)
                                 val velY = velocityTracker?.yVelocity ?: 0f
                                 
-                                if (abs(velY) > 50 || moveCount > 2 || consecutiveScrollMoves > 1) {
+                                if (abs(velY) > 40 || moveCount > 4 || consecutiveScrollMoves > 1) {
                                     if (!scrollDetected) {
                                         scrollDetected = true
                                         isScrollingGesture = true
