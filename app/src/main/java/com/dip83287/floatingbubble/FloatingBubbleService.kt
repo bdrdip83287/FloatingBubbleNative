@@ -2037,7 +2037,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 totalDy += Math.abs(currentDy)
                 
                 // If user moves significantly
-                if (dx > 30 || dy > 5) {
+                if (dx > 30 || dy > 10) {
                     hasMoved = true
                     isSingleTap = false
                 }
