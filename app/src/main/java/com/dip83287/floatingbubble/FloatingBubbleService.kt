@@ -1985,7 +1985,7 @@ class FloatingBubbleService : Service() {
                             totalDy += Math.abs(currentDy)
                             
                             // If user moves significantly
-                            if (dx > 10 || dy > 19) {
+                            if (dx > 12 || dy > 12) {
                                 hasMoved = true
                                 isSingleTap = false
                             }
@@ -1997,7 +1997,7 @@ class FloatingBubbleService : Service() {
                                 velocityTracker?.computeCurrentVelocity(1000)
                                 val velY = velocityTracker?.yVelocity ?: 0f
                                 
-                                if (abs(velY) > 30 || moveCount > 2 || consecutiveScrollMoves > 1) {
+                                if (abs(velY) > 40 || moveCount > 2 || consecutiveScrollMoves > 1) {
                                     if (!scrollDetected) {
                                         scrollDetected = true
                                         isScrollingGesture = true
