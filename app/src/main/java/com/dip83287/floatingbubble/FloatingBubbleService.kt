@@ -2043,7 +2043,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 }
                 
                 // ✅ আরও সহজ স্ক্রলিং ডিটেকশন - থ্রেশহোল্ড কম করা হয়েছে
-                if (dy > dx && dy > 0 && !isLongPressTriggered) {
+                if (dy > dx && dy > 20 && !isLongPressTriggered) {
                     consecutiveScrollMoves++
                     
                     // ভেলোসিটি চেক
