@@ -2018,7 +2018,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         v.parent.requestDisallowInterceptTouchEvent(true)
                     }
                     longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 150)
+                    longPressHandler.postDelayed(runnable, 50)
                 }
                 
                 lastTouchTime = currentTime
