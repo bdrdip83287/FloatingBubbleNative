@@ -2018,7 +2018,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         v.parent.requestDisallowInterceptTouchEvent(true)
                     }
                     longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 350)
+                    longPressHandler.postDelayed(runnable, 500)
                 }
                 
                 lastTouchTime = currentTime
@@ -2037,7 +2037,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 totalDy += Math.abs(currentDy)
                 
                 // If user moves significantly
-                if (dx > 2 || dy > 2) {
+                if (dx > 0 || dy > 0) {
                     hasMoved = true
                     isSingleTap = false
                 }
