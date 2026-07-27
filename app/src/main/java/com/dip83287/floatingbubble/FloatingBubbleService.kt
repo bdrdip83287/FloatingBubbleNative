@@ -1985,7 +1985,7 @@ class FloatingBubbleService : Service() {
                             totalDy += Math.abs(currentDy)
                             
                             // If user moves significantly
-                            if (dx > 25 || dy > 25) {
+                            if (dx > 40 || dy > 40) {
                                 hasMoved = true
                                 isSingleTap = false
                             }
