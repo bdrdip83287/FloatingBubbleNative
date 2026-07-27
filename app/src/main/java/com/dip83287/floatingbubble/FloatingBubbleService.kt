@@ -1891,7 +1891,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ সম্পূর্ণ OnTouchListener
+            // ✅ সম্পূর্ণ OnTouchListener - দ্রুত স্ক্রলিং ঠিক করা হয়েছে
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1913,6 +1913,7 @@ class FloatingBubbleService : Service() {
                 private var velocityTracker: VelocityTracker? = null
                 private var totalDy = 0f
                 private var consecutiveScrollMoves = 0
+                private var isScrollGestureConfirmed = false
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
@@ -1932,6 +1933,7 @@ class FloatingBubbleService : Service() {
                             hasMoved = false
                             shouldDeselect = false
                             scrollDetected = false
+                            isScrollGestureConfirmed = false
                             moveCount = 0
                             velocityY = 0f
                             totalDy = 0f
@@ -1981,21 +1983,25 @@ class FloatingBubbleService : Service() {
                             val currentDy = event.y - touchStartY
                             totalDy += Math.abs(currentDy)
                             
-                            if (dx > 10 || dy > 10) {
+                            // ✅ Track movement - any movement means not a single tap
+                            if (dx > 5 || dy > 5) {
                                 hasMoved = true
                                 isSingleTap = false
                             }
                             
-                            if (dy > dx && dy > 8 && !isLongPressTriggered) {
+                            // ✅ Scrolling detection with lower threshold for faster response
+                            if (dy > dx && dy > 5 && !isLongPressTriggered) {
                                 consecutiveScrollMoves++
                                 
                                 velocityTracker?.computeCurrentVelocity(1000)
                                 val velY = velocityTracker?.yVelocity ?: 0f
                                 
-                                if (abs(velY) > 30 || moveCount > 2 || consecutiveScrollMoves > 1) {
+                                // ✅ Lower velocity threshold for faster scroll detection
+                                if (abs(velY) > 20 || moveCount > 2 || consecutiveScrollMoves > 1) {
                                     if (!scrollDetected) {
                                         scrollDetected = true
                                         isScrollingGesture = true
+                                        isScrollGestureConfirmed = true
                                         isSingleTap = false
                                         shouldDeselect = false
                                         
@@ -2004,7 +2010,7 @@ class FloatingBubbleService : Service() {
                                             longPressRunnable = null
                                         }
                                         
-                                        EmergencyLog.log("Scrolling detected - velY: $velY, moveCount: $moveCount, consecutive: $consecutiveScrollMoves")
+                                        EmergencyLog.log("Scrolling detected - velY: $velY, moveCount: $moveCount")
                                     }
                                     
                                     v.parent.requestDisallowInterceptTouchEvent(false)
@@ -2016,6 +2022,7 @@ class FloatingBubbleService : Service() {
                                 }
                             }
                             
+                            // ✅ Long press + drag for character by character selection
                             if (isLongPressTriggered && (dx > 20 || dy > 20) && !isScrollingGesture) {
                                 isDragging = true
                                 isSingleTap = false
@@ -2087,6 +2094,7 @@ class FloatingBubbleService : Service() {
                             longPressRunnable = null
                             v.parent.requestDisallowInterceptTouchEvent(false)
                             
+                            // ✅ If it was a scroll gesture, restore selection
                             if (isScrollingGesture || scrollDetected) {
                                 EmergencyLog.log("Scroll ended - restoring selection")
                                 
@@ -2128,8 +2136,9 @@ class FloatingBubbleService : Service() {
                                 return true
                             }
                             
-                            // ✅ ONLY deselect on definite single tap (NO movement AT ALL)
-                            if (isSingleTap && !isLongPressTriggered && !isDragging && !hasMoved) {
+                            // ✅ ONLY deselect on pure single tap (NO movement, NO scroll, NO drag)
+                            // ✅ Use isScrollGestureConfirmed to ensure scroll wasn't detected
+                            if (isSingleTap && !isLongPressTriggered && !isDragging && !hasMoved && !isScrollGestureConfirmed) {
                                 shouldDeselect = true
                                 if (this@apply.hasSelection()) {
                                     val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
@@ -2148,8 +2157,8 @@ class FloatingBubbleService : Service() {
                                 }
                             }
                             
-                            // ✅ If there was ANY movement (hasMoved = true), KEEP the selection
-                            if (hasMoved && this@apply.hasSelection()) {
+                            // ✅ If there was ANY movement, KEEP the selection
+                            if ((hasMoved || isScrollGestureConfirmed) && this@apply.hasSelection()) {
                                 EmergencyLog.log("Movement detected - keeping selection")
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
@@ -2161,6 +2170,7 @@ class FloatingBubbleService : Service() {
                                 }
                             }
                             
+                            // Show handles for selection (not from scroll)
                             if (!isScrollingGesture && this@apply.hasSelection() && !isLongPressTriggered && !isDragging && !shouldDeselect) {
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
@@ -2186,6 +2196,7 @@ class FloatingBubbleService : Service() {
                             isSingleTap = false
                             shouldDeselect = false
                             hasMoved = false
+                            isScrollGestureConfirmed = false
                             return true
                         }
                     }
