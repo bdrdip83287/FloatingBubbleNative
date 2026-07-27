@@ -2085,108 +2085,121 @@ class FloatingBubbleService : Service() {
                             return true
                         }
                         
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            velocityTracker?.recycle()
-                            velocityTracker = null
-                            
-                            longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                            longPressRunnable = null
-                            v.parent.requestDisallowInterceptTouchEvent(false)
-                            
-                            // ✅ If it was a scroll gesture, restore selection
-                            if (isScrollingGesture || scrollDetected) {
-                                EmergencyLog.log("Scroll ended - restoring selection")
-                                
-                                this@apply.post {
-                                    if (!this@apply.hasSelection() && 
-                                        savedSelectionStart >= 0 && 
-                                        savedSelectionEnd >= 0) {
-                                        
-                                        this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
-                                        EmergencyLog.log("Selection restored: $savedSelectionStart - $savedSelectionEnd")
-                                        
-                                        updateHandlePositionsImmediate()
-                                        showSelectionHandles()
-                                        
-                                        val text = this@apply.text.substring(savedSelectionStart, savedSelectionEnd)
-                                        if (text.isNotEmpty()) {
-                                            currentSelectedText = text
-                                            showFloatingActionBar(text)
-                                        }
-                                    } else if (this@apply.hasSelection()) {
-                                        updateHandlePositionsImmediate()
-                                        showSelectionHandles()
-                                        
-                                        val (start, end) = getSelection()
-                                        if (start != end) {
-                                            val selected = this@apply.text.substring(start, end)
-                                            if (selected.isNotEmpty()) {
-                                                currentSelectedText = selected
-                                                showFloatingActionBar(selected)
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                isScrollingGesture = false
-                                scrollDetected = false
-                                savedSelectionStart = -1
-                                savedSelectionEnd = -1
-                                return true
-                            }
-                            
-                            // ✅ ONLY deselect on definite single tap
-                            if (isSingleTap && !isLongPressTriggered && !isDragging && !hasMoved) {
-                                shouldDeselect = true
-                                if (this@apply.hasSelection()) {
-                                    val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
-                                    if (offset >= 0 && offset <= this@apply.text.length) {
-                                        this@apply.setSelection(offset, offset)
-                                    }
-                                    hideSelectionHandles()
-                                    hideFloatingActionBar()
-                                    isActionBarTemporarilyHidden = false
-                                    EmergencyLog.log("Selection cleared by single tap")
-                                } else {
-                                    val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
-                                    if (offset >= 0 && offset <= this@apply.text.length) {
-                                        this@apply.setSelection(offset, offset)
-                                    }
-                                }
-                            }
-                            
-                            // Show handles for selection
-                            if (!isScrollingGesture && this@apply.hasSelection() && !isLongPressTriggered && !isDragging && !shouldDeselect) {
-                                val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
-                                    isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                    updateHandlePositionsImmediate()
-                                }
-                            } else if (isDragging && this@apply.hasSelection()) {
-                                val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
-                                    isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selected)
-                                    showSelectionHandles()
-                                    updateHandlePositionsImmediate()
-                                }
-                            }
-                            
-                            isLongPressTriggered = false
-                            isDragging = false
-                            isSingleTap = false
-                            shouldDeselect = false
-                            hasMoved = false
-                            return true
-                        }
-                    }
-                    return true
+                        // ✅ আপডেটেড: সিলেক্ট অবস্থায় মুভমেন্ট/স্ক্রলিং করলে সিলেকশন থাকবে
+MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+    // Clean up velocity tracker
+    velocityTracker?.recycle()
+    velocityTracker = null
+    
+    longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+    longPressRunnable = null
+    v.parent.requestDisallowInterceptTouchEvent(false)
+    
+    // ✅ If it was a scroll gesture, restore selection with post
+    if (isScrollingGesture || scrollDetected) {
+        EmergencyLog.log("Scroll ended - restoring selection")
+        
+        this@apply.post {
+            if (!this@apply.hasSelection() && 
+                savedSelectionStart >= 0 && 
+                savedSelectionEnd >= 0) {
+                
+                this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
+                EmergencyLog.log("Selection restored: $savedSelectionStart - $savedSelectionEnd")
+                
+                updateHandlePositionsImmediate()
+                showSelectionHandles()
+                
+                val text = this@apply.text.substring(savedSelectionStart, savedSelectionEnd)
+                if (text.isNotEmpty()) {
+                    currentSelectedText = text
+                    showFloatingActionBar(text)
                 }
-            })
+            } else if (this@apply.hasSelection()) {
+                updateHandlePositionsImmediate()
+                showSelectionHandles()
+                
+                val (start, end) = getSelection()
+                if (start != end) {
+                    val selected = this@apply.text.substring(start, end)
+                    if (selected.isNotEmpty()) {
+                        currentSelectedText = selected
+                        showFloatingActionBar(selected)
+                    }
+                }
+            }
+        }
+        
+        isScrollingGesture = false
+        scrollDetected = false
+        savedSelectionStart = -1
+        savedSelectionEnd = -1
+        return true
+    }
+    
+    // ✅ ONLY deselect on definite single tap (NO movement AT ALL)
+    // ✅ hasMoved must be false - meaning user didn't move their finger
+    if (isSingleTap && !isLongPressTriggered && !isDragging && !hasMoved) {
+        shouldDeselect = true
+        if (this@apply.hasSelection()) {
+            val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
+            if (offset >= 0 && offset <= this@apply.text.length) {
+                this@apply.setSelection(offset, offset)
+            }
+            hideSelectionHandles()
+            hideFloatingActionBar()
+            isActionBarTemporarilyHidden = false
+            EmergencyLog.log("Selection cleared by single tap")
+        } else {
+            val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
+            if (offset >= 0 && offset <= this@apply.text.length) {
+                this@apply.setSelection(offset, offset)
+            }
+        }
+    }
+    
+    // ✅ If there was ANY movement (hasMoved = true), KEEP the selection
+    // ✅ This ensures scrolling/dragging doesn't clear selection
+    if (hasMoved && this@apply.hasSelection()) {
+        EmergencyLog.log("Movement detected - keeping selection")
+        val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
+        if (selected.isNotEmpty()) {
+            currentSelectedText = selected
+            isActionBarTemporarilyHidden = false
+            showFloatingActionBar(selected)
+            showSelectionHandles()
+            updateHandlePositionsImmediate()
+        }
+    }
+    
+    // Show handles for selection (not from scroll)
+    if (!isScrollingGesture && this@apply.hasSelection() && !isLongPressTriggered && !isDragging && !shouldDeselect) {
+        val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
+        if (selected.isNotEmpty()) {
+            currentSelectedText = selected
+            isActionBarTemporarilyHidden = false
+            showFloatingActionBar(selected)
+            showSelectionHandles()
+            updateHandlePositionsImmediate()
+        }
+    } else if (isDragging && this@apply.hasSelection()) {
+        val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
+        if (selected.isNotEmpty()) {
+            currentSelectedText = selected
+            isActionBarTemporarilyHidden = false
+            showFloatingActionBar(selected)
+            showSelectionHandles()
+            updateHandlePositionsImmediate()
+        }
+    }
+    
+    isLongPressTriggered = false
+    isDragging = false
+    isSingleTap = false
+    shouldDeselect = false
+    hasMoved = false
+    return true
+}
             
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
