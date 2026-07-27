@@ -1985,7 +1985,7 @@ class FloatingBubbleService : Service() {
                             totalDy += Math.abs(currentDy)
                             
                             // If user moves significantly
-                            if (dx > 40 || dy > 40) {
+                            if (dx > 15 || dy > 15) {
                                 hasMoved = true
                                 isSingleTap = false
                             }
@@ -2022,7 +2022,7 @@ class FloatingBubbleService : Service() {
                             }
                             
                             // ✅ Long press + drag for character by character selection
-                            if (isLongPressTriggered && (dx > 20 || dy > 20) && !isScrollingGesture) {
+                            if (isLongPressTriggered && (dx > 40 || dy > 40) && !isScrollingGesture) {
                                 isDragging = true
                                 isSingleTap = false
                                 shouldDeselect = false
