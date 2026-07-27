@@ -1991,7 +1991,7 @@ class FloatingBubbleService : Service() {
                             }
                             
                             // ✅ স্ক্রলিং ডিটেকশন - কম থ্রেশহোল্ড
-                            if (dy > dx && dy > 15 && !isLongPressTriggered) {
+                            if (dy > dx && dy > 1 && !isLongPressTriggered) {
                                 consecutiveScrollMoves++
                                 
                                 velocityTracker?.computeCurrentVelocity(1000)
