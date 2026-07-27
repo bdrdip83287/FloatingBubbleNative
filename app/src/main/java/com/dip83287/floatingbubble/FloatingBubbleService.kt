@@ -1991,13 +1991,13 @@ class FloatingBubbleService : Service() {
                             }
                             
                             // ✅ স্ক্রলিং ডিটেকশন - কম থ্রেশহোল্ড
-                            if (dy > dx && dy > 8 && !isLongPressTriggered) {
+                            if (dy > dx && dy > 15 && !isLongPressTriggered) {
                                 consecutiveScrollMoves++
                                 
                                 velocityTracker?.computeCurrentVelocity(1000)
                                 val velY = velocityTracker?.yVelocity ?: 0f
                                 
-                                if (abs(velY) > 40 || moveCount > 6 || consecutiveScrollMoves > 1) {
+                                if (abs(velY) > 40 || moveCount > 3 || consecutiveScrollMoves > 1) {
                                     if (!scrollDetected) {
                                         scrollDetected = true
                                         isScrollingGesture = true
