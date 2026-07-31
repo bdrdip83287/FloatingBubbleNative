@@ -1631,6 +1631,7 @@ class FloatingBubbleService : Service() {
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
+    // ✅ Character by character selection during drag
     private fun handleDragSelection(editText: EditText, event: MotionEvent) {
         try {
             val currentLayout = editText.layout ?: return
@@ -1681,6 +1682,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ✅ Word selection for double tap / long press (no drag)
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -1940,7 +1942,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ ফাইনাল ফিক্স - স্ক্রল করার সময় সিলেকশন থাকবে
+            // ✅ সম্পূর্ণ OnTouchListener - আপনার বিশ্লেষণ অনুযায়ী ফিক্স করা হয়েছে
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1953,10 +1955,11 @@ class FloatingBubbleService : Service() {
                 private var isSingleTap = false
                 private var touchStartX = 0f
                 private var touchStartY = 0f
+                private var isScrollDetected = false
                 private var savedSelectionStart = -1
                 private var savedSelectionEnd = -1
-                private var selectionRestored = false
                 private val touchSlop = ViewConfiguration.get(this@FloatingBubbleService).scaledTouchSlop.toFloat()
+                private var isSelectionRestored = false
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
@@ -1969,7 +1972,8 @@ class FloatingBubbleService : Service() {
                             isDragging = false
                             hasMoved = false
                             isSingleTap = true
-                            selectionRestored = false
+                            isScrollDetected = false
+                            isSelectionRestored = false
                             touchStartX = x
                             touchStartY = y
                             
@@ -1986,14 +1990,19 @@ class FloatingBubbleService : Service() {
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
+                                // ✅ Double tap - select word
                                 isSelecting = true
                                 isSingleTap = false
                                 selectWordAtPosition(this@apply, x, y, true)
+                                // ✅ Double tap-এ parent কে event handle করতে দেবেন না
+                                v.parent.requestDisallowInterceptTouchEvent(true)
                             } else {
+                                // ✅ Long press - select word
                                 val runnable = Runnable {
                                     isSelecting = true
                                     isSingleTap = false
                                     selectWordAtPosition(this@apply, x, y, true)
+                                    v.parent.requestDisallowInterceptTouchEvent(true)
                                 }
                                 longPressRunnable = runnable
                                 longPressHandler.postDelayed(runnable, 300)
@@ -2002,60 +2011,70 @@ class FloatingBubbleService : Service() {
                             lastTouchTime = currentTime
                             lastTouchX = x
                             lastTouchY = y
-                            v.parent.requestDisallowInterceptTouchEvent(false)
-                            return false  // ✅ EditText-কে event process করতে দিন
+                            
+                            // ✅ DOWN event এ false return করলে EditText নিজে handle করে
+                            // তাই true return করে event consume করছি
+                            return true
                         }
                         
                         MotionEvent.ACTION_MOVE -> {
                             val dx = Math.abs(event.x - touchStartX)
                             val dy = Math.abs(event.y - touchStartY)
                             
-                            // ✅ Movement detected
+                            // ✅ scaledTouchSlop ব্যবহার করে gesture detect
                             if (dx > touchSlop || dy > touchSlop) {
                                 hasMoved = true
                                 isSingleTap = false
                                 cancelLongPress()
                             }
                             
-                            // ✅ স্ক্রল ডিটেক্ট - ScrollView কে handle করতে দিন
+                            // ✅ স্ক্রল ডিটেকশন - dy > dx এবং dy > touchSlop
                             if (dy > dx && dy > touchSlop) {
+                                isScrollDetected = true
+                                isSingleTap = false
+                                // ✅ স্ক্রল হলে parent কে handle করতে দিন
                                 v.parent.requestDisallowInterceptTouchEvent(false)
                             }
                             
-                            // ✅ Long press + drag - character by character
-                            if (isSelecting && (dx > touchSlop || dy > touchSlop)) {
+                            // ✅ Long press + drag - character by character selection
+                            if (isSelecting && (dx > touchSlop || dy > touchSlop) && !isScrollDetected) {
                                 isDragging = true
                                 handleDragSelection(this@apply, event)
+                                v.parent.requestDisallowInterceptTouchEvent(true)
                             }
                             
-                            // ✅ স্ক্রল চলাকালীন selection restore - যদি নষ্ট হয়ে থাকে
-                            if (!this@apply.hasSelection() && savedSelectionStart >= 0 && savedSelectionEnd >= 0 && !selectionRestored) {
-                                if (hasMoved || dy > touchSlop) {
+                            // ✅ স্ক্রল শুরু হলে selection restore করার জন্য flag set
+                            if (isScrollDetected && savedSelectionStart >= 0 && savedSelectionEnd >= 0) {
+                                if (this@apply.hasSelection()) {
+                                    // Selection থাকলে সেটা রেখে দিই
+                                } else if (!isSelectionRestored) {
+                                    // ✅ selection restore
                                     this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
-                                    selectionRestored = true
+                                    isSelectionRestored = true
                                     EmergencyLog.log("Selection restored during scroll: $savedSelectionStart - $savedSelectionEnd")
                                     updateHandlePositionsImmediate()
                                     showSelectionHandles()
                                 }
                             }
                             
+                            // Update handles during any selection
                             if (this@apply.hasSelection() && !isScrolling) {
                                 updateHandlePositionsSafe()
                             }
                             
-                            return false  // ✅ EditText-কে event process করতে দিন
+                            return true
                         }
                         
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                             cancelLongPress()
                             v.parent.requestDisallowInterceptTouchEvent(false)
                             
-                            // ✅ স্ক্রল শেষে selection restore
-                            if ((hasMoved) && !this@apply.hasSelection() && 
-                                savedSelectionStart >= 0 && savedSelectionEnd >= 0 && !selectionRestored) {
+                            // ✅ স্ক্রল শেষে selection restore - যদি নষ্ট হয়ে থাকে
+                            if ((isScrollDetected || hasMoved) && !this@apply.hasSelection() && 
+                                savedSelectionStart >= 0 && savedSelectionEnd >= 0) {
                                 
                                 this@apply.setSelection(savedSelectionStart, savedSelectionEnd)
-                                EmergencyLog.log("Selection restored after scroll: $savedSelectionStart - $savedSelectionEnd")
+                                EmergencyLog.log("Selection restored after scroll end: $savedSelectionStart - $savedSelectionEnd")
                                 updateHandlePositionsImmediate()
                                 showSelectionHandles()
                                 
@@ -2066,8 +2085,8 @@ class FloatingBubbleService : Service() {
                                 }
                             }
                             
-                            // ✅ ONLY deselect on pure single tap
-                            if (isSingleTap && !hasMoved && !isSelecting && !isDragging) {
+                            // ✅ ONLY deselect on pure single tap (NO movement, NO scroll)
+                            if (isSingleTap && !hasMoved && !isSelecting && !isDragging && !isScrollDetected) {
                                 if (this@apply.hasSelection()) {
                                     val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
                                     if (offset >= 0 && offset <= this@apply.text.length) {
@@ -2081,8 +2100,8 @@ class FloatingBubbleService : Service() {
                             }
                             
                             // ✅ If there was movement, KEEP the selection
-                            if (hasMoved && this@apply.hasSelection()) {
-                                EmergencyLog.log("Movement detected - keeping selection")
+                            if ((hasMoved || isScrollDetected) && this@apply.hasSelection()) {
+                                EmergencyLog.log("Movement/Scroll detected - keeping selection")
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
@@ -2094,7 +2113,7 @@ class FloatingBubbleService : Service() {
                             }
                             
                             // Show handles for selection
-                            if (this@apply.hasSelection() && !isSingleTap) {
+                            if (this@apply.hasSelection() && !isSingleTap && !isScrollDetected) {
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
@@ -2118,14 +2137,15 @@ class FloatingBubbleService : Service() {
                             isDragging = false
                             hasMoved = false
                             isSingleTap = false
+                            isScrollDetected = false
+                            isSelectionRestored = false
                             savedSelectionStart = -1
                             savedSelectionEnd = -1
-                            selectionRestored = false
                             
-                            return false  // ✅ EditText-কে event process করতে দিন
+                            return true
                         }
                     }
-                    return false
+                    return true
                 }
                 
                 private fun cancelLongPress() {
