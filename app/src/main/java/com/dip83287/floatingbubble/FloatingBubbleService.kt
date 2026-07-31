@@ -532,6 +532,37 @@ class FloatingBubbleService : Service() {
         })
     }
 
+    // যদি Scroll থেকে এসে Selection হারিয়ে যায়,
+// তাহলে Restore করে দাও।
+if (hadSelectionOnDown &&
+    !isSingleTap &&
+    !this@apply.hasSelection() &&
+    savedSelectionStart >= 0 &&
+    savedSelectionEnd >= 0
+) {
+
+    this@apply.setSelection(
+        savedSelectionStart,
+        savedSelectionEnd
+    )
+
+    updateHandlePositionsImmediate()
+
+    showSelectionHandles()
+
+    val txt = this@apply.text.substring(
+        savedSelectionStart,
+        savedSelectionEnd
+    )
+
+    if (txt.isNotEmpty()) {
+
+        currentSelectedText = txt
+
+        showFloatingActionBar(txt)
+    }
+}
+
     private fun setupBubbleLongClickListener() {
         bubbleView?.setOnLongClickListener {
             stopSelf()
@@ -1952,6 +1983,7 @@ class FloatingBubbleService : Service() {
                 private var hasMoved = false
                 private var isSingleTap = false
                 private var touchStartX = 0f
+              private var hadSelectionOnDown = false
                 private var touchStartY = 0f
                 private var savedSelectionStart = -1
                 private var savedSelectionEnd = -1
@@ -1977,7 +2009,10 @@ class FloatingBubbleService : Service() {
                             if (this@apply.hasSelection()) {
                                 savedSelectionStart = this@apply.selectionStart
                                 savedSelectionEnd = this@apply.selectionEnd
-                                EmergencyLog.log("Selection saved: $savedSelectionStart - $savedSelectionEnd")
+hadSelectionOnDown = this@apply.hasSelection()
+                              
+                        
+                              EmergencyLog.log("Selection saved: $savedSelectionStart - $savedSelectionEnd")
                             } else {
                                 savedSelectionStart = -1
                                 savedSelectionEnd = -1
@@ -2017,10 +2052,26 @@ class FloatingBubbleService : Service() {
                                 cancelLongPress()
                             }
                             
-                            // ✅ স্ক্রল ডিটেক্ট - ScrollView কে handle করতে দিন
-                            if (dy > dx && dy > touchSlop) {
-                                v.parent.requestDisallowInterceptTouchEvent(false)
-                            }
+// যদি আগে থেকেই Selection থাকে এবং User শুধু Scroll করে,
+// তাহলে Selection কখনো Clear হতে দেবে না।
+if (this@apply.hasSelection() && dy > dx && dy > touchSlop) {
+
+    isSingleTap = false
+
+    cancelLongPress()
+
+    // Scroll Allow
+    v.parent.requestDisallowInterceptTouchEvent(false)
+
+    // Selection Preserve
+    post {
+        if (!hasSelection()) {
+            setSelection(savedSelectionStart, savedSelectionEnd)
+        }
+    }
+
+    return false
+}
                             
                             // ✅ Long press + drag - character by character
                             if (isSelecting && (dx > touchSlop || dy > touchSlop)) {
