@@ -1942,7 +1942,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ আপনার দেওয়া সঠিক OnTouchListener - editText.post এর ভিতরে
+            // ✅ ফ্লটিং বাবল ক্র্যাশ ঠিক করার জন্য - editText.post এর ভিতরে সঠিক কনটেক্সট সহ
             editText.post {
                 val touchSlop = ViewConfiguration.get(this@FloatingBubbleService).scaledTouchSlop
                 editText.setOnTouchListener(object : View.OnTouchListener {
@@ -1970,19 +1970,18 @@ class FloatingBubbleService : Service() {
                                     savedSelectionEnd = -1
                                 }
 
-                                // prepare a long-press runnable (kept for compatibility); can be cancelled on scroll
+                                // prepare a long-press runnable
                                 longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
                                 val runnable = Runnable {
                                     if (!isScrollGestureNow) {
-                                        // optional: keep existing long-press behavior (select word)
-                                        selectWordAtPosition(editText, downX, downY, true)
+                                        // Use the outer class's method
+                                        this@FloatingBubbleService.selectWordAtPosition(editText, downX, downY, true)
                                         v.parent.requestDisallowInterceptTouchEvent(true)
                                     }
                                 }
                                 longPressRunnable = runnable
                                 longPressHandler.postDelayed(runnable, 300L)
 
-                                // allow parent to decide (return false) so ScrollView can intercept if it's a scroll
                                 return false
                             }
 
@@ -1990,17 +1989,13 @@ class FloatingBubbleService : Service() {
                                 val dx = Math.abs(event.x - downX)
                                 val dy = Math.abs(event.y - downY)
 
-                                // detect vertical scroll gesture
                                 if (!isScrollGestureNow) {
                                     if (dy > touchSlop && dy > dx) {
-                                        // treat as scroll: cancel long-press, let parent scroll, preserve selection
                                         isScrollGestureNow = true
                                         longPressRunnable?.let { longPressHandler.removeCallbacks(it); longPressRunnable = null }
 
-                                        // allow parent ScrollView to receive/take over touch events
                                         v.parent.requestDisallowInterceptTouchEvent(false)
 
-                                        // update flags/UI as your existing logic expects
                                         isScrolling = true
                                         wereHandlesVisibleBeforeScroll = areHandlesVisible
                                         if (areHandlesVisible) {
@@ -2014,10 +2009,7 @@ class FloatingBubbleService : Service() {
                                     }
                                 }
 
-                                // if already a scroll, let parent handle it
                                 if (isScrollGestureNow) return false
-
-                                // otherwise let other touch processing continue (selection/long-press)
                                 return false
                             }
 
@@ -2025,18 +2017,15 @@ class FloatingBubbleService : Service() {
                                 longPressRunnable?.let { longPressHandler.removeCallbacks(it); longPressRunnable = null }
 
                                 if (isScrollGestureNow) {
-                                    // scroll ended — restore selection UI if we had saved one
                                     isScrolling = false
                                     if (savedSelectionStart >= 0 && savedSelectionEnd >= 0 &&
                                         savedSelectionStart <= editText.text.length && savedSelectionEnd <= editText.text.length) {
 
-                                        // restore selection defensively
                                         editText.setSelection(
                                             savedSelectionStart.coerceAtLeast(0),
                                             savedSelectionEnd.coerceAtMost(editText.text.length)
                                         )
 
-                                        // update handle positions and floating action bar
                                         updateHandlePositionsImmediate()
                                         val (sStart, sEnd) = getSelection()
                                         if (sStart != sEnd) {
@@ -2054,7 +2043,6 @@ class FloatingBubbleService : Service() {
                                     return false
                                 }
 
-                                // not a scroll - normal behavior
                                 return false
                             }
                         }
