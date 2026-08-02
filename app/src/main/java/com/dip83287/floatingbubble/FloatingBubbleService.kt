@@ -122,11 +122,6 @@ class FloatingBubbleService : Service() {
     private var lastScrollTime = 0L
     
     private var wereHandlesVisibleBeforeScroll = false
-    
-    // ✅ ScrollView এর টাচ ট্র্যাক করার জন্য
-    private var isScrollViewTouching = false
-    private var savedSelectionStartForScroll = -1
-    private var savedSelectionEndForScroll = -1
 
     private var lastFontScale = 0f
     private var lastScreenWidth = 0
@@ -1757,52 +1752,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ ScrollView এর OnTouchListener - সিলেকশন সংরক্ষণ করে
-    private fun setupScrollViewTouchListener() {
-        scrollView.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    isScrollViewTouching = true
-                    // ✅ সিলেকশন সংরক্ষণ করো
-                    if (editText.hasSelection()) {
-                        savedSelectionStartForScroll = editText.selectionStart
-                        savedSelectionEndForScroll = editText.selectionEnd
-                        EmergencyLog.log("ScrollView DOWN - Selection saved: $savedSelectionStartForScroll - $savedSelectionEndForScroll")
-                    } else {
-                        savedSelectionStartForScroll = -1
-                        savedSelectionEndForScroll = -1
-                    }
-                    false // ScrollView কে ইভেন্ট হ্যান্ডেল করতে দাও
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    isScrollViewTouching = false
-                    // ✅ স্ক্রলিং শেষে সিলেকশন রিস্টোর করো
-                    if (savedSelectionStartForScroll >= 0 && savedSelectionEndForScroll >= 0) {
-                        if (!editText.hasSelection()) {
-                            editText.setSelection(savedSelectionStartForScroll, savedSelectionEndForScroll)
-                            EmergencyLog.log("ScrollView UP - Selection restored: $savedSelectionStartForScroll - $savedSelectionEndForScroll")
-                            
-                            // ✅ হ্যান্ডেল এবং অ্যাকশন বার শো করো
-                            Handler(Looper.getMainLooper()).postDelayed({
-                                updateHandlePositionsImmediate()
-                                showSelectionHandles()
-                                val text = editText.text.substring(savedSelectionStartForScroll, savedSelectionEndForScroll)
-                                if (text.isNotEmpty()) {
-                                    currentSelectedText = text
-                                    showFloatingActionBar(text)
-                                }
-                            }, 50)
-                        }
-                        savedSelectionStartForScroll = -1
-                        savedSelectionEndForScroll = -1
-                    }
-                    false
-                }
-                else -> false
-            }
-        }
-    }
-
     private fun openEditorForNote(note: NoteItem) {
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -1993,7 +1942,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ EditText এর OnTouchListener - সিংেল ট্যাপ এবং ড্র্যাগ হ্যান্ডেল করে
+            // ✅ সম্পূর্ণ নিজস্ব TouchListener - EditText এর default behavior ব্লক করা হয়েছে
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -2004,6 +1953,11 @@ class FloatingBubbleService : Service() {
                 private var isDragging = false
                 private var hasMoved = false
                 private var isSingleTap = false
+                
+                // ✅ সিলেকশন সংরক্ষণের জন্য ভেরিয়েবল
+                private var savedStart = -1
+                private var savedEnd = -1
+                private var selectionRestored = false
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
@@ -2016,6 +1970,17 @@ class FloatingBubbleService : Service() {
                             isDragging = false
                             hasMoved = false
                             isSingleTap = true
+                            selectionRestored = false
+                            
+                            // ✅ বর্তমান সিলেকশন সংরক্ষণ
+                            if (this@apply.hasSelection()) {
+                                savedStart = this@apply.selectionStart
+                                savedEnd = this@apply.selectionEnd
+                                EmergencyLog.log("Selection saved: $savedStart - $savedEnd")
+                            } else {
+                                savedStart = -1
+                                savedEnd = -1
+                            }
                             
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
@@ -2038,13 +2003,16 @@ class FloatingBubbleService : Service() {
                             lastTouchTime = currentTime
                             lastTouchX = x
                             lastTouchY = y
-                            v.parent.requestDisallowInterceptTouchEvent(false)
+                            
+                            // ✅ EditText কে ইভেন্ট প্রসেস করতে দিচ্ছি না
+                            return true
                         }
                         
                         MotionEvent.ACTION_MOVE -> {
                             val dx = Math.abs(event.x - lastTouchX)
                             val dy = Math.abs(event.y - lastTouchY)
                             
+                            // ✅ Track movement
                             if (dx > 10 || dy > 10) {
                                 hasMoved = true
                                 isSingleTap = false
@@ -2060,29 +2028,30 @@ class FloatingBubbleService : Service() {
                             if (this@apply.hasSelection() && !isScrolling && isDragging) {
                                 updateHandlePositionsSafe()
                             }
+                            
+                            // ✅ EditText কে ইভেন্ট প্রসেস করতে দিচ্ছি না
+                            return true
                         }
                         
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                             cancelLongPress()
                             
-                            // ✅ Check if ScrollView handled the touch (scrolling)
-                            if (isScrollViewTouching) {
-                                // ScrollView is handling touch, keep selection
-                                EmergencyLog.log("ScrollView handling touch - keeping selection")
-                                if (this@apply.hasSelection()) {
-                                    val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                                    if (selected.isNotEmpty()) {
-                                        currentSelectedText = selected
-                                        showFloatingActionBar(selected)
+                            // ✅ যদি সিলেকশন সংরক্ষিত থাকে এবং বর্তমানে সিলেকশন নেই, তাহলে পুনরুদ্ধার করো
+                            if (savedStart >= 0 && savedEnd >= 0 && savedStart != savedEnd) {
+                                if (!this@apply.hasSelection()) {
+                                    this@apply.setSelection(savedStart, savedEnd)
+                                    selectionRestored = true
+                                    EmergencyLog.log("Selection restored: $savedStart - $savedEnd")
+                                    
+                                    // ✅ হ্যান্ডেল এবং অ্যাকশন বার দেখাও
+                                    val text = this@apply.text.substring(savedStart, savedEnd)
+                                    if (text.isNotEmpty()) {
+                                        currentSelectedText = text
+                                        showFloatingActionBar(text)
                                         showSelectionHandles()
                                         updateHandlePositionsImmediate()
                                     }
                                 }
-                                isSelecting = false
-                                isDragging = false
-                                hasMoved = false
-                                isSingleTap = false
-                                return true
                             }
                             
                             // ✅ ONLY deselect on pure single tap (NO movement)
@@ -2142,9 +2111,12 @@ class FloatingBubbleService : Service() {
                             isDragging = false
                             hasMoved = false
                             isSingleTap = false
+                            
+                            // ✅ EditText কে ইভেন্ট প্রসেস করতে দিচ্ছি না
+                            return true
                         }
                     }
-                    return false
+                    return true
                 }
                 
                 private fun cancelLongPress() {
@@ -2196,9 +2168,6 @@ class FloatingBubbleService : Service() {
         
         scrollView.addView(editText)
         contentContainer.addView(scrollView)
-        
-        // ✅ ScrollView এর OnTouchListener সেট করো
-        setupScrollViewTouchListener()
 
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
