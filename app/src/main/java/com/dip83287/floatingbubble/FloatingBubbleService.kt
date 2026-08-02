@@ -1942,7 +1942,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ সম্পূর্ণ OnTouchListener - super.onTouchEvent() কল করে EditText এর default behavior রাখা
+            // ✅ উন্নত OnTouchListener - তির্যক স্ক্রলিং সাপোর্ট সহ
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1953,11 +1953,11 @@ class FloatingBubbleService : Service() {
                 private var isDragging = false
                 private var hasMoved = false
                 private var isSingleTap = false
+                private var isScrollDetected = false
+                private var startX = 0f
+                private var startY = 0f
                 
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
-                    // ✅ প্রথমে EditText এর default onTouchEvent কল করি
-                    val result = v.onTouchEvent(event)
-                    
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
                             val currentTime = System.currentTimeMillis()
@@ -1968,14 +1968,19 @@ class FloatingBubbleService : Service() {
                             isDragging = false
                             hasMoved = false
                             isSingleTap = true
+                            isScrollDetected = false
+                            startX = x
+                            startY = y
                             
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
                                 Math.abs(y - lastTouchY) < 50) {
+                                // ✅ Double tap - select word
                                 isSelecting = true
                                 isSingleTap = false
                                 selectWordAtPosition(this@apply, x, y, true)
                             } else {
+                                // ✅ Long press - select word
                                 val runnable = Runnable {
                                     isSelecting = true
                                     isSingleTap = false
@@ -1988,24 +1993,36 @@ class FloatingBubbleService : Service() {
                             lastTouchTime = currentTime
                             lastTouchX = x
                             lastTouchY = y
-                            
-                            // ✅ ScrollView কে ইভেন্ট নিতে দিচ্ছি (স্ক্রলিং এর জন্য)
                             v.parent.requestDisallowInterceptTouchEvent(false)
                         }
                         
                         MotionEvent.ACTION_MOVE -> {
-                            val dx = Math.abs(event.x - lastTouchX)
-                            val dy = Math.abs(event.y - lastTouchY)
+                            val dx = Math.abs(event.x - startX)
+                            val dy = Math.abs(event.y - startY)
                             
+                            // ✅ মুভমেন্ট ডিটেক্ট - 10px থ্রেশহোল্ড
                             if (dx > 10 || dy > 10) {
                                 hasMoved = true
                                 isSingleTap = false
                                 cancelLongPress()
                             }
                             
-                            // ✅ If we have a selection and user is dragging, do character by character selection
-                            if (this@apply.hasSelection() && (dx > 20 || dy > 20)) {
+                            // ✅ স্ক্রলিং ডিটেকশন - তির্যক স্ক্রলিং সাপোর্ট
+                            // যেকোনো দিকে 30px এর বেশি মুভমেন্ট হলে স্ক্রলিং ধরা হবে
+                            if (!isScrollDetected && (dx > 30 || dy > 30) && !isSelecting) {
+                                isScrollDetected = true
+                                // স্ক্রলিং ডিটেক্ট হলে ড্র্যাগ বাতিল
+                                isDragging = false
+                                EmergencyLog.log("Scroll detected - dx: $dx, dy: $dy")
+                                v.parent.requestDisallowInterceptTouchEvent(false)
+                                return true
+                            }
+                            
+                            // ✅ ড্র্যাগ - শুধুমাত্র যখন স্ক্রলিং ডিটেক্ট হয়নি এবং সিলেকশন আছে
+                            // ড্র্যাগ থ্রেশহোল্ড 40px - স্ক্রলিং এর চেয়ে বেশি
+                            if (!isScrollDetected && this@apply.hasSelection() && (dx > 40 || dy > 40)) {
                                 isDragging = true
+                                v.parent.requestDisallowInterceptTouchEvent(true)
                                 handleDragSelection(this@apply, event)
                             }
                             
@@ -2013,19 +2030,18 @@ class FloatingBubbleService : Service() {
                                 updateHandlePositionsSafe()
                             }
                             
-                            // ✅ ScrollView কে ইভেন্ট নিতে দিচ্ছি (স্ক্রলিং এর জন্য)
-                            if (dy > dx && dy > 20) {
+                            // স্ক্রলিং ডিটেক্ট হলে parent কে ইন্টারসেপ্ট করতে দিন
+                            if (isScrollDetected) {
                                 v.parent.requestDisallowInterceptTouchEvent(false)
-                            } else {
-                                v.parent.requestDisallowInterceptTouchEvent(true)
                             }
                         }
                         
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                             cancelLongPress()
+                            v.parent.requestDisallowInterceptTouchEvent(false)
                             
                             // ✅ ONLY deselect on pure single tap (NO movement)
-                            if (isSingleTap && !hasMoved && !isSelecting && !isDragging) {
+                            if (isSingleTap && !hasMoved && !isSelecting && !isDragging && !isScrollDetected) {
                                 if (this@apply.hasSelection()) {
                                     val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
                                     if (offset >= 0 && offset <= this@apply.text.length) {
@@ -2039,7 +2055,7 @@ class FloatingBubbleService : Service() {
                             }
                             
                             // ✅ If there was movement, KEEP the selection
-                            if (hasMoved && this@apply.hasSelection()) {
+                            if ((hasMoved || isScrollDetected) && this@apply.hasSelection()) {
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
@@ -2081,13 +2097,10 @@ class FloatingBubbleService : Service() {
                             isDragging = false
                             hasMoved = false
                             isSingleTap = false
-                            
-                            v.parent.requestDisallowInterceptTouchEvent(false)
+                            isScrollDetected = false
                         }
                     }
-                    
-                    // ✅ EditText এর default behavior কাজ করছে, তাই true return
-                    return true
+                    return false
                 }
                 
                 private fun cancelLongPress() {
