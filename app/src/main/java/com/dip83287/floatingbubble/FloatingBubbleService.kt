@@ -2009,7 +2009,7 @@ class FloatingBubbleService : Service() {
                             
                             // ✅ স্ক্রলিং ডিটেকশন - তির্যক স্ক্রলিং সাপোর্ট
                             // যেকোনো দিকে 30px এর বেশি মুভমেন্ট হলে স্ক্রলিং ধরা হবে
-                            if (!isScrollDetected && (dx > 5 || dy > 5) && !isSelecting) {
+                            if (!isScrollDetected && (dx > 30 || dy > 30) && !isSelecting) {
                                 isScrollDetected = true
                                 // স্ক্রলিং ডিটেক্ট হলে ড্র্যাগ বাতিল
                                 isDragging = false
@@ -2020,7 +2020,7 @@ class FloatingBubbleService : Service() {
                             
                             // ✅ ড্র্যাগ - শুধুমাত্র যখন স্ক্রলিং ডিটেক্ট হয়নি এবং সিলেকশন আছে
                             // ড্র্যাগ থ্রেশহোল্ড 40px - স্ক্রলিং এর চেয়ে বেশি
-                            if (!isScrollDetected && this@apply.hasSelection() && (dx > 40 || dy > 40)) {
+                            if (!isScrollDetected && this@apply.hasSelection() && (dx > 80 || dy > 80)) {
                                 isDragging = true
                                 v.parent.requestDisallowInterceptTouchEvent(true)
                                 handleDragSelection(this@apply, event)
