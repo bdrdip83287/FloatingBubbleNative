@@ -2001,7 +2001,7 @@ class FloatingBubbleService : Service() {
                             val dy = Math.abs(event.y - startY)
                             
                             // ✅ মুভমেন্ট ডিটেক্ট - 10px থ্রেশহোল্ড
-                            if (dx > 10 || dy > 10) {
+                            if (dx > 1 || dy > 1) {
                                 hasMoved = true
                                 isSingleTap = false
                                 cancelLongPress()
@@ -2020,7 +2020,7 @@ class FloatingBubbleService : Service() {
                             
                             // ✅ ড্র্যাগ - শুধুমাত্র যখন স্ক্রলিং ডিটেক্ট হয়নি এবং সিলেকশন আছে
                             // ড্র্যাগ থ্রেশহোল্ড 40px - স্ক্রলিং এর চেয়ে বেশি
-                            if (!isScrollDetected && this@apply.hasSelection() && (dx > 20 || dy > 20)) {
+                            if (!isScrollDetected && this@apply.hasSelection() && (dx > 40 || dy > 40)) {
                                 isDragging = true
                                 v.parent.requestDisallowInterceptTouchEvent(true)
                                 handleDragSelection(this@apply, event)
