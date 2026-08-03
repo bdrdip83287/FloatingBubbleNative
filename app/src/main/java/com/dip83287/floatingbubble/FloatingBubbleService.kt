@@ -2001,7 +2001,7 @@ class FloatingBubbleService : Service() {
                             val dy = Math.abs(event.y - startY)
                             
                             // ✅ মুভমেন্ট ডিটেক্ট - 10px থ্রেশহোল্ড
-                            if (dx > 30 || dy > 30) {
+                            if (dx > -5 || dy > -5) {
                                 hasMoved = true
                                 isSingleTap = false
                                 cancelLongPress()
