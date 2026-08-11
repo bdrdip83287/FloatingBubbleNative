@@ -40,6 +40,7 @@ import com.dip83287.floatingbubble.utils.EmergencyLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 class FloatingBubbleService : Service() {
 
@@ -1942,7 +1943,7 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-            // ✅ সরলীকৃত OnTouchListener - আপনার দেওয়া কোড থেকে নেওয়া
+            // ✅ আপডেটেড OnTouchListener - সব ধরনের স্ক্রলিং ডিটেক্ট করে
             setOnTouchListener(object : View.OnTouchListener {
                 private var lastTouchTime = 0L
                 private var lastTouchX = 0f
@@ -1954,6 +1955,15 @@ class FloatingBubbleService : Service() {
                 private var hasMoved = false
                 private var isSingleTap = false
                 
+                // ✅ স্ক্রলিং ডিটেকশনের জন্য ভেরিয়েবল
+                private var touchStartX = 0f
+                private var touchStartY = 0f
+                private var totalDistance = 0f
+                private var isScrollingDetected = false
+                private var velocityTracker: VelocityTracker? = null
+                private var moveCount = 0
+                private var scrollConfirmed = false
+                
                 override fun onTouch(v: View, event: MotionEvent): Boolean {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
@@ -1961,10 +1971,20 @@ class FloatingBubbleService : Service() {
                             val x = event.x
                             val y = event.y
                             
+                            // Initialize velocity tracker
+                            velocityTracker = VelocityTracker.obtain()
+                            velocityTracker?.addMovement(event)
+                            
                             cancelLongPress()
                             isDragging = false
                             hasMoved = false
                             isSingleTap = true
+                            isScrollingDetected = false
+                            scrollConfirmed = false
+                            totalDistance = 0f
+                            moveCount = 0
+                            touchStartX = x
+                            touchStartY = y
                             
                             if (currentTime - lastTouchTime < 300 && 
                                 Math.abs(x - lastTouchX) < 50 && 
@@ -1991,32 +2011,77 @@ class FloatingBubbleService : Service() {
                         }
                         
                         MotionEvent.ACTION_MOVE -> {
-                            val dx = Math.abs(event.x - lastTouchX)
-                            val dy = Math.abs(event.y - lastTouchY)
+                            velocityTracker?.addMovement(event)
+                            moveCount++
                             
-                            // ✅ Track movement
+                            val dx = Math.abs(event.x - touchStartX)
+                            val dy = Math.abs(event.y - touchStartY)
+                            val distance = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                            totalDistance += distance
+                            
+                            // ✅ যেকোনো মুভমেন্ট ট্র্যাক করুন
                             if (dx > 10 || dy > 10) {
                                 hasMoved = true
                                 isSingleTap = false
-                                cancelLongPress()
                             }
                             
-                            // ✅ If we have a selection and user is dragging, do character by character selection
-                            if (this@apply.hasSelection() && (dx > 20 || dy > 20)) {
+                            // ✅ স্মার্ট স্ক্রলিং ডিটেকশন - সব দিকের জন্য
+                            if (!isScrollingDetected && !isSelecting && !isDragging && hasMoved) {
+                                // ভেলোসিটি চেক
+                                velocityTracker?.computeCurrentVelocity(1000)
+                                val velX = velocityTracker?.xVelocity ?: 0f
+                                val velY = velocityTracker?.yVelocity ?: 0f
+                                val velocity = sqrt((velX * velX + velY * velY).toDouble()).toFloat()
+                                
+                                // ✅ স্ক্রলিং ডিটেক্ট করার শর্ত:
+                                // 1. দূরত্ব 30px এর বেশি (যেকোনো দিকে)
+                                // 2. অথবা ভেলোসিটি 100px/s এর বেশি (যেকোনো দিকে)
+                                // 3. অথবা 3 বার মুভমেন্ট হয়েছে
+                                if (totalDistance > 30 || velocity > 100 || moveCount > 3) {
+                                    isScrollingDetected = true
+                                    scrollConfirmed = true
+                                    isDragging = false
+                                    isSingleTap = false
+                                    cancelLongPress()
+                                    
+                                    // ✅ স্ক্রলিং ধরতে প্যারেন্টকে ইন্টারসেপ্ট করতে দিন
+                                    v.parent.requestDisallowInterceptTouchEvent(false)
+                                    EmergencyLog.log("Scroll detected - distance: $totalDistance, velocity: $velocity, moves: $moveCount")
+                                    return true
+                                }
+                            }
+                            
+                            // ✅ Long press + drag - কিন্তু শুধুমাত্র যদি স্ক্রলিং না হয়
+                            if (!isScrollingDetected && !scrollConfirmed && 
+                                this@apply.hasSelection() && 
+                                (dx > 20 || dy > 20)) {
+                                
                                 isDragging = true
+                                isSingleTap = false
+                                v.parent.requestDisallowInterceptTouchEvent(true)
                                 handleDragSelection(this@apply, event)
+                                
+                                if (!isScrolling) {
+                                    updateHandlePositionsSafe()
+                                }
                             }
                             
                             if (this@apply.hasSelection() && !isScrolling && isDragging) {
                                 updateHandlePositionsSafe()
                             }
+                            
+                            return true
                         }
                         
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            cancelLongPress()
+                            velocityTracker?.recycle()
+                            velocityTracker = null
                             
-                            // ✅ ONLY deselect on pure single tap (NO movement)
-                            if (isSingleTap && !hasMoved && !isSelecting && !isDragging) {
+                            cancelLongPress()
+                            v.parent.requestDisallowInterceptTouchEvent(false)
+                            
+                            // ✅ ONLY deselect on pure single tap (NO movement, NO scroll)
+                            if (isSingleTap && !hasMoved && !isSelecting && !isDragging && !scrollConfirmed) {
                                 if (this@apply.hasSelection()) {
                                     val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
                                     if (offset >= 0 && offset <= this@apply.text.length) {
@@ -2029,8 +2094,8 @@ class FloatingBubbleService : Service() {
                                 }
                             }
                             
-                            // ✅ If there was movement, KEEP the selection
-                            if (hasMoved && this@apply.hasSelection()) {
+                            // ✅ If there was movement OR scroll, KEEP the selection
+                            if ((hasMoved || scrollConfirmed) && this@apply.hasSelection()) {
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
@@ -2042,10 +2107,11 @@ class FloatingBubbleService : Service() {
                                         updateHandlePositionsImmediate()
                                     }, 50)
                                 }
+                                EmergencyLog.log("Movement/Scroll detected - keeping selection")
                             }
                             
                             // Show handles for selection
-                            if (!isSelecting && this@apply.hasSelection() && !isDragging && !isSingleTap) {
+                            if (!isSelecting && this@apply.hasSelection() && !isDragging && !isSingleTap && !scrollConfirmed) {
                                 val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
                                 if (selected.isNotEmpty()) {
                                     currentSelectedText = selected
@@ -2072,6 +2138,8 @@ class FloatingBubbleService : Service() {
                             isDragging = false
                             hasMoved = false
                             isSingleTap = false
+                            scrollConfirmed = false
+                            isScrollingDetected = false
                         }
                     }
                     return false
