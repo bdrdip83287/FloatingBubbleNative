@@ -2017,7 +2017,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 totalDistance += distance
                 
                 // ✅ থ্রেশহোল্ড বাড়ানো হয়েছে (10 → 20)
-                if (dx > 70 || dy > 70) {
+                if (dx > 0 || dy > 0) {
                     hasMoved = true
                     isSingleTap = false
                 }
