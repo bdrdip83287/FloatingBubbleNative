@@ -53,9 +53,9 @@ class FloatingBubbleService : Service() {
 
     private val NOTEPAD_TITLE = "Floating Notes"
     private val NOTEPAD_MIN_WIDTH = 380
-    private val NOTEPAD_MIN_HEIGHT = 500
-    private val NOTEPAD_MAX_WIDTH = 650
-    private val NOTEPAD_MAX_HEIGHT = 850
+    private val NOTEPAD_MIN_HEIGHT = 0
+    private val NOTEPAD_MAX_WIDTH = 6
+    private val NOTEPAD_MAX_HEIGHT = 8
 
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
@@ -119,7 +119,7 @@ class FloatingBubbleService : Service() {
     
     private var isScrolling = false
     private var scrollStopHandler: Handler? = null
-    private val SCROLL_STOP_DELAY = 500L
+    private val SCROLL_STOP_DELAY = 0L
     private var lastScrollTime = 0L
     
     private var wereHandlesVisibleBeforeScroll = false
@@ -193,11 +193,11 @@ class FloatingBubbleService : Service() {
                 } catch (e: Exception) {
                     EmergencyLog.logException(e, "Configuration check")
                 }
-                configCheckHandler.postDelayed(this, 500)
+                configCheckHandler.postDelayed(this, 0)
             }
         }
         configCheckRunnable = runnable
-        configCheckHandler.postDelayed(runnable, 500)
+        configCheckHandler.postDelayed(runnable, 0)
     }
 
     private fun loadNotes() {
@@ -301,7 +301,7 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = 150
+            params.y = 1
             zone.visibility = View.GONE
             deleteZoneView = zone
             windowManager.addView(deleteZoneView, params)
@@ -345,11 +345,11 @@ class FloatingBubbleService : Service() {
         
         return if (isFirstTime) {
             val defaultX = screenWidth - BUBBLE_SIZE - 20
-            val defaultY = 150
+            val defaultY = 1
             Pair(defaultX, defaultY)
         } else {
             val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
-            val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
+            val savedY = prefs.getInt(KEY_BUBBLE_Y, 1)
             Pair(savedX, savedY)
         }
     }
@@ -1119,7 +1119,7 @@ class FloatingBubbleService : Service() {
             leftHandleView?.let { handle ->
                 handle.animate()
                     ?.alpha(0f)
-                    ?.setDuration(150)
+                    ?.setDuration(1)
                     ?.setInterpolator(DecelerateInterpolator())
                     ?.withEndAction {
                         handle.visibility = View.GONE
@@ -1129,7 +1129,7 @@ class FloatingBubbleService : Service() {
             rightHandleView?.let { handle ->
                 handle.animate()
                     ?.alpha(0f)
-                    ?.setDuration(150)
+                    ?.setDuration(1)
                     ?.setInterpolator(DecelerateInterpolator())
                     ?.withEndAction {
                         handle.visibility = View.GONE
@@ -1146,7 +1146,7 @@ class FloatingBubbleService : Service() {
                 if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
                     handle.animate()
                         ?.alpha(0f)
-                        ?.setDuration(150)
+                        ?.setDuration(1)
                         ?.setInterpolator(DecelerateInterpolator())
                         ?.start()
                 }
@@ -1155,7 +1155,7 @@ class FloatingBubbleService : Service() {
                 if (handle.visibility == View.VISIBLE && handle.alpha > 0f) {
                     handle.animate()
                         ?.alpha(0f)
-                        ?.setDuration(150)
+                        ?.setDuration(1)
                         ?.setInterpolator(DecelerateInterpolator())
                         ?.start()
                 }
@@ -1327,7 +1327,7 @@ class FloatingBubbleService : Service() {
                     if (isExpanded) {
                         collapseToBubble()
                     }
-                }, 500)
+                }, 0)
             }
         }
         actionBarView.addView(shareBtn)
@@ -1354,7 +1354,7 @@ class FloatingBubbleService : Service() {
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
-            params.x = x.toInt() - 50
+            params.x = x.toInt() - 
             params.y = (y - 55).toInt()
             
             try {
@@ -1366,7 +1366,7 @@ class FloatingBubbleService : Service() {
     
     private fun shareLargeText(text: String) {
         try {
-            if (text.length > 500000) {
+            if (text.length > 0000) {
                 val timeStamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
                 val fileName = "shared_note_$timeStamp.txt"
                 val cacheFile = java.io.File(cacheDir, fileName)
@@ -1622,7 +1622,7 @@ class FloatingBubbleService : Service() {
         val isBengali = char in '\u0980'..'\u09FF'
         val isHindi = char in '\u0900'..'\u097F'
         val isArabic = char in '\u0600'..'\u06FF'
-        val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
+        val isUrdu = char in '\u0600'..'\u06FF' || char in '\u07'..'\u077F'
         val isLetterOrDigit = Character.isLetterOrDigit(char)
         val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' || 
                        char == '#' || char == '$' || char == '%' || char == '&' ||
@@ -1734,11 +1734,11 @@ class FloatingBubbleService : Service() {
                         
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
-                        }, 50)
+                        }, )
                         
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
-                        }, 150)
+                        }, 1)
                         
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
@@ -1986,8 +1986,8 @@ setOnTouchListener(object : View.OnTouchListener {
                 touchStartY = y
                 
                 if (currentTime - lastTouchTime < 300 && 
-                    Math.abs(x - lastTouchX) < 50 && 
-                    Math.abs(y - lastTouchY) < 50) {
+                    Math.abs(x - lastTouchX) <  && 
+                    Math.abs(y - lastTouchY) < ) {
                     isSelecting = true
                     isSingleTap = false
                     selectWordAtPosition(this@apply, x, y, true)
@@ -2030,7 +2030,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     val velocity = sqrt((velX * velX + velY * velY).toDouble()).toFloat()
                     
                     // ✅ থ্রেশহোল্ড বাড়ানো হয়েছে
-                    if (totalDistance > 50 || velocity > 150 || moveCount > 5) {
+                    if (totalDistance >  30 || velocity > 100 || moveCount > 3) {
                         isScrollingDetected = true
                         scrollConfirmed = true
                         isDragging = false
@@ -2097,7 +2097,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         updateHandlePositionsImmediate()
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
-                        }, 50)
+                        }, )
                     }
                     EmergencyLog.log("Movement/Scroll detected - keeping selection")
                 }
@@ -2113,7 +2113,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         updateHandlePositionsImmediate()
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateHandlePositionsImmediate()
-                        }, 50)
+                        }, )
                     }
                 } else if (isDragging && this@apply.hasSelection()) {
                     val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
@@ -2199,7 +2199,7 @@ setOnTouchListener(object : View.OnTouchListener {
 
         val saveBtn = Button(this).apply {
             text = "Save"
-            setBackgroundColor(Color.parseColor("#4CAF50"))
+            setBackgroundColor(Color.parseColor("#4CAF"))
             setTextColor(Color.WHITE)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
             setOnClickListener {
@@ -2375,7 +2375,7 @@ setOnTouchListener(object : View.OnTouchListener {
 
             fun bind(note: NoteItem) {
                 titleView.text = note.title
-                val preview = if (note.content.length > 50) note.content.take(50) + "..." else note.content
+                val preview = if (note.content.length > ) note.content.take() + "..." else note.content
                 contentView.text = preview.ifEmpty { "No content" }
                 
                 itemView.setOnClickListener { onItemClick(note) }
