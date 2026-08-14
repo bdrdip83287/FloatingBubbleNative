@@ -2030,7 +2030,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     val velocity = sqrt((velX * velX + velY * velY).toDouble()).toFloat()
                     
                     // ✅ থ্রেশহোল্ড বাড়ানো হয়েছে
-                    if (totalDistance > 70 || velocity > 1 || moveCount > 5) {
+                    if (totalDistance > 70 || velocity > 200 || moveCount > 50) {
                         isScrollingDetected = true
                         scrollConfirmed = true
                         isDragging = false
