@@ -2030,7 +2030,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     val velocity = sqrt((velX * velX + velY * velY).toDouble()).toFloat()
                     
                     // ✅ থ্রেশহোল্ড বাড়ানো হয়েছে
-                    if (totalDistance > 70 || velocity > 200 || moveCount > 50) {
+                    if (totalDistance > 70 || velocity > 200 || moveCount > 5) {
                         isScrollingDetected = true
                         scrollConfirmed = true
                         isDragging = false
@@ -2046,7 +2046,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 // ✅ ড্র্যাগ থ্রেশহোল্ড বাড়ানো হয়েছে (20 → 30)
                 if (!isScrollingDetected && !scrollConfirmed && 
                     this@apply.hasSelection() && 
-                    (dx > 30 || dy > 30)) {
+                    (dx > 0 || dy > 0)) {
                     
                     isDragging = true
                     isSingleTap = false
