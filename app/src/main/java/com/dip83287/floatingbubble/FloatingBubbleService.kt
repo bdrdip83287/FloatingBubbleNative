@@ -2046,7 +2046,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 // ✅ ড্র্যাগ থ্রেশহোল্ড বাড়ানো হয়েছে (20 → 30)
                 if (!isScrollingDetected && !scrollConfirmed && 
                     this@apply.hasSelection() && 
-                    (dx > 0 || dy > 0)) {
+                    (dx > 200 || dy > 200)) {
                     
                     isDragging = true
                     isSingleTap = false
