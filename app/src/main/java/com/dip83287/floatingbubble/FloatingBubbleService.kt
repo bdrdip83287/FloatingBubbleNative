@@ -1943,206 +1943,988 @@ class FloatingBubbleService : Service() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
             
-// ✅ আপডেটেড OnTouchListener - সঠিক সেন্সিটিভিটি সহ
+// ============================================================
+// ✅ Android-like Selection + Smooth Scrolling Touch Handler
+// ============================================================
+
 setOnTouchListener(object : View.OnTouchListener {
+
+    // --------------------------------------------------------
+    // Touch / Gesture State
+    // --------------------------------------------------------
+
+    private enum class TouchState {
+        IDLE,
+        PRESSED,
+        SELECTING,
+        SCROLLING,
+        DRAGGING_SELECTION
+    }
+
+    private var touchState = TouchState.IDLE
+
+    // --------------------------------------------------------
+    // Time / Position
+    // --------------------------------------------------------
+
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
     private var lastTouchY = 0f
-    private var longPressRunnable: Runnable? = null
-    private val longPressHandler = Handler(Looper.getMainLooper())
-    private var isSelecting = false
-    private var isDragging = false
-    private var hasMoved = false
-    private var isSingleTap = false
-    
-    // ✅ স্ক্রলিং ডিটেকশনের জন্য ভেরিয়েবল
+
     private var touchStartX = 0f
     private var touchStartY = 0f
+
+    private var previousX = 0f
+    private var previousY = 0f
+
+    // --------------------------------------------------------
+    // Long Press
+    // --------------------------------------------------------
+
+    private var longPressRunnable: Runnable? = null
+
+    private val longPressHandler =
+        Handler(Looper.getMainLooper())
+
+    // --------------------------------------------------------
+    // Android Native Touch Slop
+    // --------------------------------------------------------
+
+    private val touchSlop =
+        ViewConfiguration.get(this@apply.context).scaledTouchSlop
+
+    // Selection handle drag-এর জন্য সামান্য বেশি tolerance
+    private val selectionDragSlop =
+        touchSlop * 2
+
+    // --------------------------------------------------------
+    // Movement
+    // --------------------------------------------------------
+
+    private var hasMoved = false
+    private var isSingleTap = false
+
     private var totalDistance = 0f
-    private var isScrollingDetected = false
+
+    // --------------------------------------------------------
+    // Double Tap
+    // --------------------------------------------------------
+
+    private var isDoubleTapCandidate = false
+
+    // --------------------------------------------------------
+    // Velocity
+    // --------------------------------------------------------
+
     private var velocityTracker: VelocityTracker? = null
-    private var moveCount = 0
-    private var scrollConfirmed = false
-    
-    override fun onTouch(v: View, event: MotionEvent): Boolean {
-        when (event.action) {
+
+    // --------------------------------------------------------
+    // Selection Snapshot
+    //
+    // Scroll করার সময় selection range ধরে রাখার জন্য।
+    // --------------------------------------------------------
+
+    private var savedSelectionStart = -1
+    private var savedSelectionEnd = -1
+
+    // --------------------------------------------------------
+    // Scroll State
+    // --------------------------------------------------------
+
+    private var selectionWasActiveBeforeScroll = false
+
+    private var scrollStarted = false
+
+    // --------------------------------------------------------
+    // Utility
+    // --------------------------------------------------------
+
+    private fun saveCurrentSelection() {
+
+        if (this@apply.hasSelection()) {
+
+            savedSelectionStart =
+                this@apply.selectionStart
+
+            savedSelectionEnd =
+                this@apply.selectionEnd
+
+            selectionWasActiveBeforeScroll = true
+        }
+    }
+
+    private fun restoreSavedSelection() {
+
+        if (!selectionWasActiveBeforeScroll) {
+            return
+        }
+
+        if (savedSelectionStart < 0 ||
+            savedSelectionEnd < 0
+        ) {
+            return
+        }
+
+        val textLength = this@apply.text.length
+
+        val start = savedSelectionStart
+            .coerceIn(0, textLength)
+
+        val end = savedSelectionEnd
+            .coerceIn(0, textLength)
+
+        if (start != end) {
+
+            try {
+                this@apply.setSelection(start, end)
+            } catch (e: Exception) {
+                EmergencyLog.log(
+                    "Selection restore error: ${e.message}"
+                )
+            }
+        }
+    }
+
+    private fun clearSelectionState() {
+
+        savedSelectionStart = -1
+        savedSelectionEnd = -1
+        selectionWasActiveBeforeScroll = false
+        scrollStarted = false
+    }
+
+    // --------------------------------------------------------
+    // Long Press Cancel
+    // --------------------------------------------------------
+
+    private fun cancelLongPress() {
+
+        longPressRunnable?.let {
+            longPressHandler.removeCallbacks(it)
+        }
+
+        longPressRunnable = null
+    }
+
+    // --------------------------------------------------------
+    // Check whether movement passed Android touch slop
+    // --------------------------------------------------------
+
+    private fun passedTouchSlop(
+        x: Float,
+        y: Float
+    ): Boolean {
+
+        val dx = x - touchStartX
+        val dy = y - touchStartY
+
+        return (dx * dx + dy * dy) >=
+                (touchSlop * touchSlop)
+    }
+
+    // --------------------------------------------------------
+    // Start scrolling while preserving selection
+    // --------------------------------------------------------
+
+    private fun beginSelectionScroll(
+        event: MotionEvent
+    ) {
+
+        if (touchState == TouchState.SCROLLING) {
+            return
+        }
+
+        // Selection-এর range প্রথমে save করো
+        if (this@apply.hasSelection()) {
+            saveCurrentSelection()
+        }
+
+        selectionWasActiveBeforeScroll =
+            savedSelectionStart >= 0 &&
+            savedSelectionEnd > savedSelectionStart
+
+        scrollStarted = true
+
+        touchState = TouchState.SCROLLING
+
+        isSingleTap = false
+        hasMoved = true
+
+        cancelLongPress()
+
+        // ----------------------------------------------------
+        // Parent-কে scrolling করতে দেওয়া হচ্ছে।
+        //
+        // যদি EditText নিজেই scrollable হয়, নিচের ACTION_MOVE
+        // অংশে scrollBy() ব্যবহার হবে।
+        // ----------------------------------------------------
+
+        v.parent.requestDisallowInterceptTouchEvent(false)
+
+        EmergencyLog.log(
+            "Selection scroll started - " +
+            "selection=$savedSelectionStart..$savedSelectionEnd"
+        )
+    }
+
+    // --------------------------------------------------------
+    // Maintain selection after scrolling
+    // --------------------------------------------------------
+
+    private fun maintainSelectionAfterScroll() {
+
+        if (!selectionWasActiveBeforeScroll) {
+            return
+        }
+
+        if (savedSelectionStart < 0 ||
+            savedSelectionEnd <= savedSelectionStart
+        ) {
+            return
+        }
+
+        // যদি কোনো কারণে selection হারিয়ে যায়,
+        // আগের range restore করো।
+        if (!this@apply.hasSelection()) {
+
+            restoreSavedSelection()
+        }
+
+        // Selection UI শুধু position update করবে।
+        // Selection নতুন করে তৈরি করবে না।
+
+        if (this@apply.hasSelection()) {
+
+            updateHandlePositionsSafe()
+        }
+    }
+
+    // --------------------------------------------------------
+    // ACTION DOWN
+    // --------------------------------------------------------
+
+    override fun onTouch(
+        v: View,
+        event: MotionEvent
+    ): Boolean {
+
+        when (event.actionMasked) {
+
+            // ==================================================
+            // ACTION_DOWN
+            // ==================================================
+
             MotionEvent.ACTION_DOWN -> {
-                val currentTime = System.currentTimeMillis()
+
+                val currentTime =
+                    System.currentTimeMillis()
+
                 val x = event.x
                 val y = event.y
-                
-                velocityTracker = VelocityTracker.obtain()
+
+                // ----------------------------------------------
+                // Velocity tracker
+                // ----------------------------------------------
+
+                velocityTracker?.recycle()
+
+                velocityTracker =
+                    VelocityTracker.obtain()
+
                 velocityTracker?.addMovement(event)
-                
+
+                // ----------------------------------------------
+                // Reset gesture state
+                // ----------------------------------------------
+
                 cancelLongPress()
-                isDragging = false
+
+                touchState = TouchState.PRESSED
+
                 hasMoved = false
                 isSingleTap = true
-                isScrollingDetected = false
-                scrollConfirmed = false
+
                 totalDistance = 0f
-                moveCount = 0
+
+                scrollStarted = false
+
+                selectionWasActiveBeforeScroll = false
+
+                savedSelectionStart = -1
+                savedSelectionEnd = -1
+
                 touchStartX = x
                 touchStartY = y
-                
-                if (currentTime - lastTouchTime < 300 && 
-                    Math.abs(x - lastTouchX) < 50 && 
-                    Math.abs(y - lastTouchY) < 50) {
-                    isSelecting = true
+
+                previousX = x
+                previousY = y
+
+                // ----------------------------------------------
+                // Double tap
+                // ----------------------------------------------
+
+                isDoubleTapCandidate =
+                    currentTime - lastTouchTime < 300 &&
+                    kotlin.math.abs(
+                        x - lastTouchX
+                    ) < 50 &&
+                    kotlin.math.abs(
+                        y - lastTouchY
+                    ) < 50
+
+                if (isDoubleTapCandidate) {
+
+                    // ------------------------------------------
+                    // Double tap → Word selection
+                    // ------------------------------------------
+
+                    touchState =
+                        TouchState.SELECTING
+
                     isSingleTap = false
-                    selectWordAtPosition(this@apply, x, y, true)
+
+                    selectWordAtPosition(
+                        this@apply,
+                        x,
+                        y,
+                        true
+                    )
+
+                    // Selection range save
+                    saveCurrentSelection()
+
                 } else {
+
+                    // ------------------------------------------
+                    // Long press → Word selection
+                    // ------------------------------------------
+
+                    val downX = x
+                    val downY = y
+
                     val runnable = Runnable {
-                        isSelecting = true
+
+                        // Finger যদি ইতিমধ্যে scroll করে থাকে,
+                        // long press execute করবে না।
+                        if (touchState != TouchState.PRESSED) {
+                            return@Runnable
+                        }
+
+                        touchState =
+                            TouchState.SELECTING
+
                         isSingleTap = false
-                        selectWordAtPosition(this@apply, x, y, true)
+
+                        selectWordAtPosition(
+                            this@apply,
+                            downX,
+                            downY,
+                            true
+                        )
+
+                        // Selection save
+                        saveCurrentSelection()
+
+                        EmergencyLog.log(
+                            "Long press selection started"
+                        )
                     }
+
                     longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 400)
+
+                    longPressHandler.postDelayed(
+                        runnable,
+                        400
+                    )
                 }
-                
+
                 lastTouchTime = currentTime
                 lastTouchX = x
                 lastTouchY = y
-                v.parent.requestDisallowInterceptTouchEvent(false)
+
+                // ----------------------------------------------
+                // Parent initially may intercept normally.
+                // ----------------------------------------------
+
+                v.parent.requestDisallowInterceptTouchEvent(
+                    false
+                )
+
+                // IMPORTANT:
+                // Gesture নিজের কাছে রাখছি।
+                return true
             }
-            
+
+            // ==================================================
+            // ACTION_MOVE
+            // ==================================================
+
             MotionEvent.ACTION_MOVE -> {
+
                 velocityTracker?.addMovement(event)
-                moveCount++
-                
-                val dx = Math.abs(event.x - touchStartX)
-                val dy = Math.abs(event.y - touchStartY)
-                val distance = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-                totalDistance += distance
-                
-                // ✅ থ্রেশহোল্ড বাড়ানো হয়েছে (10 → 20)
-                if (dx > 0 || dy > 0) {
+
+                val x = event.x
+                val y = event.y
+
+                // ----------------------------------------------
+                // Movement from DOWN
+                // ----------------------------------------------
+
+                val dxFromStart =
+                    x - touchStartX
+
+                val dyFromStart =
+                    y - touchStartY
+
+                val distanceFromStart =
+                    kotlin.math.sqrt(
+                        (
+                            dxFromStart *
+                                dxFromStart
+                        ) +
+                        (
+                            dyFromStart *
+                                dyFromStart
+                        )
+                            .toDouble()
+                    ).toFloat()
+
+                // ----------------------------------------------
+                // Actual movement from PREVIOUS point
+                //
+                // আগের code-এর totalDistance সমস্যা এখানে নেই।
+                // ----------------------------------------------
+
+                val dx =
+                    x - previousX
+
+                val dy =
+                    y - previousY
+
+                val stepDistance =
+                    kotlin.math.sqrt(
+                        (
+                            dx * dx
+                        ) +
+                        (
+                            dy * dy
+                        ).toDouble()
+                    ).toFloat()
+
+                totalDistance += stepDistance
+
+                previousX = x
+                previousY = y
+
+                // ----------------------------------------------
+                // Touch slop
+                // ----------------------------------------------
+
+                val passedSlop =
+                    distanceFromStart >= touchSlop
+
+                if (passedSlop) {
+
                     hasMoved = true
                     isSingleTap = false
                 }
-                
-                // ✅ স্ক্রলিং ডিটেকশন - থ্রেশহোল্ড বাড়ানো হয়েছে
-                if (!isScrollingDetected && !isSelecting && !isDragging && hasMoved) {
-                    velocityTracker?.computeCurrentVelocity(1000)
-                    val velX = velocityTracker?.xVelocity ?: 0f
-                    val velY = velocityTracker?.yVelocity ?: 0f
-                    val velocity = sqrt((velX * velX + velY * velY).toDouble()).toFloat()
-                    
-                    // ✅ থ্রেশহোল্ড বাড়ানো হয়েছে
-                    if (totalDistance > 70 || velocity > 200 || moveCount > 5) {
-                        isScrollingDetected = true
-                        scrollConfirmed = true
-                        isDragging = false
-                        isSingleTap = false
-                        cancelLongPress()
-                        
-                        v.parent.requestDisallowInterceptTouchEvent(false)
-                        EmergencyLog.log("Scroll detected - distance: $totalDistance, velocity: $velocity, moves: $moveCount")
+
+                // ==================================================
+                // STATE: PRESSED
+                // ==================================================
+
+                if (touchState ==
+                    TouchState.PRESSED
+                ) {
+
+                    // ------------------------------------------
+                    // Touch slop পার হওয়ার আগ পর্যন্ত
+                    // এটাকে scroll বা drag ধরা হবে না।
+                    // ------------------------------------------
+
+                    if (!passedSlop) {
                         return true
                     }
+
+                    // Finger নড়েছে → long press cancel
+                    cancelLongPress()
+
+                    // ------------------------------------------
+                    // Selection active আছে?
+                    // ------------------------------------------
+
+                    if (this@apply.hasSelection()) {
+
+                        saveCurrentSelection()
+
+                        beginSelectionScroll(event)
+
+                        return true
+                    }
+
+                    // ------------------------------------------
+                    // Selection নেই → সাধারণ scrolling
+                    // ------------------------------------------
+
+                    touchState =
+                        TouchState.SCROLLING
+
+                    v.parent
+                        .requestDisallowInterceptTouchEvent(false)
+
+                    return true
                 }
-                
-                // ✅ ড্র্যাগ থ্রেশহোল্ড বাড়ানো হয়েছে (20 → 30)
-                if (!isScrollingDetected && !scrollConfirmed && 
-                    this@apply.hasSelection() && 
-                    (dx > 200 || dy > 200)) {
-                    
-                    isDragging = true
-                    isSingleTap = false
-                    v.parent.requestDisallowInterceptTouchEvent(true)
-                    handleDragSelection(this@apply, event)
-                    
-                    if (!isScrolling) {
+
+                // ==================================================
+                // STATE: SELECTING
+                // ==================================================
+
+                if (touchState ==
+                    TouchState.SELECTING
+                ) {
+
+                    // ------------------------------------------
+                    // Selection ইতিমধ্যে তৈরি হয়েছে।
+                    //
+                    // এখন finger move করলে selection
+                    // automatically clear করা যাবে না।
+                    // ------------------------------------------
+
+                    if (!passedSlop) {
+                        return true
+                    }
+
+                    // ------------------------------------------
+                    // Selection handle drag হলে
+                    // handleDragSelection() ব্যবহার হবে।
+                    //
+                    // আপনার existing handle listener থাকলে
+                    // সেটিই মূলত handle movement handle করবে।
+                    // ------------------------------------------
+
+                    // এখানে body scrolling detect করা হচ্ছে।
+                    // ------------------------------------------
+
+                    if (this@apply.hasSelection()) {
+
+                        saveCurrentSelection()
+
+                        beginSelectionScroll(event)
+
+                        return true
+                    }
+
+                    return true
+                }
+
+                // ==================================================
+                // STATE: SCROLLING
+                // ==================================================
+
+                if (touchState ==
+                    TouchState.SCROLLING
+                ) {
+
+                    cancelLongPress()
+
+                    // ------------------------------------------
+                    // Selection থাকলে অবশ্যই preserve করো
+                    // ------------------------------------------
+
+                    maintainSelectionAfterScroll()
+
+                    // ------------------------------------------
+                    // EditText নিজে scrollable হলে:
+                    //
+                    // Finger-এর movement অনুযায়ী scroll করো।
+                    //
+                    // Android-এর native-like behavior-এর জন্য
+                    // vertical movement ব্যবহার করা হচ্ছে।
+                    // ------------------------------------------
+
+                    if (this@apply.canScrollVertically(
+                            -1
+                        ) ||
+                        this@apply.canScrollVertically(
+                            1
+                        )
+                    ) {
+
+                        // Finger উপরে গেলে content উপরে যাবে
+                        // Finger নিচে গেলে content নিচে যাবে
+
+                        val scrollY =
+                            -dy.toInt()
+
+                        if (scrollY != 0) {
+
+                            this@apply.scrollBy(
+                                0,
+                                scrollY
+                            )
+                        }
+                    }
+
+                    // ------------------------------------------
+                    // Selection UI position update
+                    // ------------------------------------------
+
+                    if (selectionWasActiveBeforeScroll &&
+                        this@apply.hasSelection()
+                    ) {
+
                         updateHandlePositionsSafe()
                     }
+
+                    return true
                 }
-                
-                if (this@apply.hasSelection() && !isScrolling && isDragging) {
-                    updateHandlePositionsSafe()
+
+                // ==================================================
+                // STATE: DRAGGING_SELECTION
+                // ==================================================
+
+                if (touchState ==
+                    TouchState.DRAGGING_SELECTION
+                ) {
+
+                    if (this@apply.hasSelection()) {
+
+                        handleDragSelection(
+                            this@apply,
+                            event
+                        )
+
+                        if (!isScrolling) {
+
+                            updateHandlePositionsSafe()
+                        }
+                    }
+
+                    return true
                 }
-                
-                return true
             }
-            
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+
+            // ==================================================
+            // ACTION_UP
+            // ==================================================
+
+            MotionEvent.ACTION_UP -> {
+
+                velocityTracker?.addMovement(event)
+
                 velocityTracker?.recycle()
                 velocityTracker = null
-                
+
                 cancelLongPress()
-                v.parent.requestDisallowInterceptTouchEvent(false)
-                
-                // ✅ সিংেল ট্যাপ ডিটেক্ট - শুধুমাত্র যদি কোনো মুভমেন্ট না হয়
-                if (isSingleTap && !hasMoved && !isSelecting && !isDragging && !scrollConfirmed) {
+
+                v.parent
+                    .requestDisallowInterceptTouchEvent(false)
+
+                // ----------------------------------------------
+                // Single tap
+                //
+                // শুধুমাত্র:
+                // - movement হয়নি
+                // - selection mode হয়নি
+                // - scrolling হয়নি
+                // ----------------------------------------------
+
+                if (touchState ==
+                    TouchState.PRESSED &&
+                    isSingleTap &&
+                    !hasMoved
+                ) {
+
                     if (this@apply.hasSelection()) {
-                        val offset = getOffsetAtPosition(this@apply, lastTouchX, lastTouchY)
-                        if (offset >= 0 && offset <= this@apply.text.length) {
-                            this@apply.setSelection(offset, offset)
+
+                        val offset =
+                            getOffsetAtPosition(
+                                this@apply,
+                                event.x,
+                                event.y
+                            )
+
+                        if (offset >= 0 &&
+                            offset <=
+                            this@apply.text.length
+                        ) {
+
+                            this@apply.setSelection(
+                                offset,
+                                offset
+                            )
                         }
+
                         hideSelectionHandles()
                         hideFloatingActionBar()
-                        isActionBarTemporarilyHidden = false
-                        EmergencyLog.log("Selection cleared by single tap")
+
+                        isActionBarTemporarilyHidden =
+                            false
+
+                        clearSelectionState()
+
+                        EmergencyLog.log(
+                            "Selection cleared by single tap"
+                        )
                     }
                 }
-                
-                // ✅ মুভমেন্ট বা স্ক্রলিং থাকলে সিলেকশন রাখো
-                if ((hasMoved || scrollConfirmed) && this@apply.hasSelection()) {
-                    val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                    if (selected.isNotEmpty()) {
-                        currentSelectedText = selected
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selected)
-                        showSelectionHandles()
-                        updateHandlePositionsImmediate()
-                        Handler(Looper.getMainLooper()).postDelayed({
+
+                // ==================================================
+                // SCROLL শেষ হয়েছে
+                // ==================================================
+
+                if (touchState ==
+                    TouchState.SCROLLING
+                ) {
+
+                    // ------------------------------------------
+                    // Selection range restore
+                    // ------------------------------------------
+
+                    restoreSavedSelection()
+
+                    // ------------------------------------------
+                    // Selection UI restore
+                    // ------------------------------------------
+
+                    if (selectionWasActiveBeforeScroll &&
+                        this@apply.hasSelection()
+                    ) {
+
+                        val start =
+                            this@apply.selectionStart
+
+                        val end =
+                            this@apply.selectionEnd
+
+                        if (start >= 0 &&
+                            end > start
+                        ) {
+
+                            currentSelectedText =
+                                this@apply.text.substring(
+                                    start,
+                                    end
+                                )
+
+                            isActionBarTemporarilyHidden =
+                                false
+
+                            showFloatingActionBar(
+                                currentSelectedText
+                            )
+
+                            showSelectionHandles()
+
                             updateHandlePositionsImmediate()
-                        }, 50)
+
+                            Handler(
+                                Looper.getMainLooper()
+                            ).postDelayed({
+
+                                if (this@apply.hasSelection()) {
+
+                                    updateHandlePositionsImmediate()
+                                }
+
+                            }, 50)
+                        }
+
+                        EmergencyLog.log(
+                            "Scroll finished - selection preserved"
+                        )
                     }
-                    EmergencyLog.log("Movement/Scroll detected - keeping selection")
                 }
-                
-                // সিলেকশন থাকলে হ্যান্ডেল শো করো
-                if (!isSelecting && this@apply.hasSelection() && !isDragging && !isSingleTap && !scrollConfirmed) {
-                    val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                    if (selected.isNotEmpty()) {
-                        currentSelectedText = selected
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selected)
-                        showSelectionHandles()
-                        updateHandlePositionsImmediate()
-                        Handler(Looper.getMainLooper()).postDelayed({
+
+                // ==================================================
+                // Selection drag শেষ
+                // ==================================================
+
+                if (touchState ==
+                    TouchState.DRAGGING_SELECTION
+                ) {
+
+                    if (this@apply.hasSelection()) {
+
+                        val start =
+                            this@apply.selectionStart
+
+                        val end =
+                            this@apply.selectionEnd
+
+                        if (start >= 0 &&
+                            end > start
+                        ) {
+
+                            currentSelectedText =
+                                this@apply.text.substring(
+                                    start,
+                                    end
+                                )
+
+                            isActionBarTemporarilyHidden =
+                                false
+
+                            showFloatingActionBar(
+                                currentSelectedText
+                            )
+
+                            showSelectionHandles()
+
                             updateHandlePositionsImmediate()
-                        }, 50)
+                        }
                     }
-                } else if (isDragging && this@apply.hasSelection()) {
-                    val selected = this@apply.text.substring(this@apply.selectionStart, this@apply.selectionEnd)
-                    if (selected.isNotEmpty()) {
-                        currentSelectedText = selected
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selected)
+                }
+
+                // ==================================================
+                // SELECTING অবস্থায় selection থাকলে
+                // ==================================================
+
+                if (
+                    touchState ==
+                    TouchState.SELECTING &&
+                    this@apply.hasSelection()
+                ) {
+
+                    val start =
+                        this@apply.selectionStart
+
+                    val end =
+                        this@apply.selectionEnd
+
+                    if (start >= 0 &&
+                        end > start
+                    ) {
+
+                        currentSelectedText =
+                            this@apply.text.substring(
+                                start,
+                                end
+                            )
+
+                        isActionBarTemporarilyHidden =
+                            false
+
+                        showFloatingActionBar(
+                            currentSelectedText
+                        )
+
                         showSelectionHandles()
+
                         updateHandlePositionsImmediate()
                     }
                 }
-                
-                isSelecting = false
-                isDragging = false
-                hasMoved = false
+
+                // ----------------------------------------------
+                // Reset touch state
+                //
+                // Selection নিজে clear করা হচ্ছে না।
+                // ----------------------------------------------
+
+                touchState = TouchState.IDLE
+
                 isSingleTap = false
-                scrollConfirmed = false
-                isScrollingDetected = false
+                hasMoved = false
+
+                scrollStarted = false
+
+                selectionWasActiveBeforeScroll = false
+
+                savedSelectionStart = -1
+                savedSelectionEnd = -1
+
+                return true
+            }
+
+            // ==================================================
+            // ACTION_CANCEL
+            // ==================================================
+
+            MotionEvent.ACTION_CANCEL -> {
+
+                velocityTracker?.recycle()
+                velocityTracker = null
+
+                cancelLongPress()
+
+                v.parent
+                    .requestDisallowInterceptTouchEvent(false)
+
+                // ----------------------------------------------
+                // IMPORTANT:
+                //
+                // CANCEL মানে selection clear করা নয়।
+                //
+                // Parent gesture intercept করলেও selection
+                // ধরে রাখা হবে।
+                // ----------------------------------------------
+
+                if (this@apply.hasSelection()) {
+
+                    saveCurrentSelection()
+                }
+
+                // ----------------------------------------------
+                // Selection restore
+                // ----------------------------------------------
+
+                restoreSavedSelection()
+
+                // ----------------------------------------------
+                // UI restore
+                // ----------------------------------------------
+
+                if (this@apply.hasSelection()) {
+
+                    val start =
+                        this@apply.selectionStart
+
+                    val end =
+                        this@apply.selectionEnd
+
+                    if (start >= 0 &&
+                        end > start
+                    ) {
+
+                        currentSelectedText =
+                            this@apply.text.substring(
+                                start,
+                                end
+                            )
+
+                        isActionBarTemporarilyHidden =
+                            false
+
+                        showSelectionHandles()
+
+                        updateHandlePositionsImmediate()
+                    }
+                }
+
+                // ----------------------------------------------
+                // State reset
+                // ----------------------------------------------
+
+                touchState = TouchState.IDLE
+
+                isSingleTap = false
+                hasMoved = false
+
+                scrollStarted = false
+
+                selectionWasActiveBeforeScroll = false
+
+                savedSelectionStart = -1
+                savedSelectionEnd = -1
+
+                // IMPORTANT:
+                // এখানে selection clear করা হচ্ছে না।
+
+                return true
             }
         }
-        return false
-    }
-    
-    private fun cancelLongPress() {
-        val runnable = longPressRunnable
-        if (runnable != null) {
-            longPressHandler.removeCallbacks(runnable)
-            longPressRunnable = null
-        }
+
+        return true
     }
 })
             
