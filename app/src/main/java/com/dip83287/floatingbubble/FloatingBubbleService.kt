@@ -2048,8 +2048,8 @@ setOnTouchListener(object : View.OnTouchListener {
                     this@apply.hasSelection() && 
                     (dx > 200 || dy > 200)) {
                     
-                    isDragging = false
-                    isSingleTap = false
+                    isDragging = true
+                    isSingleTap = true
                     v.parent.requestDisallowInterceptTouchEvent(true)
                     handleDragSelection(this@apply, event)
                     
