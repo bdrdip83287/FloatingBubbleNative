@@ -2492,106 +2492,134 @@ setOnTouchListener(object : View.OnTouchListener {
                 // =================================================
 
                 if (isSingleTap &&
-                    !hasMoved &&
-                    !isSelecting &&
-                    !isScrollingDetected
-                ) {
+    !hasMoved &&
+    !isSelecting &&
+    !isScrollingDetected
+) {
 
-                    if (this@apply.hasSelection()) {
+    // ============================================================
+    // NORMAL EDITING TAP
+    //
+    // OnTouchListener true return করার কারণে EditText-এর
+    // default touch handling আর হচ্ছে না।
+    //
+    // তাই এখানে manually:
+    // Focus + Cursor + Keyboard
+    // চালু করছি।
+    // ============================================================
 
-                        val offset =
-                            getOffsetAtPosition(
-                                this@apply,
-                                event.x,
-                                event.y
-                            )
+    val offset =
+        getOffsetAtPosition(
+            this@apply,
+            event.x,
+            event.y
+        )
 
-                        if (offset >= 0 &&
-                            offset <=
-                            this@apply.text.length
-                        ) {
+    if (offset >= 0 &&
+        offset <= this@apply.text.length
+    ) {
 
-                            this@apply.setSelection(
-                                offset,
-                                offset
-                            )
-                        }
+        // --------------------------------------------------------
+        // Focus
+        // --------------------------------------------------------
 
-                        hideSelectionHandles()
+        this@apply.requestFocus()
 
-                        hideFloatingActionBar()
+        // --------------------------------------------------------
+        // Cursor position
+        // --------------------------------------------------------
 
-                        isActionBarTemporarilyHidden =
-                            false
+        this@apply.setSelection(
+            offset,
+            offset
+        )
 
-                        clearSelectionSnapshot()
+        // --------------------------------------------------------
+        // Existing selection UI hide
+        // --------------------------------------------------------
 
-                        EmergencyLog.log(
-                            "Selection cleared by single tap"
-                        )
-                    }
+        hideSelectionHandles()
 
-                } else {
+        hideFloatingActionBar()
 
-                    // =================================================
-                    // CASE 2:
-                    // Movement / Scroll
-                    //
-                    // Selection থাকবে।
-                    // =================================================
+        isActionBarTemporarilyHidden =
+            false
 
-                    if (hasMoved ||
-                        isScrollingDetected
-                    ) {
+        clearSelectionSnapshot()
 
-                        // ---------------------------------------------
-                        // Snapshot থেকে selection restore
-                        // ---------------------------------------------
+        // --------------------------------------------------------
+        // Keyboard show
+        // --------------------------------------------------------
 
-                        restoreSelectionForScroll()
+        this@apply.post {
 
-                        if (this@apply.hasSelection()) {
+            this@apply.requestFocus()
 
-                            val start =
-                                this@apply.selectionStart
+            val imm =
+                this@apply.context
+                    .getSystemService(
+                        Context.INPUT_METHOD_SERVICE
+                    ) as? InputMethodManager
 
-                            val end =
-                                this@apply.selectionEnd
+            imm?.showSoftInput(
+                this@apply,
+                InputMethodManager.SHOW_IMPLICIT
+            )
+        }
 
-                            if (start >= 0 &&
-                                end > start &&
-                                end <=
-                                this@apply.text.length
-                            ) {
+        EmergencyLog.log(
+            "Normal editing tap: " +
+            "focus + cursor + keyboard requested"
+        )
+    }
 
-                                currentSelectedText =
-                                    this@apply.text.substring(
-                                        start,
-                                        end
-                                    )
+} else {
 
-                                isActionBarTemporarilyHidden =
-                                    false
+    // ============================================================
+    // MOVEMENT / SCROLL
+    // ============================================================
 
-                                // -------------------------------------
-                                // ScrollView scrolling শেষ না হলে
-                                // ScrollView-এর নিজস্ব listener UI
-                                // restore করবে।
-                                // -------------------------------------
+    if (hasMoved ||
+        isScrollingDetected
+    ) {
 
-                                if (!isScrolling) {
+        restoreSelectionForScroll()
 
-                                    updateHandlePositionsSafe()
-                                }
+        if (this@apply.hasSelection()) {
 
-                                EmergencyLog.log(
-                                    "Movement/Scroll finished - " +
-                                    "selection preserved"
-                                )
-                            }
-                        }
-                    }
+            val start =
+                this@apply.selectionStart
+
+            val end =
+                this@apply.selectionEnd
+
+            if (start >= 0 &&
+                end > start &&
+                end <=
+                this@apply.text.length
+            ) {
+
+                currentSelectedText =
+                    this@apply.text.substring(
+                        start,
+                        end
+                    )
+
+                isActionBarTemporarilyHidden =
+                    false
+
+                if (!isScrolling) {
+                    updateHandlePositionsSafe()
                 }
+
+                EmergencyLog.log(
+                    "Movement/Scroll finished - " +
+                    "selection preserved"
+                )
+            }
+        }
+    }
+}
 
                 // =================================================
                 // CASE 3:
