@@ -1457,6 +1457,103 @@ class FloatingBubbleService : Service() {
         return Pair(editText.selectionStart, editText.selectionEnd)
     }
     
+    private fun getSelectionMagnifier(): Magnifier? {
+
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+        return null
+    }
+
+    if (selectionMagnifier == null) {
+
+        val density = resources.displayMetrics.density
+
+        val width =
+            (selectionMagnifierWidthDp * density).toInt()
+
+        val height =
+            (selectionMagnifierHeightDp * density).toInt()
+
+        selectionMagnifier =
+            Magnifier.Builder(editText)
+                .setSize(width, height)
+                .setCornerRadius(12f * density)
+                .setZoom(selectionMagnifierZoom)
+                .build()
+    }
+
+    return selectionMagnifier
+}
+
+private fun showSelectionMagnifier(
+    rawX: Float,
+    rawY: Float
+) {
+
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+        return
+    }
+
+    try {
+
+        val location =
+            IntArray(2)
+
+        editText.getLocationOnScreen(
+            location
+        )
+
+        val localX =
+            rawX - location[0]
+
+        val localY =
+            rawY - location[1]
+
+        val safeX =
+            localX.coerceIn(
+                0f,
+                editText.width.toFloat()
+            )
+
+        val safeY =
+            localY.coerceIn(
+                0f,
+                editText.height.toFloat()
+            )
+
+        getSelectionMagnifier()
+            ?.show(
+                safeX,
+                safeY
+            )
+
+    } catch (e: Exception) {
+
+        EmergencyLog.logException(
+            e,
+            "showSelectionMagnifier"
+        )
+    }
+}
+
+private fun hideSelectionMagnifier() {
+
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+        return
+    }
+
+    try {
+
+        selectionMagnifier?.dismiss()
+
+    } catch (e: Exception) {
+
+        EmergencyLog.logException(
+            e,
+            "hideSelectionMagnifier"
+        )
+    }
+}
+    
     private fun getOffsetAtPosition(editText: EditText, x: Float, y: Float): Int {
         try {
             val currentLayout = editText.layout ?: return -1
@@ -1959,6 +2056,11 @@ setOnTouchListener(object : View.OnTouchListener {
     private var isSingleTap = false
     private var isScrollingDetected = false
     private var longPressRunnable: Runnable? = null
+    private var selectionMagnifier: Magnifier? = null
+
+private val selectionMagnifierZoom = 2.5f
+private val selectionMagnifierWidthDp = 120f
+private val selectionMagnifierHeightDp = 80f
 
     private val longPressHandler =
         Handler(Looper.getMainLooper())
@@ -1970,7 +2072,7 @@ setOnTouchListener(object : View.OnTouchListener {
             this@apply.context
         ).scaledTouchSlop
 
-    
+    private var 
     private var selectionAnchor = -1
 
     private var selectionDragActive = false
