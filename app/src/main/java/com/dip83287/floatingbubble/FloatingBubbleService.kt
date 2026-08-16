@@ -3101,6 +3101,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         false
                     )
 
+
                 if (this@apply.hasSelection()) {
 
                     saveSelectionForScroll()
