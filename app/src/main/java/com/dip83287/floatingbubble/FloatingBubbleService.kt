@@ -900,7 +900,6 @@ class FloatingBubbleService : Service() {
                     .setCornerRadius(
                         12f * density
                     )
-                    .setZoom(2.5f)
                     .build()
         }
     }
@@ -2279,7 +2278,6 @@ setOnTouchListener(object : View.OnTouchListener {
                     .setCornerRadius(
                         12f * density
                     )
-                    .setZoom(2.5f)
                     .build()
         }
     }
