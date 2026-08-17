@@ -1631,20 +1631,46 @@ class FloatingBubbleService : Service() {
             val start = editText.selectionStart
             val startLine = currentLayout.getLineForOffset(start)
             val x = currentLayout.getPrimaryHorizontal(start) + location[0]
-            val y = currentLayout.getLineTop(startLine) + location[1]
-            
-            val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
-            )
-            params.gravity = Gravity.TOP or Gravity.START
-            params.x = x.toInt() - 50
-            params.y = (y - 55).toInt()
+val y = currentLayout.getLineTop(startLine) + location[1]
+
+val params = WindowManager.LayoutParams(
+    WindowManager.LayoutParams.WRAP_CONTENT,
+    WindowManager.LayoutParams.WRAP_CONTENT,
+    if (Build.VERSION.SDK_INT >= 26)
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    else
+        WindowManager.LayoutParams.TYPE_PHONE,
+    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+    PixelFormat.TRANSLUCENT
+)
+
+params.gravity = Gravity.TOP or Gravity.START
+params.x = x.toInt() - 50
+
+// Action Bar-এর actual height মাপা
+actionBarView.measure(
+    View.MeasureSpec.makeMeasureSpec(
+        0,
+        View.MeasureSpec.UNSPECIFIED
+    ),
+    View.MeasureSpec.makeMeasureSpec(
+        0,
+        View.MeasureSpec.UNSPECIFIED
+    )
+)
+
+val actionBarHeight =
+    actionBarView.measuredHeight
+
+// Selection-এর উপরে 15dp gap
+val extraGap =
+    (15 * resources.displayMetrics.density).toInt()
+
+params.y =
+    y.toInt() -
+    actionBarHeight -
+    extraGap
             
             try {
                 actionBarWindowManager?.addView(floatingActionBar, params)
