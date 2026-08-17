@@ -874,15 +874,17 @@ class FloatingBubbleService : Service() {
 
     private var initialSelectionStart = 0
     private var initialSelectionEnd = 0
+
     private var lastUpdateTime = 0L
+    private var lastMagnifierTime = 0L
 
     private var magnifier: Magnifier? = null
 
+    private val frameInterval = 16L
+
     private fun createHandleMagnifier() {
 
-        if (Build.VERSION.SDK_INT <
-            Build.VERSION_CODES.P
-        ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             return
         }
 
@@ -906,14 +908,25 @@ class FloatingBubbleService : Service() {
 
     private fun showHandleMagnifier(
         rawX: Float,
-        rawY: Float
+        rawY: Float,
+        force: Boolean = false
     ) {
 
-        if (Build.VERSION.SDK_INT <
-            Build.VERSION_CODES.P
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return
+        }
+
+        val now =
+            System.currentTimeMillis()
+
+        if (
+            !force &&
+            now - lastMagnifierTime < frameInterval
         ) {
             return
         }
+
+        lastMagnifierTime = now
 
         try {
 
@@ -958,9 +971,7 @@ class FloatingBubbleService : Service() {
 
     private fun hideHandleMagnifier() {
 
-        if (Build.VERSION.SDK_INT <
-            Build.VERSION_CODES.P
-        ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             return
         }
 
@@ -975,6 +986,8 @@ class FloatingBubbleService : Service() {
                 "hideHandleMagnifier"
             )
         }
+
+        lastMagnifierTime = 0L
     }
 
     override fun onTouch(
@@ -992,8 +1005,7 @@ class FloatingBubbleService : Service() {
                 initialSelectionEnd =
                     editText.selectionEnd
 
-                lastUpdateTime =
-                    System.currentTimeMillis()
+                lastUpdateTime = 0L
 
                 if (isLeft) {
                     isDraggingLeftHandle = true
@@ -1005,7 +1017,8 @@ class FloatingBubbleService : Service() {
 
                 showHandleMagnifier(
                     event.rawX,
-                    event.rawY
+                    event.rawY,
+                    true
                 )
 
                 return true
@@ -1013,12 +1026,12 @@ class FloatingBubbleService : Service() {
 
             MotionEvent.ACTION_MOVE -> {
 
-                val currentTime =
+                val now =
                     System.currentTimeMillis()
 
                 if (
-                    currentTime -
-                    lastUpdateTime < 16
+                    now - lastUpdateTime <
+                    frameInterval
                 ) {
 
                     showHandleMagnifier(
@@ -1029,110 +1042,145 @@ class FloatingBubbleService : Service() {
                     return true
                 }
 
-                lastUpdateTime =
-                    currentTime
+                lastUpdateTime = now
 
-                val currentLayout =
-                    editText.layout
+                val layout =
+                    editText.layout ?: return true
 
-                if (currentLayout != null) {
+                val location =
+                    IntArray(2)
 
-                    val editLocation =
-                        IntArray(2)
+                editText.getLocationOnScreen(
+                    location
+                )
 
-                    editText.getLocationOnScreen(
-                        editLocation
+                val textX =
+                    event.rawX -
+                    location[0] +
+                    editText.scrollX
+
+                val textY =
+                    event.rawY -
+                    location[1] +
+                    editText.scrollY
+
+                val safeY =
+                    textY.toInt().coerceIn(
+                        0,
+                        (layout.height - 1)
+                            .coerceAtLeast(0)
                     )
 
-                    val textX =
-                        event.rawX -
-                        editLocation[0] +
-                        editText.scrollX
+                val line =
+                    layout.getLineForVertical(
+                        safeY
+                    )
 
-                    val textY =
-                        event.rawY -
-                        editLocation[1] +
-                        editText.scrollY
+                val offset =
+                    layout.getOffsetForHorizontal(
+                        line,
+                        textX
+                    )
 
-                    val layoutHeight =
-                        currentLayout.height
-                            .coerceAtLeast(1)
+                val newOffset =
+                    offset.coerceIn(
+                        0,
+                        editText.text.length
+                    )
 
-                    val safeY =
-                        textY.toInt()
-                            .coerceIn(
-                                0,
-                                layoutHeight - 1
-                            )
+                if (isLeft) {
 
-                    val line =
-                        currentLayout
-                            .getLineForVertical(
-                                safeY
-                            )
+                    if (
+                        newOffset <
+                        initialSelectionEnd
+                    ) {
 
-                    val offset =
-                        currentLayout
-                            .getOffsetForHorizontal(
-                                line,
-                                textX
-                            )
-
-                    val newOffset =
-                        offset.coerceIn(
-                            0,
-                            editText.text.length
-                        )
-
-                    if (isLeft) {
-
-                        if (
-                            newOffset <
+                        editText.setSelection(
+                            newOffset,
                             initialSelectionEnd
-                        ) {
-
-                            editText.setSelection(
-                                newOffset,
-                                initialSelectionEnd
-                            )
-
-                        } else {
-
-                            editText.setSelection(
-                                initialSelectionEnd,
-                                newOffset
-                            )
-                        }
+                        )
 
                     } else {
 
-                        if (
-                            newOffset >
+                        editText.setSelection(
+                            initialSelectionEnd,
+                            newOffset
+                        )
+                    }
+
+                } else {
+
+                    if (
+                        newOffset >
+                        initialSelectionStart
+                    ) {
+
+                        editText.setSelection(
+                            initialSelectionStart,
+                            newOffset
+                        )
+
+                    } else {
+
+                        editText.setSelection(
+                            newOffset,
                             initialSelectionStart
-                        ) {
-
-                            editText.setSelection(
-                                initialSelectionStart,
-                                newOffset
-                            )
-
-                        } else {
-
-                            editText.setSelection(
-                                newOffset,
-                                initialSelectionStart
-                            )
-                        }
+                        )
                     }
+                }
 
-                    showHandleMagnifier(
-                        event.rawX,
-                        event.rawY
-                    )
+                /*
+                 * Magnifier update throttled.
+                 */
+                showHandleMagnifier(
+                    event.rawX,
+                    event.rawY
+                )
 
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
-                    }
+                /*
+                 * Handle position update throttled.
+                 */
+                if (!isScrolling) {
+                    updateHandlePositionsSafe()
+                }
+
+                /*
+                 * শুধু selected text update করা হচ্ছে।
+                 * FloatingActionBar এখানে recreate করা হচ্ছে না।
+                 */
+                val start =
+                    editText.selectionStart
+
+                val end =
+                    editText.selectionEnd
+
+                if (
+                    start >= 0 &&
+                    end > start &&
+                    end <= editText.text.length
+                ) {
+
+                    currentSelectedText =
+                        editText.text.substring(
+                            start,
+                            end
+                        )
+
+                    isActionBarTemporarilyHidden =
+                        true
+                }
+
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+
+                isDraggingLeftHandle = false
+                isDraggingRightHandle = false
+
+                hideHandleMagnifier()
+
+                if (editText.hasSelection()) {
 
                     val start =
                         editText.selectionStart
@@ -1143,8 +1191,7 @@ class FloatingBubbleService : Service() {
                     if (
                         start >= 0 &&
                         end > start &&
-                        end <=
-                        editText.text.length
+                        end <= editText.text.length
                     ) {
 
                         val selected =
@@ -1161,60 +1208,14 @@ class FloatingBubbleService : Service() {
                             isActionBarTemporarilyHidden =
                                 false
 
-                            if (!isScrolling) {
-
-                                showFloatingActionBar(
-                                    selected
-                                )
-                            }
-                        }
-                    }
-                }
-
-                return true
-            }
-
-            MotionEvent.ACTION_UP -> {
-
-                isDraggingLeftHandle = false
-                isDraggingRightHandle = false
-
-                hideHandleMagnifier()
-
-                if (editText.hasSelection()) {
-
-                    updateHandlePositionsImmediate()
-
-                    val start =
-                        editText.selectionStart
-
-                    val end =
-                        editText.selectionEnd
-
-                    if (
-                        start >= 0 &&
-                        end > start &&
-                        end <=
-                        editText.text.length
-                    ) {
-
-                        val selected =
-                            editText.text.substring(
-                                start,
-                                end
+                            showFloatingActionBar(
+                                selected
                             )
 
-                        currentSelectedText =
-                            selected
+                            showSelectionHandles()
 
-                        isActionBarTemporarilyHidden =
-                            false
-
-                        showFloatingActionBar(
-                            selected
-                        )
-
-                        showSelectionHandles()
+                            updateHandlePositionsImmediate()
+                        }
                     }
                 }
 
@@ -2258,6 +2259,11 @@ setOnTouchListener(object : View.OnTouchListener {
 
     private var selectionMagnifier: Magnifier? = null
 
+    private var lastMagnifierTime = 0L
+    private var lastHandleUpdateTime = 0L
+
+    private val frameInterval = 16L
+
     private fun createMagnifier() {
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
@@ -2282,49 +2288,53 @@ setOnTouchListener(object : View.OnTouchListener {
         }
     }
 
-    private fun showMagnifier(
+    private fun showSelectionMagnifier(
         rawX: Float,
-        rawY: Float
+        rawY: Float,
+        force: Boolean = false
     ) {
 
-        if (Build.VERSION.SDK_INT <
-            Build.VERSION_CODES.P
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return
+        }
+
+        val now = System.currentTimeMillis()
+
+        if (!force &&
+            now - lastMagnifierTime < frameInterval
         ) {
             return
         }
+
+        lastMagnifierTime = now
 
         try {
 
             createMagnifier()
 
-            val location =
-                IntArray(2)
+            val location = IntArray(2)
 
-            this@apply.getLocationOnScreen(
-                location
-            )
+            this@apply.getLocationOnScreen(location)
 
             val localX =
-                rawX - location[0]
-
-            val localY =
-                rawY - location[1]
-
-            val safeX =
-                localX.coerceIn(
+                (
+                    rawX - location[0]
+                ).coerceIn(
                     0f,
                     this@apply.width.toFloat()
                 )
 
-            val safeY =
-                localY.coerceIn(
+            val localY =
+                (
+                    rawY - location[1]
+                ).coerceIn(
                     0f,
                     this@apply.height.toFloat()
                 )
 
             selectionMagnifier?.show(
-                safeX,
-                safeY
+                localX,
+                localY
             )
 
         } catch (e: Exception) {
@@ -2336,11 +2346,9 @@ setOnTouchListener(object : View.OnTouchListener {
         }
     }
 
-    private fun hideMagnifier() {
+    private fun hideSelectionMagnifier() {
 
-        if (Build.VERSION.SDK_INT <
-            Build.VERSION_CODES.P
-        ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             return
         }
 
@@ -2355,6 +2363,53 @@ setOnTouchListener(object : View.OnTouchListener {
                 "hideSelectionMagnifier"
             )
         }
+
+        lastMagnifierTime = 0L
+    }
+
+    private fun updateHandlesThrottled() {
+
+        val now = System.currentTimeMillis()
+
+        if (now - lastHandleUpdateTime < frameInterval) {
+            return
+        }
+
+        lastHandleUpdateTime = now
+
+        if (!isScrolling) {
+            updateHandlePositionsSafe()
+        }
+    }
+
+    private fun updateSelectedTextDuringDrag() {
+
+        val start = this@apply.selectionStart
+        val end = this@apply.selectionEnd
+
+        if (
+            start < 0 ||
+            end < 0 ||
+            start == end ||
+            start > this@apply.text.length ||
+            end > this@apply.text.length
+        ) {
+            return
+        }
+
+        val selected =
+            this@apply.text.substring(
+                start,
+                end
+            )
+
+        if (selected.isEmpty()) {
+            return
+        }
+
+        currentSelectedText = selected
+
+        isActionBarTemporarilyHidden = true
     }
 
     override fun onTouch(
@@ -2380,8 +2435,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 velocityTracker?.addMovement(event)
 
                 cancelLongPress()
-
-                hideMagnifier()
+                hideSelectionMagnifier()
 
                 isSelecting = false
                 isDragging = false
@@ -2451,10 +2505,6 @@ setOnTouchListener(object : View.OnTouchListener {
                         false
                     )
 
-                /*
-                 * EditText-কে event process করতে দেওয়া হচ্ছে।
-                 * এতে normal typing/cursor/keyboard কাজ করবে।
-                 */
                 return false
             }
 
@@ -2490,10 +2540,6 @@ setOnTouchListener(object : View.OnTouchListener {
                     isSingleTap = false
                 }
 
-                /*
-                 * Long press হওয়ার আগে scrolling হলে
-                 * selection ধরে রাখা হবে।
-                 */
                 if (
                     !isScrollingDetected &&
                     !isSelecting &&
@@ -2532,27 +2578,17 @@ setOnTouchListener(object : View.OnTouchListener {
                         isSingleTap = false
 
                         cancelLongPress()
-                        hideMagnifier()
+                        hideSelectionMagnifier()
 
                         v.parent
                             .requestDisallowInterceptTouchEvent(
                                 false
                             )
 
-                        EmergencyLog.log(
-                            "Scroll detected - " +
-                            "distance=$totalDistance, " +
-                            "velocity=$velocity, " +
-                            "moves=$moveCount"
-                        )
-
                         return true
                     }
                 }
 
-                /*
-                 * Long press + drag selection.
-                 */
                 if (
                     !isScrollingDetected &&
                     !scrollConfirmed &&
@@ -2573,32 +2609,37 @@ setOnTouchListener(object : View.OnTouchListener {
                         event
                     )
 
+                    updateSelectedTextDuringDrag()
+
                     /*
-                     * Magnifier finger-এর বর্তমান
-                     * position-এ থাকবে।
+                     * Magnifier এবং handle update
+                     * সর্বোচ্চ ~60 FPS।
                      */
-                    showMagnifier(
+                    showSelectionMagnifier(
                         event.rawX,
                         event.rawY
                     )
 
-                    if (!isScrolling) {
-                        updateHandlePositionsSafe()
-                    }
+                    updateHandlesThrottled()
+
+                    return true
                 }
 
                 if (
-                    this@apply.hasSelection() &&
-                    !isScrolling &&
-                    isDragging
+                    isDragging &&
+                    this@apply.hasSelection()
                 ) {
 
-                    updateHandlePositionsSafe()
+                    updateSelectedTextDuringDrag()
 
-                    showMagnifier(
+                    showSelectionMagnifier(
                         event.rawX,
                         event.rawY
                     )
+
+                    updateHandlesThrottled()
+
+                    return true
                 }
 
                 return true
@@ -2610,18 +2651,13 @@ setOnTouchListener(object : View.OnTouchListener {
                 velocityTracker = null
 
                 cancelLongPress()
-
-                hideMagnifier()
+                hideSelectionMagnifier()
 
                 v.parent
                     .requestDisallowInterceptTouchEvent(
                         false
                     )
 
-                /*
-                 * শুধুমাত্র pure single tap হলে
-                 * selection clear হবে।
-                 */
                 if (
                     isSingleTap &&
                     !hasMoved &&
@@ -2656,56 +2692,49 @@ setOnTouchListener(object : View.OnTouchListener {
 
                         isActionBarTemporarilyHidden =
                             false
-
-                        EmergencyLog.log(
-                            "Selection cleared by single tap"
-                        )
                     }
                 }
 
-                /*
-                 * Movement বা scrolling হলে
-                 * selection preserve হবে।
-                 */
                 if (
                     (hasMoved || scrollConfirmed) &&
                     this@apply.hasSelection()
                 ) {
 
-                    val selected =
-                        this@apply.text.substring(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
+                    val start =
+                        this@apply.selectionStart
 
-                    if (selected.isNotEmpty()) {
+                    val end =
+                        this@apply.selectionEnd
 
-                        currentSelectedText =
-                            selected
+                    if (
+                        start >= 0 &&
+                        end > start &&
+                        end <= this@apply.text.length
+                    ) {
 
-                        isActionBarTemporarilyHidden =
-                            false
+                        val selected =
+                            this@apply.text.substring(
+                                start,
+                                end
+                            )
 
-                        showFloatingActionBar(
-                            selected
-                        )
+                        if (selected.isNotEmpty()) {
 
-                        showSelectionHandles()
+                            currentSelectedText =
+                                selected
 
-                        updateHandlePositionsImmediate()
+                            isActionBarTemporarilyHidden =
+                                false
 
-                        Handler(
-                            Looper.getMainLooper()
-                        ).postDelayed({
+                            showFloatingActionBar(
+                                selected
+                            )
+
+                            showSelectionHandles()
 
                             updateHandlePositionsImmediate()
-
-                        }, 50)
+                        }
                     }
-
-                    EmergencyLog.log(
-                        "Movement/Scroll detected - keeping selection"
-                    )
                 }
 
                 if (
@@ -2716,63 +2745,40 @@ setOnTouchListener(object : View.OnTouchListener {
                     !scrollConfirmed
                 ) {
 
-                    val selected =
-                        this@apply.text.substring(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
+                    val start =
+                        this@apply.selectionStart
 
-                    if (selected.isNotEmpty()) {
+                    val end =
+                        this@apply.selectionEnd
 
-                        currentSelectedText =
-                            selected
+                    if (
+                        start >= 0 &&
+                        end > start &&
+                        end <= this@apply.text.length
+                    ) {
 
-                        isActionBarTemporarilyHidden =
-                            false
+                        val selected =
+                            this@apply.text.substring(
+                                start,
+                                end
+                            )
 
-                        showFloatingActionBar(
-                            selected
-                        )
+                        if (selected.isNotEmpty()) {
 
-                        showSelectionHandles()
+                            currentSelectedText =
+                                selected
 
-                        updateHandlePositionsImmediate()
+                            isActionBarTemporarilyHidden =
+                                false
 
-                        Handler(
-                            Looper.getMainLooper()
-                        ).postDelayed({
+                            showFloatingActionBar(
+                                selected
+                            )
+
+                            showSelectionHandles()
 
                             updateHandlePositionsImmediate()
-
-                        }, 50)
-                    }
-
-                } else if (
-                    isDragging &&
-                    this@apply.hasSelection()
-                ) {
-
-                    val selected =
-                        this@apply.text.substring(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
-
-                    if (selected.isNotEmpty()) {
-
-                        currentSelectedText =
-                            selected
-
-                        isActionBarTemporarilyHidden =
-                            false
-
-                        showFloatingActionBar(
-                            selected
-                        )
-
-                        showSelectionHandles()
-
-                        updateHandlePositionsImmediate()
+                        }
                     }
                 }
 
@@ -2792,7 +2798,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 velocityTracker = null
 
                 cancelLongPress()
-                hideMagnifier()
+                hideSelectionMagnifier()
 
                 v.parent
                     .requestDisallowInterceptTouchEvent(
@@ -2825,7 +2831,7 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 })
 
-            
+// -------INTERVEL-----            
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 
