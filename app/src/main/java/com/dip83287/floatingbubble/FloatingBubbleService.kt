@@ -868,85 +868,374 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
     
-    inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-        private var initialTouchX = 0f
-        private var initialSelectionStart = 0
-        private var initialSelectionEnd = 0
-        private var lastUpdateTime = 0L
-        
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialTouchX = event.rawX
-                    initialSelectionStart = editText.selectionStart
-                    initialSelectionEnd = editText.selectionEnd
-                    lastUpdateTime = System.currentTimeMillis()
-                    
-                    if (isLeft) {
-                        isDraggingLeftHandle = true
-                    } else {
-                        isDraggingRightHandle = true
-                    }
-                    return true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastUpdateTime < 16) {
-                        return true
-                    }
-                    lastUpdateTime = currentTime
-                    
-                    val currentLayout = editText.layout
-                    
-                    if (currentLayout != null) {
-                        val editLocation = IntArray(2)
-                        editText.getLocationOnScreen(editLocation)
-                        
-                        val textX = event.rawX - editLocation[0] + editText.scrollX
-                        val textY = event.rawY - editLocation[1] + editText.scrollY
-                        
-                        val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
-                        val offset = currentLayout.getOffsetForHorizontal(line, textX)
-                        val newOffset = offset.coerceIn(0, editText.text.length)
-                        
-                        if (isLeft) {
-                            if (newOffset < initialSelectionEnd) {
-                                editText.setSelection(newOffset, initialSelectionEnd)
-                            } else {
-                                editText.setSelection(initialSelectionEnd, newOffset)
-                            }
-                        } else {
-                            if (newOffset > initialSelectionStart) {
-                                editText.setSelection(initialSelectionStart, newOffset)
-                            } else {
-                                editText.setSelection(newOffset, initialSelectionStart)
-                            }
-                        }
-                        
-                        if (!isScrolling) {
-                            updateHandlePositionsSafe()
-                        }
-                        
-                        val (start, end) = getSelection()
-                        if (start != end && start >= 0 && end <= editText.text.length) {
-                            val selected = editText.text.substring(start, end)
-                            if (selected.isNotEmpty()) {
-                                currentSelectedText = selected
-                                showFloatingActionBar(selected)
-                            }
-                        }
-                    }
-                    return true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    isDraggingLeftHandle = false
-                    isDraggingRightHandle = false
-                    return true
-                }
-            }
-            return false
+    inner class HandleTouchListener(
+    private val isLeft: Boolean
+) : View.OnTouchListener {
+
+    private var initialSelectionStart = 0
+    private var initialSelectionEnd = 0
+    private var lastUpdateTime = 0L
+
+    private var magnifier: Magnifier? = null
+
+    private fun createHandleMagnifier() {
+
+        if (Build.VERSION.SDK_INT <
+            Build.VERSION_CODES.P
+        ) {
+            return
+        }
+
+        if (magnifier == null) {
+
+            val density =
+                resources.displayMetrics.density
+
+            magnifier =
+                Magnifier.Builder(editText)
+                    .setSize(
+                        (120 * density).toInt(),
+                        (80 * density).toInt()
+                    )
+                    .setCornerRadius(
+                        12f * density
+                    )
+                    .setZoom(2.5f)
+                    .build()
         }
     }
+
+    private fun showHandleMagnifier(
+        rawX: Float,
+        rawY: Float
+    ) {
+
+        if (Build.VERSION.SDK_INT <
+            Build.VERSION_CODES.P
+        ) {
+            return
+        }
+
+        try {
+
+            createHandleMagnifier()
+
+            val location =
+                IntArray(2)
+
+            editText.getLocationOnScreen(
+                location
+            )
+
+            val localX =
+                (
+                    rawX - location[0]
+                ).coerceIn(
+                    0f,
+                    editText.width.toFloat()
+                )
+
+            val localY =
+                (
+                    rawY - location[1]
+                ).coerceIn(
+                    0f,
+                    editText.height.toFloat()
+                )
+
+            magnifier?.show(
+                localX,
+                localY
+            )
+
+        } catch (e: Exception) {
+
+            EmergencyLog.logException(
+                e,
+                "showHandleMagnifier"
+            )
+        }
+    }
+
+    private fun hideHandleMagnifier() {
+
+        if (Build.VERSION.SDK_INT <
+            Build.VERSION_CODES.P
+        ) {
+            return
+        }
+
+        try {
+
+            magnifier?.dismiss()
+
+        } catch (e: Exception) {
+
+            EmergencyLog.logException(
+                e,
+                "hideHandleMagnifier"
+            )
+        }
+    }
+
+    override fun onTouch(
+        v: View,
+        event: MotionEvent
+    ): Boolean {
+
+        when (event.actionMasked) {
+
+            MotionEvent.ACTION_DOWN -> {
+
+                initialSelectionStart =
+                    editText.selectionStart
+
+                initialSelectionEnd =
+                    editText.selectionEnd
+
+                lastUpdateTime =
+                    System.currentTimeMillis()
+
+                if (isLeft) {
+                    isDraggingLeftHandle = true
+                } else {
+                    isDraggingRightHandle = true
+                }
+
+                editText.requestFocus()
+
+                showHandleMagnifier(
+                    event.rawX,
+                    event.rawY
+                )
+
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+
+                val currentTime =
+                    System.currentTimeMillis()
+
+                if (
+                    currentTime -
+                    lastUpdateTime < 16
+                ) {
+
+                    showHandleMagnifier(
+                        event.rawX,
+                        event.rawY
+                    )
+
+                    return true
+                }
+
+                lastUpdateTime =
+                    currentTime
+
+                val currentLayout =
+                    editText.layout
+
+                if (currentLayout != null) {
+
+                    val editLocation =
+                        IntArray(2)
+
+                    editText.getLocationOnScreen(
+                        editLocation
+                    )
+
+                    val textX =
+                        event.rawX -
+                        editLocation[0] +
+                        editText.scrollX
+
+                    val textY =
+                        event.rawY -
+                        editLocation[1] +
+                        editText.scrollY
+
+                    val layoutHeight =
+                        currentLayout.height
+                            .coerceAtLeast(1)
+
+                    val safeY =
+                        textY.toInt()
+                            .coerceIn(
+                                0,
+                                layoutHeight - 1
+                            )
+
+                    val line =
+                        currentLayout
+                            .getLineForVertical(
+                                safeY
+                            )
+
+                    val offset =
+                        currentLayout
+                            .getOffsetForHorizontal(
+                                line,
+                                textX
+                            )
+
+                    val newOffset =
+                        offset.coerceIn(
+                            0,
+                            editText.text.length
+                        )
+
+                    if (isLeft) {
+
+                        if (
+                            newOffset <
+                            initialSelectionEnd
+                        ) {
+
+                            editText.setSelection(
+                                newOffset,
+                                initialSelectionEnd
+                            )
+
+                        } else {
+
+                            editText.setSelection(
+                                initialSelectionEnd,
+                                newOffset
+                            )
+                        }
+
+                    } else {
+
+                        if (
+                            newOffset >
+                            initialSelectionStart
+                        ) {
+
+                            editText.setSelection(
+                                initialSelectionStart,
+                                newOffset
+                            )
+
+                        } else {
+
+                            editText.setSelection(
+                                newOffset,
+                                initialSelectionStart
+                            )
+                        }
+                    }
+
+                    showHandleMagnifier(
+                        event.rawX,
+                        event.rawY
+                    )
+
+                    if (!isScrolling) {
+                        updateHandlePositionsSafe()
+                    }
+
+                    val start =
+                        editText.selectionStart
+
+                    val end =
+                        editText.selectionEnd
+
+                    if (
+                        start >= 0 &&
+                        end > start &&
+                        end <=
+                        editText.text.length
+                    ) {
+
+                        val selected =
+                            editText.text.substring(
+                                start,
+                                end
+                            )
+
+                        if (selected.isNotEmpty()) {
+
+                            currentSelectedText =
+                                selected
+
+                            isActionBarTemporarilyHidden =
+                                false
+
+                            if (!isScrolling) {
+
+                                showFloatingActionBar(
+                                    selected
+                                )
+                            }
+                        }
+                    }
+                }
+
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+
+                isDraggingLeftHandle = false
+                isDraggingRightHandle = false
+
+                hideHandleMagnifier()
+
+                if (editText.hasSelection()) {
+
+                    updateHandlePositionsImmediate()
+
+                    val start =
+                        editText.selectionStart
+
+                    val end =
+                        editText.selectionEnd
+
+                    if (
+                        start >= 0 &&
+                        end > start &&
+                        end <=
+                        editText.text.length
+                    ) {
+
+                        val selected =
+                            editText.text.substring(
+                                start,
+                                end
+                            )
+
+                        currentSelectedText =
+                            selected
+
+                        isActionBarTemporarilyHidden =
+                            false
+
+                        showFloatingActionBar(
+                            selected
+                        )
+
+                        showSelectionHandles()
+                    }
+                }
+
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+
+                isDraggingLeftHandle = false
+                isDraggingRightHandle = false
+
+                hideHandleMagnifier()
+
+                return true
+            }
+        }
+
+        return false
+    }
+}
     
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
