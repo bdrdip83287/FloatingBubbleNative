@@ -1665,7 +1665,7 @@ val actionBarHeight =
 
 // Selection-এর উপরে 15dp gap
 val extraGap =
-    (30 * resources.displayMetrics.density).toInt()
+    (50 * resources.displayMetrics.density).toInt()
 
 params.y =
     y.toInt() -
