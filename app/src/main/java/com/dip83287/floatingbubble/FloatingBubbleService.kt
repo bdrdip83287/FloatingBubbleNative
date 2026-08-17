@@ -894,8 +894,8 @@ class FloatingBubbleService : Service() {
             magnifier =
                 Magnifier.Builder(editText)
                     .setSize(
-                        (120 * density).toInt(),
-                        (80 * density).toInt()
+                        (80 * density).toInt(),
+                        (50 * density).toInt()
                     )
                     .setCornerRadius(
                         12f * density
@@ -2272,8 +2272,8 @@ setOnTouchListener(object : View.OnTouchListener {
             selectionMagnifier =
                 Magnifier.Builder(this@apply)
                     .setSize(
-                        (120 * density).toInt(),
-                        (80 * density).toInt()
+                        (80 * density).toInt(),
+                        (50 * density).toInt()
                     )
                     .setCornerRadius(
                         12f * density
