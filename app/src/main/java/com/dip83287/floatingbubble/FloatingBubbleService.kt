@@ -90,6 +90,10 @@ class FloatingBubbleService : Service() {
 
     private var deleteZoneView: View? = null
     private var isInDeleteZone = false
+    private var deleteZoneAnimator: ValueAnimator? = null
+private var deleteZoneHovered = false
+
+private val DELETE_ZONE_HOVER_SCALE = 1.25f
     private var flingAnimator: ValueAnimator? = null
 
     private var velocityTracker: VelocityTracker? = null
@@ -271,59 +275,249 @@ class FloatingBubbleService : Service() {
     }
 
     private fun createDeleteZone() {
-        try {
-            val zone = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                val shape = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.RED)
-                }
-                background = shape
-                setPadding(30, 30, 30, 30)
+    try {
+        val zone = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            pivotX = DELETE_ZONE_SIZE / 2f
+            pivotY = DELETE_ZONE_SIZE / 2f
+
+            val shape = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.RED)
             }
 
-            val cross = TextView(this).apply {
-                text = "✕"
-                textSize = 35f
-                setTextColor(Color.WHITE)
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                gravity = Gravity.CENTER
-                setPadding(0, 0, 0, 0)
-            }
-            zone.addView(cross)
-
-            val params = WindowManager.LayoutParams(
-                DELETE_ZONE_SIZE, DELETE_ZONE_SIZE,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT
-            )
-            params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = 150
-            zone.visibility = View.GONE
-            deleteZoneView = zone
-            windowManager.addView(deleteZoneView, params)
-            EmergencyLog.log("Delete zone created")
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "createDeleteZone")
+            background = shape
+            setPadding(30, 30, 30, 30)
         }
+
+        val cross = TextView(this).apply {
+            text = "✕"
+            textSize = 35f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 0)
+        }
+
+        zone.addView(cross)
+
+        val params = WindowManager.LayoutParams(
+            DELETE_ZONE_SIZE,
+            DELETE_ZONE_SIZE,
+            if (Build.VERSION.SDK_INT >= 26)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+
+        params.gravity =
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+
+        params.y = 150
+
+        zone.visibility = View.GONE
+        zone.scaleX = 1f
+        zone.scaleY = 1f
+
+        deleteZoneView = zone
+
+        windowManager.addView(
+            deleteZoneView,
+            params
+        )
+
+        EmergencyLog.log("Delete zone created")
+
+    } catch (e: Exception) {
+        EmergencyLog.logException(
+            e,
+            "createDeleteZone"
+        )
     }
+}
 
     private fun showDeleteZone() {
-        if (deleteZoneView?.visibility != View.VISIBLE) {
-            deleteZoneView?.visibility = View.VISIBLE
-            EmergencyLog.log("Delete zone shown")
+
+    deleteZoneAnimator?.cancel()
+
+    deleteZoneView?.apply {
+
+        visibility = View.VISIBLE
+
+        if (!deleteZoneHovered) {
+            scaleX = 1f
+            scaleY = 1f
         }
     }
 
-    private fun hideDeleteZone() {
-        if (deleteZoneView?.visibility != View.GONE) {
-            deleteZoneView?.visibility = View.GONE
-            EmergencyLog.log("Delete zone hidden")
-        }
+    EmergencyLog.log("Delete zone shown")
+}
+
+private fun hideDeleteZone() {
+
+    deleteZoneAnimator?.cancel()
+    deleteZoneAnimator = null
+
+    deleteZoneHovered = false
+    isInDeleteZone = false
+
+    deleteZoneView?.animate()
+        ?.scaleX(1f)
+        ?.scaleY(1f)
+        ?.setDuration(120L)
+        ?.start()
+
+    deleteZoneView?.visibility = View.GONE
+
+    EmergencyLog.log("Delete zone hidden")
+}
+
+
+private fun setDeleteZoneHovered(hovered: Boolean) {
+
+    if (deleteZoneHovered == hovered) {
+        return
     }
+
+    deleteZoneHovered = hovered
+    isInDeleteZone = hovered
+
+    deleteZoneAnimator?.cancel()
+
+    val targetScale =
+        if (hovered) {
+            DELETE_ZONE_HOVER_SCALE
+        } else {
+            1f
+        }
+
+    deleteZoneAnimator =
+        ValueAnimator.ofFloat(
+            deleteZoneView?.scaleX ?: 1f,
+            targetScale
+        ).apply {
+
+            duration = 140L
+
+            interpolator =
+                DecelerateInterpolator()
+
+            addUpdateListener { animator ->
+
+                val scale =
+                    animator.animatedValue as Float
+
+                deleteZoneView?.scaleX = scale
+                deleteZoneView?.scaleY = scale
+            }
+
+            addListener(
+                object : Animator.AnimatorListener {
+
+                    override fun onAnimationStart(
+                        animation: Animator
+                    ) {}
+
+                    override fun onAnimationRepeat(
+                        animation: Animator
+                    ) {}
+
+                    override fun onAnimationCancel(
+                        animation: Animator
+                    ) {}
+
+                    override fun onAnimationEnd(
+                        animation: Animator
+                    ) {
+
+                        deleteZoneAnimator = null
+                    }
+                }
+            )
+
+            start()
+        }
+
+    EmergencyLog.log(
+        if (hovered)
+            "Delete zone hover ON"
+        else
+            "Delete zone hover OFF"
+    )
+}
+
+private fun checkBubbleDeleteZoneHover(
+    bubbleParams: WindowManager.LayoutParams,
+    displayMetrics: android.util.DisplayMetrics
+) {
+
+    val zoneView = deleteZoneView
+        ?: return
+
+    if (zoneView.visibility != View.VISIBLE) {
+        return
+    }
+
+    val zoneLocation = IntArray(2)
+
+    zoneView.getLocationOnScreen(
+        zoneLocation
+    )
+
+    val zoneCenterX =
+        zoneLocation[0] +
+        zoneView.width / 2f
+
+    val zoneCenterY =
+        zoneLocation[1] +
+        zoneView.height / 2f
+
+    val bubbleCenterX =
+        bubbleParams.x +
+        BUBBLE_SIZE / 2f
+
+    val bubbleCenterY =
+        bubbleParams.y +
+        BUBBLE_SIZE / 2f
+
+    val dx =
+        bubbleCenterX - zoneCenterX
+
+    val dy =
+        bubbleCenterY - zoneCenterY
+
+    val distance =
+        sqrt(
+            dx * dx +
+            dy * dy
+        )
+
+    /*
+     * Normal zone radius + bubble radius
+     * ব্যবহার করা হচ্ছে যাতে Bubble-এর কেন্দ্র
+     * Zone-এর যথেষ্ট ভিতরে গেলে hover হয়।
+     */
+    val baseRadius =
+        DELETE_ZONE_SIZE / 2f
+
+    val hoverRadius =
+        baseRadius *
+        DELETE_ZONE_HOVER_SCALE
+
+    val bubbleRadius =
+        BUBBLE_SIZE / 2f
+
+    val deleteThreshold =
+        hoverRadius + bubbleRadius * 0.35f
+
+    val inside =
+        distance <= deleteThreshold
+
+    setDeleteZoneHovered(inside)
+}
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
@@ -426,29 +620,37 @@ class FloatingBubbleService : Service() {
     }
 
     private fun setupBubbleTouchListener(
-        params: WindowManager.LayoutParams,
-        displayMetrics: android.util.DisplayMetrics
-    ) {
-        bubbleView?.setOnTouchListener(object : View.OnTouchListener {
+    params: WindowManager.LayoutParams,
+    displayMetrics: android.util.DisplayMetrics
+) {
+
+    bubbleView?.setOnTouchListener(
+        object : View.OnTouchListener {
 
             private var initialX = 0
             private var initialY = 0
+
             private var touchX = 0f
             private var touchY = 0f
 
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
+            override fun onTouch(
+                v: View,
+                event: MotionEvent
+            ): Boolean {
 
                 velocityTracker ?: run {
-                    velocityTracker = VelocityTracker.obtain()
+                    velocityTracker =
+                        VelocityTracker.obtain()
                 }
 
                 velocityTracker?.addMovement(event)
 
-                when (event.action) {
+                when (event.actionMasked) {
 
                     MotionEvent.ACTION_DOWN -> {
+
                         showDeleteZone()
-                        
+
                         flingAnimator?.cancel()
 
                         initialX = params.x
@@ -458,80 +660,137 @@ class FloatingBubbleService : Service() {
                         touchY = event.rawY
 
                         isInDeleteZone = false
+                        deleteZoneHovered = false
 
                         return true
                     }
 
                     MotionEvent.ACTION_MOVE -> {
 
-                        val dx = event.rawX - touchX
-                        val dy = event.rawY - touchY
+                        val dx =
+                            event.rawX - touchX
 
-                        params.x = initialX + dx.toInt()
-                        params.y = initialY + dy.toInt()
+                        val dy =
+                            event.rawY - touchY
 
-                        val screenHeight = displayMetrics.heightPixels
-                        val deleteZoneY = screenHeight - DELETE_ZONE_SIZE - 80
+                        params.x =
+                            initialX + dx.toInt()
 
-                        if (params.y + BUBBLE_SIZE > deleteZoneY) {
-                            if (!isInDeleteZone) {
-                                isInDeleteZone = true
-                                showDeleteZone()
-                                EmergencyLog.log("Entered delete zone")
-                            }
-                        } else {
-                            if (isInDeleteZone) {
-                                isInDeleteZone = false
-                                EmergencyLog.log("Left delete zone")
-                            }
+                        params.y =
+                            initialY + dy.toInt()
+
+                        /*
+                         * প্রকৃত Delete Zone circle
+                         * অনুযায়ী hover detection।
+                         */
+                        checkBubbleDeleteZoneHover(
+                            params,
+                            displayMetrics
+                        )
+
+                        try {
+
+                            windowManager.updateViewLayout(
+                                bubbleView!!,
+                                params
+                            )
+
+                        } catch (e: Exception) {
+
+                            EmergencyLog.logException(
+                                e,
+                                "Bubble move update"
+                            )
                         }
-
-                        windowManager.updateViewLayout(bubbleView!!, params)
 
                         return true
                     }
 
                     MotionEvent.ACTION_UP -> {
+
+                        val wasInDeleteZone =
+                            isInDeleteZone
+
                         hideDeleteZone()
 
-                        if (isInDeleteZone) {
-                            EmergencyLog.log("Bubble deleted via delete zone")
+                        /*
+                         * Finger তোলার মুহূর্তে যদি Bubble
+                         * Delete Zone-এর ভিতরে থাকে,
+                         * তখনই delete হবে।
+                         */
+                        if (wasInDeleteZone) {
+
+                            EmergencyLog.log(
+                                "Bubble deleted via delete zone"
+                            )
+
                             resetFirstTimeFlag()
                             deleteBubble()
+
                             return true
                         }
 
-                        val deltaX = abs(event.rawX - touchX)
-                        val deltaY = abs(event.rawY - touchY)
+                        val deltaX =
+                            abs(
+                                event.rawX - touchX
+                            )
 
-                        if (deltaX < 10 && deltaY < 10) {
+                        val deltaY =
+                            abs(
+                                event.rawY - touchY
+                            )
+
+                        /*
+                         * Normal tap.
+                         */
+                        if (
+                            deltaX < 10 &&
+                            deltaY < 10
+                        ) {
+
                             expandToNotePad()
+
                             return true
                         }
 
-                        velocityTracker?.computeCurrentVelocity(1000)
+                        velocityTracker
+                            ?.computeCurrentVelocity(1000)
 
-                        velocityY = velocityTracker?.yVelocity ?: 0f
+                        velocityY =
+                            velocityTracker?.yVelocity
+                                ?: 0f
 
-                        velocityTracker?.recycle()
+                        velocityTracker
+                            ?.recycle()
+
                         velocityTracker = null
 
-                        applyStableDockPhysics(params, displayMetrics)
+                        applyStableDockPhysics(
+                            params,
+                            displayMetrics
+                        )
 
                         return true
                     }
 
                     MotionEvent.ACTION_CANCEL -> {
+
                         hideDeleteZone()
-                        velocityTracker?.recycle()
+
+                        velocityTracker
+                            ?.recycle()
+
                         velocityTracker = null
+
+                        return true
                     }
                 }
 
                 return false
             }
-        })
-    }
+        }
+    )
+}
 
     private fun setupBubbleLongClickListener() {
         bubbleView?.setOnLongClickListener {
@@ -1665,7 +1924,7 @@ val actionBarHeight =
 
 // Selection-এর উপরে 15dp gap
 val extraGap =
-    (50 * resources.displayMetrics.density).toInt()
+    (60 * resources.displayMetrics.density).toInt()
 
 params.y =
     y.toInt() -
