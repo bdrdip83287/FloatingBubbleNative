@@ -376,8 +376,9 @@ private fun hideDeleteZone() {
 }
 
 
-private fun setDeleteZoneHovered(hovered: Boolean) {
-
+private fun setDeleteZoneHovered(
+    hovered: Boolean
+) {
     if (deleteZoneHovered == hovered) {
         return
     }
@@ -389,7 +390,9 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
 
     val zone = deleteZoneView ?: return
 
-    val startScale = zone.scaleX
+    val startScale =
+        zone.scaleX
+
     val targetScale =
         if (hovered) {
             DELETE_ZONE_HOVER_SCALE
@@ -405,7 +408,8 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
 
             duration = 180L
 
-            interpolator = DecelerateInterpolator()
+            interpolator =
+                DecelerateInterpolator()
 
             addUpdateListener { animator ->
 
@@ -415,7 +419,6 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
                 zone.scaleX = scale
                 zone.scaleY = scale
 
-                // scale অনুযায়ী visual size নিশ্চিত রাখা
                 zone.invalidate()
             }
 
@@ -451,10 +454,13 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
         }
 
     EmergencyLog.log(
-        if (hovered)
-            "Delete zone hover ON - scale=$targetScale"
-        else
-            "Delete zone hover OFF"
+        if (hovered) {
+            "Delete zone hover ON - " +
+            "visual + detection scale = " +
+            DELETE_ZONE_HOVER_SCALE
+        } else {
+            "Delete zone hover OFF - scale = 1.0"
+        }
     )
 }
 
@@ -463,27 +469,47 @@ private fun checkBubbleDeleteZoneHover(
     displayMetrics: android.util.DisplayMetrics
 ) {
     val zoneView = deleteZoneView ?: return
+    val bubble = bubbleView ?: return
 
     if (zoneView.visibility != View.VISIBLE) {
         return
     }
 
+    /*
+     * Bubble-এর actual screen position নেওয়া হচ্ছে।
+     * params.x / params.y ব্যবহার করা হচ্ছে না।
+     */
+    val bubbleLocation = IntArray(2)
+
+    bubble.getLocationOnScreen(bubbleLocation)
+
+    val bubbleCenterX =
+        bubbleLocation[0] +
+        bubble.width / 2f
+
+    val bubbleCenterY =
+        bubbleLocation[1] +
+        bubble.height / 2f
+
+    /*
+     * Delete Zone-এর actual screen position।
+     */
     val zoneLocation = IntArray(2)
 
     zoneView.getLocationOnScreen(zoneLocation)
 
     val zoneCenterX =
-        zoneLocation[0] + zoneView.width / 2f
+        zoneLocation[0] +
+        zoneView.width / 2f
 
     val zoneCenterY =
-        zoneLocation[1] + zoneView.height / 2f
+        zoneLocation[1] +
+        zoneView.height / 2f
 
-    val bubbleCenterX =
-        bubbleParams.x + BUBBLE_SIZE / 2f
-
-    val bubbleCenterY =
-        bubbleParams.y + BUBBLE_SIZE / 2f
-
+    /*
+     * Bubble center এবং Delete Zone center-এর
+     * মধ্যকার distance।
+     */
     val dx =
         bubbleCenterX - zoneCenterX
 
@@ -495,44 +521,58 @@ private fun checkBubbleDeleteZoneHover(
             dx * dx + dy * dy
         )
 
+    /*
+     * Delete Zone-এর base radius।
+     */
     val baseRadius =
-        DELETE_ZONE_SIZE / 2f
+        zoneView.width / 2f
 
+    /*
+     * Bubble-এর actual radius।
+     */
     val bubbleRadius =
-        BUBBLE_SIZE / 2f
+        bubble.width / 2f
 
     /*
-     * Hover শুরু হওয়ার threshold।
+     * Hover হওয়ার আগে normal detection area।
      */
-    val hoverTriggerRadius =
-        baseRadius + bubbleRadius * 0.35f
+    val normalDetectionRadius =
+        baseRadius +
+        bubbleRadius * 0.35f
 
     /*
-     * Hover হওয়ার পর actual Delete Zone
-     * 1.35x বড়।
+     * Hover অবস্থায় visual scale যত,
+     * actual detection radius-ও ঠিক তত।
      */
-    val expandedRadius =
+    val expandedZoneRadius =
         baseRadius *
         DELETE_ZONE_HOVER_SCALE
 
     val expandedDetectionRadius =
-        expandedRadius +
+        expandedZoneRadius +
         bubbleRadius * 0.35f
 
+    /*
+     * যদি আগে থেকেই hover অবস্থায় থাকে,
+     * তাহলে expanded detection area ব্যবহার হবে।
+     *
+     * না হলে normal area দিয়ে hover শুরু হবে।
+     */
     val inside =
         if (deleteZoneHovered) {
-            /*
-             * ইতিমধ্যে hover হলে বড় area ব্যবহার করবে।
-             */
             distance <= expandedDetectionRadius
         } else {
-            /*
-             * Hover শুরু করার জন্য normal area।
-             */
-            distance <= hoverTriggerRadius
+            distance <= normalDetectionRadius
         }
 
     setDeleteZoneHovered(inside)
+
+    EmergencyLog.log(
+        "DeleteZone: distance=$distance " +
+        "normal=$normalDetectionRadius " +
+        "expanded=$expandedDetectionRadius " +
+        "hover=$deleteZoneHovered"
+    )
 }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
