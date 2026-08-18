@@ -364,13 +364,13 @@ private fun hideDeleteZone() {
     deleteZoneHovered = false
     isInDeleteZone = false
 
-    deleteZoneView?.animate()
-        ?.scaleX(1f)
-        ?.scaleY(1f)
-        ?.setDuration(120L)
-        ?.start()
+    deleteZoneView?.animate()?.cancel()
 
-    deleteZoneView?.visibility = View.GONE
+    deleteZoneView?.apply {
+        scaleX = 1f
+        scaleY = 1f
+        visibility = View.GONE
+    }
 
     EmergencyLog.log("Delete zone hidden")
 }
@@ -387,6 +387,9 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
 
     deleteZoneAnimator?.cancel()
 
+    val zone = deleteZoneView ?: return
+
+    val startScale = zone.scaleX
     val targetScale =
         if (hovered) {
             DELETE_ZONE_HOVER_SCALE
@@ -396,22 +399,24 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
 
     deleteZoneAnimator =
         ValueAnimator.ofFloat(
-            deleteZoneView?.scaleX ?: 1f,
+            startScale,
             targetScale
         ).apply {
 
-            duration = 140L
+            duration = 180L
 
-            interpolator =
-                DecelerateInterpolator()
+            interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
 
                 val scale =
                     animator.animatedValue as Float
 
-                deleteZoneView?.scaleX = scale
-                deleteZoneView?.scaleY = scale
+                zone.scaleX = scale
+                zone.scaleY = scale
+
+                // scale অনুযায়ী visual size নিশ্চিত রাখা
+                zone.invalidate()
             }
 
             addListener(
@@ -419,21 +424,25 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
 
                     override fun onAnimationStart(
                         animation: Animator
-                    ) {}
-
-                    override fun onAnimationRepeat(
-                        animation: Animator
-                    ) {}
-
-                    override fun onAnimationCancel(
-                        animation: Animator
-                    ) {}
+                    ) {
+                    }
 
                     override fun onAnimationEnd(
                         animation: Animator
                     ) {
-
+                        zone.scaleX = targetScale
+                        zone.scaleY = targetScale
                         deleteZoneAnimator = null
+                    }
+
+                    override fun onAnimationCancel(
+                        animation: Animator
+                    ) {
+                    }
+
+                    override fun onAnimationRepeat(
+                        animation: Animator
+                    ) {
                     }
                 }
             )
@@ -443,7 +452,7 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
 
     EmergencyLog.log(
         if (hovered)
-            "Delete zone hover ON"
+            "Delete zone hover ON - scale=$targetScale"
         else
             "Delete zone hover OFF"
     )
