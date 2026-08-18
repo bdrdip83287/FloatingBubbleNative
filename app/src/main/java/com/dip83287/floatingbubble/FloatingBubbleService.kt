@@ -670,8 +670,8 @@ private fun checkBubbleDeleteZoneHover(
 
             val  = resources.
             val (defaultX, defaultY) = getInitialBubblePosition()
-            params.x = defaultX
-            params.y = defaultY
+params.x = defaultX
+params.y = defaultY
 
             setupBubbleTouchListener(params)
             setupBubbleLongClickListener()
@@ -827,10 +827,7 @@ private fun checkBubbleDeleteZoneHover(
 
                         velocityTracker = null
 
-                        applyStableDockPhysics(
-                            params,
-                            
-                        )
+                        applyStableDockPhysics(params)
 
                         return true
                     }
