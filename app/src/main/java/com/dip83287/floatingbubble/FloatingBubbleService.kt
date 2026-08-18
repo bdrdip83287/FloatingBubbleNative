@@ -2861,13 +2861,10 @@ setOnTouchListener(object : View.OnTouchListener {
                         event.y - touchStartY
                     )
 
-                val distance =
-                    sqrt(
-                        (
-                            dx * dx +
-                            dy * dy
-                        ).toDouble()
-                    ).toFloat()
+                val distance = sqrt(
+    (dx.toDouble() * dx.toDouble()) +
+    (dy.toDouble() * dy.toDouble())
+).toFloat()
 
                 totalDistance += distance
 
