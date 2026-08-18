@@ -462,9 +462,7 @@ private fun checkBubbleDeleteZoneHover(
     bubbleParams: WindowManager.LayoutParams,
     displayMetrics: android.util.DisplayMetrics
 ) {
-
-    val zoneView = deleteZoneView
-        ?: return
+    val zoneView = deleteZoneView ?: return
 
     if (zoneView.visibility != View.VISIBLE) {
         return
@@ -472,25 +470,19 @@ private fun checkBubbleDeleteZoneHover(
 
     val zoneLocation = IntArray(2)
 
-    zoneView.getLocationOnScreen(
-        zoneLocation
-    )
+    zoneView.getLocationOnScreen(zoneLocation)
 
     val zoneCenterX =
-        zoneLocation[0] +
-        zoneView.width / 2f
+        zoneLocation[0] + zoneView.width / 2f
 
     val zoneCenterY =
-        zoneLocation[1] +
-        zoneView.height / 2f
+        zoneLocation[1] + zoneView.height / 2f
 
     val bubbleCenterX =
-        bubbleParams.x +
-        BUBBLE_SIZE / 2f
+        bubbleParams.x + BUBBLE_SIZE / 2f
 
     val bubbleCenterY =
-        bubbleParams.y +
-        BUBBLE_SIZE / 2f
+        bubbleParams.y + BUBBLE_SIZE / 2f
 
     val dx =
         bubbleCenterX - zoneCenterX
@@ -500,30 +492,45 @@ private fun checkBubbleDeleteZoneHover(
 
     val distance =
         sqrt(
-            dx * dx +
-            dy * dy
+            dx * dx + dy * dy
         )
 
-    /*
-     * Normal zone radius + bubble radius
-     * ব্যবহার করা হচ্ছে যাতে Bubble-এর কেন্দ্র
-     * Zone-এর যথেষ্ট ভিতরে গেলে hover হয়।
-     */
     val baseRadius =
         DELETE_ZONE_SIZE / 2f
-
-    val hoverRadius =
-        baseRadius *
-        DELETE_ZONE_HOVER_SCALE
 
     val bubbleRadius =
         BUBBLE_SIZE / 2f
 
-    val deleteThreshold =
-        hoverRadius + bubbleRadius * 0.35f
+    /*
+     * Hover শুরু হওয়ার threshold।
+     */
+    val hoverTriggerRadius =
+        baseRadius + bubbleRadius * 0.35f
+
+    /*
+     * Hover হওয়ার পর actual Delete Zone
+     * 1.35x বড়।
+     */
+    val expandedRadius =
+        baseRadius *
+        DELETE_ZONE_HOVER_SCALE
+
+    val expandedDetectionRadius =
+        expandedRadius +
+        bubbleRadius * 0.35f
 
     val inside =
-        distance <= deleteThreshold
+        if (deleteZoneHovered) {
+            /*
+             * ইতিমধ্যে hover হলে বড় area ব্যবহার করবে।
+             */
+            distance <= expandedDetectionRadius
+        } else {
+            /*
+             * Hover শুরু করার জন্য normal area।
+             */
+            distance <= hoverTriggerRadius
+        }
 
     setDeleteZoneHovered(inside)
 }
