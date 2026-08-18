@@ -93,7 +93,7 @@ class FloatingBubbleService : Service() {
     private var deleteZoneAnimator: ValueAnimator? = null
 private var deleteZoneHovered = false
 
-private val DELETE_ZONE_HOVER_SCALE = 1.25f
+private val DELETE_ZONE_HOVER_SCALE = 3.25f
     private var flingAnimator: ValueAnimator? = null
 
     private var velocityTracker: VelocityTracker? = null
