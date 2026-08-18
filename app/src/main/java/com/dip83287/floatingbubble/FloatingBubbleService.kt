@@ -162,8 +162,8 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             scrollStopHandler = Handler(Looper.getMainLooper())
             
             lastFontScale = resources.configuration.fontScale
-            lastScreenWidth = resources..widthPixels
-            lastScreenHeight = resources..heightPixels
+            lastScreenWidth = resources.displayMetrics.widthPixels
+            lastScreenHeight = resources.displayMetrics.heightPixels
             
             startConfigurationCheck()
             
@@ -177,8 +177,8 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             override fun run() {
                 try {
                     val currentFontScale = resources.configuration.fontScale
-                    val currentScreenWidth = resources..widthPixels
-                    val currentScreenHeight = resources..heightPixels
+                    val currentScreenWidth = resources.displayMetrics.widthPixels
+                    val currentScreenHeight = resources.displayMetrics.heightPixels
                     
                     if (currentFontScale != lastFontScale || 
                         currentScreenWidth != lastScreenWidth || 
@@ -381,12 +381,9 @@ private fun hideDeleteZone() {
 }
 
 
-private fun setDeleteZoneHovered(
-    hovered: Boolean
-) {
-    if (deleteZoneHovered == hovered) {
-        return
-    }
+private fun setDeleteZoneHovered(hovered: Boolean) {
+
+    if (deleteZoneHovered == hovered) return
 
     deleteZoneHovered = hovered
     isInDeleteZone = hovered
@@ -398,20 +395,13 @@ private fun setDeleteZoneHovered(
     val normalSize = DELETE_ZONE_SIZE
 
     val expandedSize =
-        (DELETE_ZONE_SIZE *
-                DELETE_ZONE_HOVER_SCALE)
-            .toInt()
-
-    val targetSize =
-        if (hovered) {
-            expandedSize
-        } else {
-            normalSize
-        }
+        (DELETE_ZONE_SIZE * DELETE_ZONE_HOVER_SCALE).toInt()
 
     val currentSize =
-        zone.layoutParams?.width
-            ?: normalSize
+        zone.layoutParams?.width ?: normalSize
+
+    val targetSize =
+        if (hovered) expandedSize else normalSize
 
     deleteZoneAnimator =
         ValueAnimator.ofInt(
@@ -420,22 +410,39 @@ private fun setDeleteZoneHovered(
         ).apply {
 
             duration = 180L
-
-            interpolator =
-                DecelerateInterpolator()
+            interpolator = DecelerateInterpolator()
 
             addUpdateListener { animator ->
 
-                val size =
-                    animator.animatedValue as Int
+                try {
+                    val size =
+                        animator.animatedValue as Int
 
-                val lp =
-                    zone.layoutParams
+                    val lp =
+                        zone.layoutParams as WindowManager.LayoutParams
 
-                lp.width = size
-                lp.height = size
+                    lp.width = size
+                    lp.height = size
 
-                zone.layoutParams = lp
+                    /*
+                     * গুরুত্বপূর্ণ:
+                     * শুধু View-এর layoutParams নয়,
+                     * WindowManager-এর actual overlay window-ও resize হবে।
+                     */
+                    windowManager.updateViewLayout(
+                        zone,
+                        lp
+                    )
+
+                    zone.requestLayout()
+                    zone.invalidate()
+
+                } catch (e: Exception) {
+                    EmergencyLog.logException(
+                        e,
+                        "DeleteZone resize"
+                    )
+                }
             }
 
             addListener(
@@ -449,14 +456,24 @@ private fun setDeleteZoneHovered(
                     override fun onAnimationEnd(
                         animation: Animator
                     ) {
+                        try {
+                            val lp =
+                                zone.layoutParams as WindowManager.LayoutParams
 
-                        val lp =
-                            zone.layoutParams
+                            lp.width = targetSize
+                            lp.height = targetSize
 
-                        lp.width = targetSize
-                        lp.height = targetSize
+                            windowManager.updateViewLayout(
+                                zone,
+                                lp
+                            )
 
-                        zone.layoutParams = lp
+                        } catch (e: Exception) {
+                            EmergencyLog.logException(
+                                e,
+                                "DeleteZone resize end"
+                            )
+                        }
 
                         deleteZoneAnimator = null
                     }
@@ -478,18 +495,16 @@ private fun setDeleteZoneHovered(
 
     EmergencyLog.log(
         if (hovered) {
-            "Delete zone EXPANDED: $targetSize"
+            "Delete zone HOVER ON - actual size=$targetSize"
         } else {
-            "Delete zone NORMAL: $targetSize"
+            "Delete zone HOVER OFF - actual size=$targetSize"
         }
     )
 }
 
 private fun checkBubbleDeleteZoneHover(
-    bubbleParams: WindowManager.LayoutParams,
-    displayMetrics: android.util.DisplayMetrics
+    bubbleParams: WindowManager.LayoutParams
 ) {
-
     val zone = deleteZoneView ?: return
     val bubble = bubbleView ?: return
 
@@ -501,23 +516,27 @@ private fun checkBubbleDeleteZoneHover(
     bubble.getLocationOnScreen(bubbleLocation)
 
     val bubbleCenterX =
-        bubbleLocation[0] +
-        bubble.width / 2f
+        bubbleLocation[0] + bubble.width / 2f
 
     val bubbleCenterY =
-        bubbleLocation[1] +
-        bubble.height / 2f
+        bubbleLocation[1] + bubble.height / 2f
 
     val zoneLocation = IntArray(2)
     zone.getLocationOnScreen(zoneLocation)
 
+    val zoneWidth =
+        zone.layoutParams?.width
+            ?: DELETE_ZONE_SIZE
+
+    val zoneHeight =
+        zone.layoutParams?.height
+            ?: DELETE_ZONE_SIZE
+
     val zoneCenterX =
-        zoneLocation[0] +
-        zone.width / 2f
+        zoneLocation[0] + zoneWidth / 2f
 
     val zoneCenterY =
-        zoneLocation[1] +
-        zone.height / 2f
+        zoneLocation[1] + zoneHeight / 2f
 
     val dx =
         bubbleCenterX - zoneCenterX
@@ -525,47 +544,39 @@ private fun checkBubbleDeleteZoneHover(
     val dy =
         bubbleCenterY - zoneCenterY
 
-    val distance =
-        sqrt(
-            dx * dx +
-            dy * dy
-        )
+    val distance = sqrt(
+        (dx.toDouble() * dx.toDouble()) +
+        (dy.toDouble() * dy.toDouble())
+    ).toFloat()
 
     val bubbleRadius =
         bubble.width / 2f
 
-    val normalZoneRadius =
+    val normalRadius =
         DELETE_ZONE_SIZE / 2f
 
-    val expandedZoneRadius =
-        normalZoneRadius *
-        DELETE_ZONE_HOVER_SCALE
+    val expandedRadius =
+        normalRadius * DELETE_ZONE_HOVER_SCALE
 
     /*
-     * Hover শুরু করার জন্য normal zone।
+     * প্রথমবার hover শুরু করার area।
      */
     val hoverTriggerDistance =
-        normalZoneRadius +
+        normalRadius +
         bubbleRadius * 0.35f
 
     /*
-     * Hover হওয়ার পর expanded zone-ই
-     * actual detection area।
+     * Hover হওয়ার পর বড় actual detection area।
      */
     val expandedDetectionDistance =
-        expandedZoneRadius +
+        expandedRadius +
         bubbleRadius * 0.35f
 
     val inside =
         if (deleteZoneHovered) {
-
-            distance <=
-                expandedDetectionDistance
-
+            distance <= expandedDetectionDistance
         } else {
-
-            distance <=
-                hoverTriggerDistance
+            distance <= hoverTriggerDistance
         }
 
     setDeleteZoneHovered(inside)
@@ -585,20 +596,23 @@ private fun checkBubbleDeleteZoneHover(
         return START_STICKY
     }
 
-    private fun getInitialBubblePosition(: android.util.): Pair<Int, Int> {
-        val screenWidth = .widthPixels
-        val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
-        
-        return if (isFirstTime) {
-            val defaultX = screenWidth - BUBBLE_SIZE - 20
-            val defaultY = 150
-            Pair(defaultX, defaultY)
-        } else {
-            val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
-            val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
-            Pair(savedX, savedY)
-        }
+    private fun getInitialBubblePosition(): Pair<Int, Int> {
+    val screenWidth = resources.displayMetrics.widthPixels
+    val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
+
+    return if (isFirstTime) {
+        val defaultX = screenWidth - BUBBLE_SIZE - 20
+        val defaultY = 150
+        Pair(defaultX, defaultY)
+    } else {
+        val savedX = prefs.getInt(
+            KEY_BUBBLE_X,
+            screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH
+        )
+        val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
+        Pair(savedX, savedY)
     }
+}
     
     private fun markBubbleCreated() {
         if (prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)) {
@@ -659,7 +673,7 @@ private fun checkBubbleDeleteZoneHover(
             params.x = defaultX
             params.y = defaultY
 
-            setupBubbleTouchListener(params, )
+            setupBubbleTouchListener(params)
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
@@ -672,8 +686,7 @@ private fun checkBubbleDeleteZoneHover(
     }
 
     private fun setupBubbleTouchListener(
-    params: WindowManager.LayoutParams,
-    : android.util.
+    params: WindowManager.LayoutParams
 ) {
 
     bubbleView?.setOnTouchListener(
@@ -735,10 +748,7 @@ private fun checkBubbleDeleteZoneHover(
                          * প্রকৃত Delete Zone circle
                          * অনুযায়ী hover detection।
                          */
-                        checkBubbleDeleteZoneHover(
-                            params,
-                            
-                        )
+                        checkBubbleDeleteZoneHover(params)
 
                         try {
 
@@ -856,11 +866,10 @@ private fun checkBubbleDeleteZoneHover(
     }
 
     private fun applyStableDockPhysics(
-        params: WindowManager.LayoutParams,
-        : android.util.
-    ) {
-        val screenWidth = .widthPixels
-        val screenHeight = .heightPixels
+    params: WindowManager.LayoutParams
+) {
+    val screenWidth = resources.displayMetrics.widthPixels
+    val screenHeight = resources.displayMetrics.heightPixels
 
         val startX = params.x.toFloat()
         val startY = params.y.toFloat()
@@ -1201,14 +1210,13 @@ private fun checkBubbleDeleteZoneHover(
 
         if (magnifier == null) {
 
-            val density =
-                resources..density
+            val density = resources.displayMetrics.density
 
             magnifier =
                 Magnifier.Builder(editText)
                     .setSize(
-                        (130 * density).toInt(),
-                        (50 * density).toInt()
+                        (130f * density).toInt(),
+                        (50f * density).toInt()
                     )
                     .setCornerRadius(
                         15f * density
@@ -1569,8 +1577,8 @@ private fun checkBubbleDeleteZoneHover(
     }
     
     private fun dpToPx(dp: Int): Int {
-        return (dp * resources..density).toInt()
-    }
+    return (dp.toFloat() * resources.displayMetrics.density).toInt()
+}
     
     private fun updateHandlePositions() {
         if (isScrolling) return
@@ -1976,7 +1984,7 @@ val actionBarHeight =
 
 // Selection-এর উপরে 15dp gap
 val extraGap =
-    (60 * resources..density).toInt()
+    (60f * resources.displayMetrics.density).toInt()
 
 params.y =
     y.toInt() -
@@ -2609,14 +2617,13 @@ setOnTouchListener(object : View.OnTouchListener {
 
         if (selectionMagnifier == null) {
 
-            val density =
-                resources..density
+            val density = resources.displayMetrics.density
 
             selectionMagnifier =
                 Magnifier.Builder(this@apply)
                     .setSize(
-                        (130 * density).toInt(),
-                        (50 * density).toInt()
+                        (130f * density).toInt(),
+                        (50f * density).toInt()
                     )
                     .setCornerRadius(
                         15f * density
@@ -2892,13 +2899,10 @@ setOnTouchListener(object : View.OnTouchListener {
                         velocityTracker?.yVelocity
                             ?: 0f
 
-                    val velocity =
-                        sqrt(
-                            (
-                                velX * velX +
-                                velY * velY
-                            ).toDouble()
-                        ).toFloat()
+                    val velocity = sqrt(
+    (velX.toDouble() * velX.toDouble()) +
+    (velY.toDouble() * velY.toDouble())
+).toFloat()
 
                     if (
                         totalDistance > 30 ||
