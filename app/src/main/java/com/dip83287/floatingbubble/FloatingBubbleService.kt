@@ -1,4 +1,3 @@
-
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -74,6 +73,12 @@ class FloatingBubbleService : Service() {
     private var bubbleView: View? = null
     private var noteView: View? = null
     private var isExpanded = false
+
+    // বর্তমানে কোন Child Note editor খোলা আছে তা মনে রাখে।
+    // Bubble-এ minimize করার পর আবার Bubble চাপলে একই editor পুনরায় খুলবে।
+    private var activeNoteId: Long? = null
+    private var isChildNoteOpen = false
+
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
     private lateinit var scrollView: ScrollView
@@ -1036,6 +1041,20 @@ setupBubbleTouchListener(params)
         if (noteView != null) return
         
         try {
+            // যদি Bubble-এ minimize করার সময় কোনো Child Note editor খোলা ছিল,
+            // তাহলে Note List নয়, সেই একই Child Note editor-ই পুনরায় খুলবে।
+            if (isChildNoteOpen && activeNoteId != null) {
+                val activeNote = notesList.firstOrNull { it.id == activeNoteId }
+                if (activeNote != null) {
+                    openEditorForNote(activeNote)
+                    return
+                } else {
+                    // Note আর না থাকলে নিরাপদভাবে Note List-এ fallback করবে।
+                    activeNoteId = null
+                    isChildNoteOpen = false
+                }
+            }
+
             val container = createFullNotePad()
             noteView = container
             
@@ -2437,12 +2456,39 @@ params.y =
             textSize = 28f
             setTextColor(Color.parseColor("#C0392B"))
             setPadding(16, 0, 8, 0)
-            setOnClickListener { 
-                collapseToBubble()
+            setOnClickListener {
+                try {
+                    // আগের debounce save যেন পরে নতুন খোলা Note-এ গিয়ে লেখা না save করে।
+                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
+                    saveRunnable = null
+
+                    // Child Note minimize করলে আগে সর্বশেষ title/content সরাসরি save হবে।
+                    saveCurrentNoteData(note.id)
+
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+
+                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE)
+                        as? InputMethodManager
+                    imm?.hideSoftInputFromWindow(editText.windowToken, 0)
+
+                    // activeNoteId/isChildNoteOpen ইচ্ছাকৃতভাবে রাখা হচ্ছে,
+                    // যাতে Bubble থেকে আবার খুললে এই একই Child Note editor পাওয়া যায়।
+                    activeNoteId = note.id
+                    isChildNoteOpen = true
+
+                    collapseToBubble()
+                } catch (e: Exception) {
+                    EmergencyLog.logException(e, "Child Note minimize")
+                }
             }
         }
         topBar.addView(minimizeBtn)
         contentContainer.addView(topBar)
+
+        // এই editor-টি বর্তমানে যে Note-এর জন্য খোলা হয়েছে সেটি মনে রাখি।
+        activeNoteId = note.id
+        isChildNoteOpen = true
 
         titleInput = EditText(this).apply {
             setText(note.title)
@@ -3323,7 +3369,7 @@ setOnTouchListener(object : View.OnTouchListener {
         return selectionStart != selectionEnd
     }
 
-    private fun saveCurrentNote(noteId: Long) {
+    private fun saveCurrentNoteData(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
             val updatedNote = notesList[index].copy(
@@ -3335,6 +3381,13 @@ setOnTouchListener(object : View.OnTouchListener {
             saveNotesToPrefs()
             notesAdapter.updateList(notesList)
             updateBubbleCount()
+        }
+    }
+
+    private fun saveCurrentNote(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index != -1) {
+            saveCurrentNoteData(noteId)
             Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -3343,6 +3396,11 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun showNoteList() {
+        // Child editor থেকে সত্যিকার অর্থে Note List-এ ফিরে এলে
+        // active Child Note state clear হবে।
+        activeNoteId = null
+        isChildNoteOpen = false
+
         hideSelectionHandles()
         hideFloatingActionBar()
         val container = createFullNotePad()
