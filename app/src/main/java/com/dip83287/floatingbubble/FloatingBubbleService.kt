@@ -1,3 +1,4 @@
+
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -78,6 +79,14 @@ class FloatingBubbleService : Service() {
     // Bubble-এ minimize করার পর আবার Bubble চাপলে একই editor পুনরায় খুলবে।
     private var activeNoteId: Long? = null
     private var isChildNoteOpen = false
+
+    // Child Note minimize করার সময় editor-এর transient state সংরক্ষণ করে।
+    // এতে cursor/selection এবং ScrollView position হুবহু restore করা যায়।
+    private var hasSavedChildEditorState = false
+    private var savedChildEditorNoteId: Long? = null
+    private var savedChildSelectionStart = -1
+    private var savedChildSelectionEnd = -1
+    private var savedChildScrollY = 0
 
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
@@ -2462,7 +2471,15 @@ params.y =
                     saveRunnable?.let { saveHandler.removeCallbacks(it) }
                     saveRunnable = null
 
-                    // Child Note minimize করলে আগে সর্বশেষ title/content সরাসরি save হবে।
+                    // Child Note minimize করার ঠিক আগের editor state সংরক্ষণ করি।
+                    // Selection থাকলে range, না থাকলে cursor position একই থাকবে।
+                    savedChildEditorNoteId = note.id
+                    savedChildSelectionStart = editText.selectionStart.coerceIn(0, editText.text.length)
+                    savedChildSelectionEnd = editText.selectionEnd.coerceIn(0, editText.text.length)
+                    savedChildScrollY = scrollView.scrollY
+                    hasSavedChildEditorState = true
+
+                    // সর্বশেষ title/content সরাসরি save হবে।
                     saveCurrentNoteData(note.id)
 
                     hideSelectionHandles()
@@ -3362,6 +3379,42 @@ setOnTouchListener(object : View.OnTouchListener {
             
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
+
+            // Minimize করার সময়কার cursor/selection + scroll position restore করি।
+            if (hasSavedChildEditorState && savedChildEditorNoteId == note.id) {
+                val textLength = editText.text.length
+                val restoreStart = savedChildSelectionStart.coerceIn(0, textLength)
+                val restoreEnd = savedChildSelectionEnd.coerceIn(0, textLength)
+
+                try {
+                    editText.setSelection(restoreStart, restoreEnd)
+                } catch (_: Exception) {
+                    editText.setSelection(restoreStart)
+                }
+
+                scrollView.post {
+                    scrollView.scrollTo(0, savedChildScrollY.coerceAtLeast(0))
+                    editText.post {
+                        try {
+                            editText.setSelection(restoreStart, restoreEnd)
+                        } catch (_: Exception) {
+                            editText.setSelection(restoreStart)
+                        }
+
+                        if (restoreStart != restoreEnd) {
+                            showSelectionHandles()
+                            updateHandlePositionsImmediate()
+                        } else {
+                            hideSelectionHandles()
+                            hideFloatingActionBar()
+                        }
+                    }
+                }
+
+                // State একবার restore হয়ে গেলে পরের নতুন editor-এ ভুল করে apply হবে না।
+                hasSavedChildEditorState = false
+                savedChildEditorNoteId = null
+            }
         }, 300)
     }
 
@@ -3400,6 +3453,13 @@ setOnTouchListener(object : View.OnTouchListener {
         // active Child Note state clear হবে।
         activeNoteId = null
         isChildNoteOpen = false
+
+        // সত্যিকার অর্থে Child Note থেকে বের হলে পুরোনো cursor/selection state আর রাখব না।
+        hasSavedChildEditorState = false
+        savedChildEditorNoteId = null
+        savedChildSelectionStart = -1
+        savedChildSelectionEnd = -1
+        savedChildScrollY = 0
 
         hideSelectionHandles()
         hideFloatingActionBar()
