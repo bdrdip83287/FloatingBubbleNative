@@ -668,12 +668,11 @@ private fun checkBubbleDeleteZoneHover(
             )
             params.gravity = Gravity.TOP or Gravity.START
 
-            val  = resources.
-            val (defaultX, defaultY) = getInitialBubblePosition()
+val (defaultX, defaultY) = getInitialBubblePosition()
 params.x = defaultX
 params.y = defaultY
 
-            setupBubbleTouchListener(params)
+setupBubbleTouchListener(params)
             setupBubbleLongClickListener()
 
             windowManager.addView(bubbleView, params)
