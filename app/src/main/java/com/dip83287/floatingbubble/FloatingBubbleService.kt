@@ -288,7 +288,7 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             }
 
             background = shape
-            setPadding(30, 30, 30, 30)
+            setPadding(20, 20, 20, 20)
         }
 
         val cross = TextView(this).apply {
