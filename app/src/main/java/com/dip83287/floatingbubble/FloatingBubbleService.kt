@@ -1,3 +1,4 @@
+
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -2599,32 +2600,61 @@ setOnTouchListener(object : View.OnTouchListener {
     private var moveCount = 0
 
     private var selectionMagnifier: Magnifier? = null
-
     private var lastMagnifierTime = 0L
     private var lastHandleUpdateTime = 0L
-
     private val frameInterval = 16L
 
-    private fun createMagnifier() {
+    // Native EditText touch handling has to receive the normal editing gesture.
+    // Custom selection/dragging takes control only after it is actually detected.
+    private var nativeTouchActive = false
+    private var customGestureActive = false
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            return
+    private fun dispatchToNativeEditText(event: MotionEvent): Boolean {
+        return try {
+            this@apply.onTouchEvent(event)
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "dispatchToNativeEditText")
+            false
+        }
+    }
+
+    private fun cancelNativeEditTextGesture() {
+        if (!nativeTouchActive) return
+
+        try {
+            val now = android.os.SystemClock.uptimeMillis()
+            val cancelEvent = MotionEvent.obtain(
+                now,
+                now,
+                MotionEvent.ACTION_CANCEL,
+                lastTouchX,
+                lastTouchY,
+                0
+            )
+            this@apply.onTouchEvent(cancelEvent)
+            cancelEvent.recycle()
+        } catch (e: Exception) {
+            EmergencyLog.logException(
+                e,
+                "cancelNativeEditTextGesture"
+            )
         }
 
+        nativeTouchActive = false
+    }
+
+    private fun createMagnifier() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
         if (selectionMagnifier == null) {
-
             val density = resources.displayMetrics.density
-
-            selectionMagnifier =
-                Magnifier.Builder(this@apply)
-                    .setSize(
-                        (130f * density).toInt(),
-                        (50f * density).toInt()
-                    )
-                    .setCornerRadius(
-                        15f * density
-                    )
-                    .build()
+            selectionMagnifier = Magnifier.Builder(this@apply)
+                .setSize(
+                    (130f * density).toInt(),
+                    (50f * density).toInt()
+                )
+                .setCornerRadius(15f * density)
+                .build()
         }
     }
 
@@ -2633,87 +2663,51 @@ setOnTouchListener(object : View.OnTouchListener {
         rawY: Float,
         force: Boolean = false
     ) {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            return
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
 
         val now = System.currentTimeMillis()
-
-        if (!force &&
-            now - lastMagnifierTime < frameInterval
-        ) {
-            return
-        }
-
+        if (!force && now - lastMagnifierTime < frameInterval) return
         lastMagnifierTime = now
 
         try {
-
             createMagnifier()
 
             val location = IntArray(2)
-
             this@apply.getLocationOnScreen(location)
 
             val localX =
-                (
-                    rawX - location[0]
-                ).coerceIn(
+                (rawX - location[0]).coerceIn(
                     0f,
                     this@apply.width.toFloat()
                 )
 
             val localY =
-                (
-                    rawY - location[1]
-                ).coerceIn(
+                (rawY - location[1]).coerceIn(
                     0f,
                     this@apply.height.toFloat()
                 )
 
-            selectionMagnifier?.show(
-                localX,
-                localY
-            )
-
+            selectionMagnifier?.show(localX, localY)
         } catch (e: Exception) {
-
-            EmergencyLog.logException(
-                e,
-                "showSelectionMagnifier"
-            )
+            EmergencyLog.logException(e, "showSelectionMagnifier")
         }
     }
 
     private fun hideSelectionMagnifier() {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            return
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
 
         try {
-
             selectionMagnifier?.dismiss()
-
         } catch (e: Exception) {
-
-            EmergencyLog.logException(
-                e,
-                "hideSelectionMagnifier"
-            )
+            EmergencyLog.logException(e, "hideSelectionMagnifier")
         }
 
         lastMagnifierTime = 0L
     }
 
     private fun updateHandlesThrottled() {
-
         val now = System.currentTimeMillis()
-
-        if (now - lastHandleUpdateTime < frameInterval) {
-            return
-        }
+        if (now - lastHandleUpdateTime < frameInterval) return
 
         lastHandleUpdateTime = now
 
@@ -2723,7 +2717,6 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun updateSelectedTextDuringDrag() {
-
         val start = this@apply.selectionStart
         val end = this@apply.selectionEnd
 
@@ -2733,22 +2726,12 @@ setOnTouchListener(object : View.OnTouchListener {
             start == end ||
             start > this@apply.text.length ||
             end > this@apply.text.length
-        ) {
-            return
-        }
+        ) return
 
-        val selected =
-            this@apply.text.substring(
-                start,
-                end
-            )
-
-        if (selected.isEmpty()) {
-            return
-        }
+        val selected = this@apply.text.substring(start, end)
+        if (selected.isEmpty()) return
 
         currentSelectedText = selected
-
         isActionBarTemporarilyHidden = true
     }
 
@@ -2760,18 +2743,24 @@ setOnTouchListener(object : View.OnTouchListener {
         when (event.actionMasked) {
 
             MotionEvent.ACTION_DOWN -> {
-
-                val currentTime =
-                    System.currentTimeMillis()
-
+                val currentTime = System.currentTimeMillis()
                 val x = event.x
                 val y = event.y
 
+                // IMPORTANT:
+                // Read the previous tap position BEFORE overwriting lastTouchX/Y.
+                val previousTouchTime = lastTouchTime
+                val previousTouchX = lastTouchX
+                val previousTouchY = lastTouchY
+
+                val isDoubleTap =
+                    previousTouchTime > 0L &&
+                    currentTime - previousTouchTime < 300L &&
+                    Math.abs(x - previousTouchX) < 50f &&
+                    Math.abs(y - previousTouchY) < 50f
+
                 velocityTracker?.recycle()
-
-                velocityTracker =
-                    VelocityTracker.obtain()
-
+                velocityTracker = VelocityTracker.obtain()
                 velocityTracker?.addMovement(event)
 
                 cancelLongPress()
@@ -2780,25 +2769,30 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSelecting = false
                 isDragging = false
                 hasMoved = false
-                isSingleTap = true
-
+                isSingleTap = !isDoubleTap
                 isScrollingDetected = false
                 scrollConfirmed = false
+                customGestureActive = false
 
                 totalDistance = 0f
                 moveCount = 0
-
                 touchStartX = x
                 touchStartY = y
 
-                if (
-                    currentTime - lastTouchTime < 300 &&
-                    Math.abs(x - lastTouchX) < 50 &&
-                    Math.abs(y - lastTouchY) < 50
-                ) {
+                /*
+                 * For a normal tap, let the real EditText receive ACTION_DOWN.
+                 * This is what restores native cursor/keyboard/editing behavior.
+                 * For a double-tap, the native first tap has already completed;
+                 * the second tap is handled by our custom word-selection logic.
+                 */
+                if (!isDoubleTap) {
+                    nativeTouchActive = dispatchToNativeEditText(event)
+                } else {
+                    nativeTouchActive = false
 
                     isSelecting = true
                     isSingleTap = false
+                    customGestureActive = true
 
                     selectWordAtPosition(
                         this@apply,
@@ -2807,136 +2801,97 @@ setOnTouchListener(object : View.OnTouchListener {
                         true
                     )
 
-                } else {
-
-                    val runnable =
-                        Runnable {
-
-                            isSelecting = true
-                            isSingleTap = false
-
-                            selectWordAtPosition(
-                                this@apply,
-                                x,
-                                y,
-                                true
-                            )
-
-                            v.parent
-                                .requestDisallowInterceptTouchEvent(
-                                    true
-                                )
-                        }
-
-                    longPressRunnable = runnable
-
-                    longPressHandler.postDelayed(
-                        runnable,
-                        300
-                    )
+                    if (this@apply.hasSelection()) {
+                        v.parent.requestDisallowInterceptTouchEvent(true)
+                    }
                 }
 
+                if (!isDoubleTap) {
+                    val downX = x
+                    val downY = y
+                    val downRawX = event.rawX
+                    val downRawY = event.rawY
+
+                    val runnable = Runnable {
+                        // A movement/scroll means this was not a long press.
+                        if (hasMoved || isScrollingDetected || customGestureActive) {
+                            return@Runnable
+                        }
+
+                        // Native EditText has already received the DOWN event.
+                        // We now take control for custom word selection.
+                        cancelNativeEditTextGesture()
+
+                        isSelecting = true
+                        isSingleTap = false
+                        customGestureActive = true
+
+                        selectWordAtPosition(
+                            this@apply,
+                            downX,
+                            downY,
+                            true
+                        )
+
+                        if (this@apply.hasSelection()) {
+                            v.parent.requestDisallowInterceptTouchEvent(true)
+                            showSelectionMagnifier(
+                                downRawX,
+                                downRawY,
+                                true
+                            )
+                        }
+                    }
+
+                    longPressRunnable = runnable
+                    longPressHandler.postDelayed(runnable, 300L)
+                }
+
+                // Update only AFTER double-tap detection.
                 lastTouchTime = currentTime
                 lastTouchX = x
                 lastTouchY = y
 
-                v.parent
-                    .requestDisallowInterceptTouchEvent(
-                        false
-                    )
+                if (!customGestureActive) {
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+                }
 
-                return false
+                // We manually dispatch to EditText when nativeTouchActive is true.
+                // Returning true prevents View from dispatching the same event twice.
+                return true
             }
 
             MotionEvent.ACTION_MOVE -> {
-
                 velocityTracker?.addMovement(event)
-
                 moveCount++
 
-                val dx =
-                    Math.abs(
-                        event.x - touchStartX
-                    )
-
-                val dy =
-                    Math.abs(
-                        event.y - touchStartY
-                    )
-
+                val dx = Math.abs(event.x - touchStartX)
+                val dy = Math.abs(event.y - touchStartY)
                 val distance = sqrt(
-    (dx.toDouble() * dx.toDouble()) +
-    (dy.toDouble() * dy.toDouble())
-).toFloat()
+                    (dx.toDouble() * dx.toDouble()) +
+                    (dy.toDouble() * dy.toDouble())
+                ).toFloat()
 
                 totalDistance += distance
 
                 if (dx > 10 || dy > 10) {
-
                     hasMoved = true
                     isSingleTap = false
+                    cancelLongPress()
                 }
 
+                // Custom selection drag has priority over native scrolling.
                 if (
-                    !isScrollingDetected &&
-                    !isSelecting &&
-                    !isDragging &&
-                    hasMoved
-                ) {
-
-                    velocityTracker
-                        ?.computeCurrentVelocity(1000)
-
-                    val velX =
-                        velocityTracker?.xVelocity
-                            ?: 0f
-
-                    val velY =
-                        velocityTracker?.yVelocity
-                            ?: 0f
-
-                    val velocity = sqrt(
-    (velX.toDouble() * velX.toDouble()) +
-    (velY.toDouble() * velY.toDouble())
-).toFloat()
-
-                    if (
-                        totalDistance > 30 ||
-                        velocity > 100 ||
-                        moveCount > 3
-                    ) {
-
-                        isScrollingDetected = true
-                        scrollConfirmed = true
-                        isDragging = false
-                        isSingleTap = false
-
-                        cancelLongPress()
-                        hideSelectionMagnifier()
-
-                        v.parent
-                            .requestDisallowInterceptTouchEvent(
-                                false
-                            )
-
-                        return true
-                    }
-                }
-
-                if (
-                    !isScrollingDetected &&
-                    !scrollConfirmed &&
+                    customGestureActive &&
+                    isSelecting &&
                     this@apply.hasSelection() &&
                     (dx > 20 || dy > 20)
                 ) {
-
                     isDragging = true
                     isSingleTap = false
+                    nativeTouchActive = false
 
-                    v.parent
-                        .requestDisallowInterceptTouchEvent(
-                            true
-                        )
+                    v.parent.requestDisallowInterceptTouchEvent(true)
 
                     handleDragSelection(
                         this@apply,
@@ -2945,172 +2900,220 @@ setOnTouchListener(object : View.OnTouchListener {
 
                     updateSelectedTextDuringDrag()
 
-                    /*
-                     * Magnifier এবং handle update
-                     * সর্বোচ্চ ~60 FPS।
-                     */
                     showSelectionMagnifier(
                         event.rawX,
                         event.rawY
                     )
 
                     updateHandlesThrottled()
-
                     return true
                 }
 
                 if (
                     isDragging &&
+                    customGestureActive &&
                     this@apply.hasSelection()
                 ) {
-
                     updateSelectedTextDuringDrag()
-
                     showSelectionMagnifier(
                         event.rawX,
                         event.rawY
                     )
-
                     updateHandlesThrottled()
-
                     return true
+                }
+
+                // Detect normal ScrollView scrolling before native editing gets
+                // a chance to turn the gesture into something else.
+                if (
+                    !customGestureActive &&
+                    !isScrollingDetected &&
+                    hasMoved
+                ) {
+                    velocityTracker?.computeCurrentVelocity(1000)
+
+                    val velX = velocityTracker?.xVelocity ?: 0f
+                    val velY = velocityTracker?.yVelocity ?: 0f
+                    val velocity = sqrt(
+                        (velX.toDouble() * velX.toDouble()) +
+                        (velY.toDouble() * velY.toDouble())
+                    ).toFloat()
+
+                    if (
+                        totalDistance > 30 ||
+                        velocity > 100 ||
+                        moveCount > 3
+                    ) {
+                        isScrollingDetected = true
+                        scrollConfirmed = true
+                        isSingleTap = false
+                        cancelLongPress()
+                        hideSelectionMagnifier()
+
+                        if (this@apply.hasSelection()) {
+                            currentSelectedText = this@apply.text.substring(
+                                this@apply.selectionStart,
+                                this@apply.selectionEnd
+                            )
+                        }
+
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+
+                        // Pass the current MOVE to native EditText so that the
+                        // already-started native gesture remains consistent.
+                        if (nativeTouchActive) {
+                            dispatchToNativeEditText(event)
+                        }
+
+                        return true
+                    }
+                }
+
+                // Normal tap/editing/scrolling gesture: keep native EditText
+                // receiving the complete event stream until custom selection
+                // actually takes control.
+                if (!customGestureActive && nativeTouchActive) {
+                    dispatchToNativeEditText(event)
                 }
 
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
-
+                velocityTracker?.addMovement(event)
                 velocityTracker?.recycle()
                 velocityTracker = null
 
                 cancelLongPress()
                 hideSelectionMagnifier()
 
-                v.parent
-                    .requestDisallowInterceptTouchEvent(
-                        false
-                    )
+                v.parent.requestDisallowInterceptTouchEvent(false)
 
+                /*
+                 * NORMAL SINGLE TAP
+                 * -----------------
+                 * Do NOT manually setSelection() here. Native EditText has
+                 * already calculated the exact cursor position and will also
+                 * handle keyboard/cursor blinking correctly.
+                 */
                 if (
                     isSingleTap &&
                     !hasMoved &&
                     !isSelecting &&
                     !isDragging &&
-                    !scrollConfirmed
+                    !isScrollingDetected &&
+                    !scrollConfirmed &&
+                    !customGestureActive
                 ) {
-
-                    if (this@apply.hasSelection()) {
-
-                        val offset =
-                            getOffsetAtPosition(
-                                this@apply,
-                                lastTouchX,
-                                lastTouchY
-                            )
-
-                        if (
-                            offset >= 0 &&
-                            offset <=
-                            this@apply.text.length
-                        ) {
-
-                            this@apply.setSelection(
-                                offset,
-                                offset
-                            )
+                    if (nativeTouchActive) {
+                        dispatchToNativeEditText(event)
+                    } else {
+                        // Safety fallback for an unusual focus state.
+                        this@apply.requestFocus()
+                        val offset = getOffsetAtPosition(
+                            this@apply,
+                            event.x,
+                            event.y
+                        )
+                        if (offset >= 0) {
+                            this@apply.setSelection(offset, offset)
                         }
-
-                        hideSelectionHandles()
-                        hideFloatingActionBar()
-
-                        isActionBarTemporarilyHidden =
-                            false
                     }
+
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                    isActionBarTemporarilyHidden = false
+
+                    this@apply.post {
+                        this@apply.requestFocus()
+                        val imm = this@apply.context.getSystemService(
+                            Context.INPUT_METHOD_SERVICE
+                        ) as? InputMethodManager
+                        imm?.showSoftInput(
+                            this@apply,
+                            InputMethodManager.SHOW_IMPLICIT
+                        )
+                    }
+                } else if (
+                    !customGestureActive &&
+                    nativeTouchActive &&
+                    !isScrollingDetected
+                ) {
+                    // Complete native gesture for non-custom interactions.
+                    dispatchToNativeEditText(event)
                 }
 
                 if (
-                    (hasMoved || scrollConfirmed) &&
+                    customGestureActive &&
+                    isDragging &&
                     this@apply.hasSelection()
                 ) {
-
-                    val start =
-                        this@apply.selectionStart
-
-                    val end =
-                        this@apply.selectionEnd
+                    val start = this@apply.selectionStart
+                    val end = this@apply.selectionEnd
 
                     if (
                         start >= 0 &&
                         end > start &&
                         end <= this@apply.text.length
                     ) {
-
-                        val selected =
-                            this@apply.text.substring(
-                                start,
-                                end
-                            )
+                        val selected = this@apply.text.substring(start, end)
 
                         if (selected.isNotEmpty()) {
-
-                            currentSelectedText =
-                                selected
-
-                            isActionBarTemporarilyHidden =
-                                false
-
-                            showFloatingActionBar(
-                                selected
-                            )
-
+                            currentSelectedText = selected
+                            isActionBarTemporarilyHidden = false
+                            showFloatingActionBar(selected)
                             showSelectionHandles()
-
                             updateHandlePositionsImmediate()
                         }
                     }
                 }
 
                 if (
-                    !isSelecting &&
-                    this@apply.hasSelection() &&
+                    customGestureActive &&
                     !isDragging &&
-                    !isSingleTap &&
-                    !scrollConfirmed
+                    this@apply.hasSelection()
                 ) {
-
-                    val start =
-                        this@apply.selectionStart
-
-                    val end =
-                        this@apply.selectionEnd
+                    val start = this@apply.selectionStart
+                    val end = this@apply.selectionEnd
 
                     if (
                         start >= 0 &&
                         end > start &&
                         end <= this@apply.text.length
                     ) {
-
-                        val selected =
-                            this@apply.text.substring(
-                                start,
-                                end
-                            )
+                        val selected = this@apply.text.substring(start, end)
 
                         if (selected.isNotEmpty()) {
-
-                            currentSelectedText =
-                                selected
-
-                            isActionBarTemporarilyHidden =
-                                false
-
-                            showFloatingActionBar(
-                                selected
-                            )
-
+                            currentSelectedText = selected
+                            isActionBarTemporarilyHidden = false
+                            showFloatingActionBar(selected)
                             showSelectionHandles()
+                            updateHandlePositionsImmediate()
+                        }
+                    }
+                }
 
+                // For a native scroll gesture, preserve the selection and let
+                // ScrollView perform its normal scrolling behavior.
+                if (
+                    isScrollingDetected &&
+                    this@apply.hasSelection()
+                ) {
+                    val start = this@apply.selectionStart
+                    val end = this@apply.selectionEnd
+
+                    if (
+                        start >= 0 &&
+                        end > start &&
+                        end <= this@apply.text.length
+                    ) {
+                        val selected = this@apply.text.substring(start, end)
+
+                        if (selected.isNotEmpty()) {
+                            currentSelectedText = selected
+                            isActionBarTemporarilyHidden = false
+                            showFloatingActionBar(selected)
+                            showSelectionHandles()
                             updateHandlePositionsImmediate()
                         }
                     }
@@ -3122,22 +3125,25 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSingleTap = false
                 scrollConfirmed = false
                 isScrollingDetected = false
+                nativeTouchActive = false
+                customGestureActive = false
 
                 return true
             }
 
             MotionEvent.ACTION_CANCEL -> {
-
                 velocityTracker?.recycle()
                 velocityTracker = null
 
                 cancelLongPress()
                 hideSelectionMagnifier()
 
-                v.parent
-                    .requestDisallowInterceptTouchEvent(
-                        false
-                    )
+                // Finish/cancel the native gesture if it was active.
+                if (nativeTouchActive) {
+                    dispatchToNativeEditText(event)
+                }
+
+                v.parent.requestDisallowInterceptTouchEvent(false)
 
                 isSelecting = false
                 isDragging = false
@@ -3145,21 +3151,19 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSingleTap = false
                 scrollConfirmed = false
                 isScrollingDetected = false
+                nativeTouchActive = false
+                customGestureActive = false
 
                 return true
             }
         }
 
-        return false
+        return true
     }
 
     private fun cancelLongPress() {
-
         longPressRunnable?.let {
-
-            longPressHandler
-                .removeCallbacks(it)
-
+            longPressHandler.removeCallbacks(it)
             longPressRunnable = null
         }
     }
