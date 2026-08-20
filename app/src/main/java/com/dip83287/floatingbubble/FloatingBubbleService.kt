@@ -2471,7 +2471,7 @@ params.y =
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(when (icon) {
-                        "‹" -> Color.parseColor("#")
+                        "‹" -> Color.parseColor("red")
                         "⤴" -> Color.parseColor("green")
                         else -> Color.parseColor("yellow")
                     })
