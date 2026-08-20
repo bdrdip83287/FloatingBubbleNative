@@ -2170,7 +2170,7 @@ params.y =
 
         val minimizeBtn = TextView(this).apply {
             text = "−"
-            textSize = 28f
+            textSize = 32f
             setTextColor(Color.parseColor("red"))
             setPadding(16, 0, 8, 0)
             setOnClickListener { 
