@@ -2170,8 +2170,8 @@ params.y =
 
         val minimizeBtn = TextView(this).apply {
             text = "−"
-            textSize = 32f
-            setTextColor(Color.parseColor("red"))
+            textSize = 28f
+            setTextColor(Color.parseColor("#C0392B"))
             setPadding(16, 0, 8, 0)
             setOnClickListener { 
                 collapseToBubble()
@@ -2454,28 +2454,37 @@ params.y =
         }
         topBar.addView(titleText)
 
+        // ===== CHILD NOTE TOP-BAR MANUAL SIZE CONTROLS =====
+        // buttonSize = প্রতিটি গোল বাটনের সাইজ। 22 থেকে কম/বেশি করুন।
+        // iconSize   = বাটনের ভিতরের icon-এর সাইজ। 19 থেকে কম/বেশি করুন।
+        // buttonGap  = বাটনগুলোর মাঝের ফাঁকা জায়গা। বর্তমানে 4dp।
+        // iconColor  = icon-এর রং। বর্তমানে BLACK।
+        // ======================================================
         fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
+            val buttonSize = 22
+            val iconSize = 19f
+            val buttonGap = 4
             return TextView(this).apply {
                 text = icon
-                textSize = 18f
+                textSize = iconSize
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-                setTextColor(Color.WHITE)
+                setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
                 isClickable = true
                 isFocusable = true
-                layoutParams = LinearLayout.LayoutParams(dpToPx(26), dpToPx(26)).apply {
-                    marginStart = dpToPx(2)
-                    marginEnd = dpToPx(2)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(buttonSize), dpToPx(buttonSize)).apply {
+                    marginStart = dpToPx(buttonGap / 2)
+                    marginEnd = dpToPx(buttonGap / 2)
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(when (icon) {
-                        "‹" -> Color.parseColor("red")
-                        "⤴" -> Color.parseColor("green")
-                        else -> Color.parseColor("yellow")
+                        "‹" -> Color.parseColor("#00E5FF")
+                        "⤴" -> Color.parseColor("#00FF66")
+                        else -> Color.parseColor("#FFD000")
                     })
-                    // ইচ্ছাকৃতভাবে কোনো border/stroke নেই
+                    // কোনো border/stroke নেই
                 }
                 setOnClickListener { onClick() }
             }
@@ -3279,10 +3288,10 @@ setOnTouchListener(object : View.OnTouchListener {
         // Resize handle এখন নোটপ্যাডের একদম bottom-right corner-এ থাকবে।
         val resizeHandleView = TextView(this).apply {
             // শুধু bold resize arrow — কোনো button/background নেই
-            text = "↘"
+            text = "◢"
             textSize = 24f
             setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-            setTextColor(Color.parseColor("#555555"))
+            setTextColor(Color.BLACK)
             gravity = Gravity.CENTER
             includeFontPadding = false
             background = null
