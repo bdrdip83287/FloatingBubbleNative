@@ -1,4 +1,3 @@
-
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -87,6 +86,12 @@ class FloatingBubbleService : Service() {
     private var savedChildSelectionStart = -1
     private var savedChildSelectionEnd = -1
     private var savedChildScrollY = 0
+
+    // Child Note পুনরায় খোলার সময় Android-এর focus/keyboard যেন পুরোনো
+    // viewport-কে নিজে থেকে scroll না করে, তার জন্য সাময়িক restore-lock।
+    private var isRestoringChildEditorState = false
+    private var childEditorRestoreRunnable: Runnable? = null
+    private val childEditorRestoreHandler = Handler(Looper.getMainLooper())
 
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
@@ -2542,6 +2547,16 @@ params.y =
             isFocusableInTouchMode = false
             
             setOnScrollChangeListener { _, _, _, _, _ ->
+                // Child Note restore চলাকালীন Android/focus/keyboard-এর
+                // automatic scroll হলে সঙ্গে সঙ্গে saved viewport-এ ফিরিয়ে দিই।
+                if (isRestoringChildEditorState) {
+                    val targetY = savedChildScrollY.coerceAtLeast(0)
+                    if (scrollY != targetY) {
+                        scrollTo(0, targetY)
+                    }
+                    return@setOnScrollChangeListener
+                }
+
                 val currentTime = System.currentTimeMillis()
                 lastScrollTime = currentTime
                 
@@ -3373,45 +3388,91 @@ setOnTouchListener(object : View.OnTouchListener {
         windowManager.addView(noteView, params)
         
         scrollView.postDelayed({
-            editText.isFocusable = true
-            editText.isFocusableInTouchMode = true
-            editText.requestFocus()
-            
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
+            val shouldRestoreChildState =
+                hasSavedChildEditorState && savedChildEditorNoteId == note.id
 
-            // Minimize করার সময়কার cursor/selection + scroll position restore করি।
-            if (hasSavedChildEditorState && savedChildEditorNoteId == note.id) {
-                val textLength = editText.text.length
-                val restoreStart = savedChildSelectionStart.coerceIn(0, textLength)
-                val restoreEnd = savedChildSelectionEnd.coerceIn(0, textLength)
+            // Restore করার জন্য target state আগে capture করি।
+            // Focus/keyboard-এর কারণে Android পরে scroll করলেও restore-lock
+            // সেটিকে আবার এই একই viewport-এ ফিরিয়ে রাখবে।
+            val restoreScrollY = savedChildScrollY.coerceAtLeast(0)
+            val restoreStart = if (shouldRestoreChildState) {
+                savedChildSelectionStart.coerceIn(0, editText.text.length)
+            } else {
+                editText.selectionStart.coerceIn(0, editText.text.length)
+            }
+            val restoreEnd = if (shouldRestoreChildState) {
+                savedChildSelectionEnd.coerceIn(0, editText.text.length)
+            } else {
+                restoreStart
+            }
 
+            if (shouldRestoreChildState) {
+                // পুরোনো viewport lock প্রথমেই চালু করি—তাই focus দেওয়ার
+                // মুহূর্তে ScrollView কোনো visible jump করতে পারবে না।
+                isRestoringChildEditorState = true
+                childEditorRestoreRunnable?.let {
+                    childEditorRestoreHandler.removeCallbacks(it)
+                }
+
+                scrollView.scrollTo(0, restoreScrollY)
                 try {
                     editText.setSelection(restoreStart, restoreEnd)
                 } catch (_: Exception) {
                     editText.setSelection(restoreStart)
                 }
+            }
 
-                scrollView.post {
-                    scrollView.scrollTo(0, savedChildScrollY.coerceAtLeast(0))
-                    editText.post {
+            editText.isFocusable = true
+            editText.isFocusableInTouchMode = true
+            editText.requestFocus()
+
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
+
+            if (shouldRestoreChildState) {
+                // Keyboard/layout pass-এর পরও কয়েকটি frame পর্যন্ত একই Y রাখি।
+                // scrollTo() ব্যবহার করা হয়েছে, smoothScroll নয়—তাই কোনো auto-scroll
+                // animation/jump চোখে পড়বে না।
+                val restoreHandler = childEditorRestoreHandler
+                val startedAt = SystemClock.uptimeMillis()
+                val runnable = object : Runnable {
+                    override fun run() {
+                        if (!isRestoringChildEditorState) return
+
                         try {
+                            scrollView.scrollTo(0, restoreScrollY)
                             editText.setSelection(restoreStart, restoreEnd)
                         } catch (_: Exception) {
-                            editText.setSelection(restoreStart)
                         }
 
-                        if (restoreStart != restoreEnd) {
-                            showSelectionHandles()
-                            updateHandlePositionsImmediate()
+                        if (SystemClock.uptimeMillis() - startedAt < 900L) {
+                            restoreHandler.postDelayed(this, 16L)
                         } else {
-                            hideSelectionHandles()
-                            hideFloatingActionBar()
+                            // শেষবার exact position নিশ্চিত করি।
+                            try {
+                                scrollView.scrollTo(0, restoreScrollY)
+                                editText.setSelection(restoreStart, restoreEnd)
+                            } catch (_: Exception) {
+                            }
+
+                            if (restoreStart != restoreEnd) {
+                                showSelectionHandles()
+                                updateHandlePositionsImmediate()
+                            } else {
+                                hideSelectionHandles()
+                                hideFloatingActionBar()
+                            }
+
+                            isRestoringChildEditorState = false
+                            childEditorRestoreRunnable = null
                         }
                     }
                 }
 
-                // State একবার restore হয়ে গেলে পরের নতুন editor-এ ভুল করে apply হবে না।
+                childEditorRestoreRunnable = runnable
+                restoreHandler.post(runnable)
+
+                // State একবার restore cycle শুরু হলে নতুন editor-এ আর apply হবে না।
                 hasSavedChildEditorState = false
                 savedChildEditorNoteId = null
             }
