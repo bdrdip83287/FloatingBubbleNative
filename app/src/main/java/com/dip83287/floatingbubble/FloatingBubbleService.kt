@@ -2429,7 +2429,6 @@ params.y =
             setPadding(dpToPx(5), dpToPx(5), dpToPx(5), dpToPx(5))
         }
 
-        // Sample-4 style: compact dark title bar with colorful circular controls.
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -2437,59 +2436,52 @@ params.y =
                 dpToPx(40)
             )
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#20242B"))
-                setStroke(dpToPx(1), Color.parseColor("#343B46"))
-                cornerRadius = 0f
-            }
-            setPadding(dpToPx(5), 0, dpToPx(4), 0)
+            setBackgroundColor(Color.parseColor("#F9E79F"))
+            setPadding(dpToPx(5), 0, dpToPx(5), 0)
             setOnTouchListener(TitleBarDragListener())
         }
 
         val titleText = TextView(this).apply {
             text = note.content.lineSequence().firstOrNull()?.trimEnd()?.ifEmpty { "Untitled Note" } ?: "Untitled Note"
-            textSize = 15f
-            setTextColor(Color.WHITE)
+            textSize = 16f
+            setTextColor(Color.parseColor("#333333"))
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-            setPadding(dpToPx(7), 0, dpToPx(5), 0)
+            setPadding(dpToPx(6), 0, dpToPx(6), 0)
         }
         topBar.addView(titleText)
 
         fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
-            val iconColor = when (icon) {
-                "←" -> Color.parseColor("#B66DFF")   // purple
-                "↗" -> Color.parseColor("#18D6C7")   // cyan/teal
-                else -> Color.parseColor("#FF8A00")   // orange
-            }
-
             return TextView(this).apply {
                 text = icon
-                textSize = if (icon == "−") 18f else 17f
+                textSize = 18f
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
                 isClickable = true
                 isFocusable = true
-                elevation = dpToPx(2).toFloat()
-                layoutParams = LinearLayout.LayoutParams(dpToPx(28), dpToPx(28)).apply {
+                layoutParams = LinearLayout.LayoutParams(dpToPx(26), dpToPx(26)).apply {
                     marginStart = dpToPx(2)
                     marginEnd = dpToPx(2)
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(iconColor)
-                    setStroke(dpToPx(1), Color.parseColor("#FFFFFF"))
+                    setColor(when (icon) {
+                        "‹" -> Color.parseColor("#00B8D4")
+                        "⤴" -> Color.parseColor("#00C853")
+                        else -> Color.parseColor("#FF6D00")
+                    })
+                    // ইচ্ছাকৃতভাবে কোনো border/stroke নেই
                 }
                 setOnClickListener { onClick() }
             }
         }
 
-        val backBtn = createRoundTopButton("←") {
+        val backBtn = createRoundTopButton("‹") {
             saveCurrentNoteData(note.id)
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -2497,7 +2489,7 @@ params.y =
         }
         topBar.addView(backBtn)
 
-        val shareBtn = createRoundTopButton("↗") {
+        val shareBtn = createRoundTopButton("⤴") {
             saveCurrentNoteData(note.id)
             shareLargeText(editText.text.toString())
         }
@@ -3284,22 +3276,17 @@ setOnTouchListener(object : View.OnTouchListener {
         contentContainer.addView(scrollView)
 
         // Save/Delete bottom bar সম্পূর্ণ বাদ দেওয়া হয়েছে।
-        // Resize handle: Sample-4-এর মতো শুধু bold resize symbol; কোনো button/circle/background নেই।
-        // এটি নোটপ্যাডের bottom-right border-এর একদম corner-এ থাকবে।
+        // Resize handle এখন নোটপ্যাডের একদম bottom-right corner-এ থাকবে।
         val resizeHandleView = TextView(this).apply {
-            text = "↙↗"
-            textSize = 18f
+            // শুধু bold resize arrow — কোনো button/background নেই
+            text = "↘"
+            textSize = 24f
             setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-            setTextColor(Color.parseColor("#B66DFF"))
+            setTextColor(Color.parseColor("#555555"))
             gravity = Gravity.CENTER
             includeFontPadding = false
             background = null
-            setPadding(0, 0, 0, 0)
-            layoutParams = FrameLayout.LayoutParams(
-                dpToPx(30),
-                dpToPx(30),
-                Gravity.BOTTOM or Gravity.END
-            ).apply {
+            layoutParams = FrameLayout.LayoutParams(dpToPx(30), dpToPx(30), Gravity.BOTTOM or Gravity.END).apply {
                 rightMargin = 0
                 bottomMargin = 0
             }
