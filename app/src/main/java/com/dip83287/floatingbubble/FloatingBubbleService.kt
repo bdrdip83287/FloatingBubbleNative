@@ -2170,8 +2170,8 @@ params.y =
 
         val minimizeBtn = TextView(this).apply {
             text = "−"
-            textSize = 28f
-            setTextColor(Color.parseColor("#C0392B"))
+            textSize = 32f
+            setTextColor(Color.parseColor("orange"))
             setPadding(16, 0, 8, 0)
             setOnClickListener { 
                 collapseToBubble()
