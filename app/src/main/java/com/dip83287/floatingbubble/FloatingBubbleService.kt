@@ -2433,7 +2433,7 @@ params.y =
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(50)
+                dpToPx(40)
             )
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#F9E79F"))
@@ -2457,25 +2457,30 @@ params.y =
         fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
             return TextView(this).apply {
                 text = icon
-                textSize = 20f
-                setTextColor(Color.parseColor("#333333"))
+                textSize = 17f
+                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
                 isClickable = true
                 isFocusable = true
-                layoutParams = LinearLayout.LayoutParams(dpToPx(38), dpToPx(38)).apply {
-                    marginStart = dpToPx(3)
-                    marginEnd = dpToPx(3)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(30), dpToPx(30)).apply {
+                    marginStart = dpToPx(2)
+                    marginEnd = dpToPx(2)
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#FFFDF2"))
-                    setStroke(dpToPx(1), Color.parseColor("#B7A96B"))
+                    setColor(when (icon) {
+                        "←" -> Color.parseColor("#5C6BC0")
+                        "↗" -> Color.parseColor("#26A69A")
+                        else -> Color.parseColor("#FF7043")
+                    })
+                    setStroke(dpToPx(1), Color.parseColor("#FFFFFF"))
                 }
                 setOnClickListener { onClick() }
             }
         }
 
-        val backBtn = createRoundTopButton("‹") {
+        val backBtn = createRoundTopButton("←") {
             saveCurrentNoteData(note.id)
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -3269,60 +3274,29 @@ setOnTouchListener(object : View.OnTouchListener {
         scrollView.addView(editText)
         contentContainer.addView(scrollView)
 
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 16
-            }
-        }
-
-        val saveBtn = Button(this).apply {
-            text = "Save"
-            setBackgroundColor(Color.parseColor("#4CAF50"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
-            setOnClickListener {
-                saveCurrentNote(note.id)
-            }
-        }
-        buttonRow.addView(saveBtn)
-
-        val deleteBtn = Button(this).apply {
-            text = "Delete"
-            setBackgroundColor(Color.parseColor("#E74C3C"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setOnClickListener {
-                notesList.removeAll { it.id == note.id }
-                saveNotesToPrefs()
-                notesAdapter.updateList(notesList)
-                updateBubbleCount()
-                hideSelectionHandles()
-                hideFloatingActionBar()
-                showNoteList()
-                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
-            }
-        }
-        buttonRow.addView(deleteBtn)
-        contentContainer.addView(buttonRow)
-
-
+        // Save/Delete bottom bar সম্পূর্ণ বাদ দেওয়া হয়েছে।
+        // Resize handle এখন নোটপ্যাডের একদম bottom-right corner-এ থাকবে।
         val resizeHandleView = TextView(this).apply {
-            text = "◢"
-            textSize = 18f
-            setTextColor(Color.parseColor("#999999"))
-            gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
-            lp.topMargin = 8
-            layoutParams = lp
+            text = "↘"
+            textSize = 22f
+            setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            setTextColor(Color.parseColor("#FFFFFF"))
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#5C6BC0"))
+                setStroke(dpToPx(1), Color.parseColor("#FFFFFF"))
+            }
+            layoutParams = FrameLayout.LayoutParams(dpToPx(28), dpToPx(28), Gravity.BOTTOM or Gravity.END).apply {
+                rightMargin = 0
+                bottomMargin = 0
+            }
             setOnTouchListener(ResizeTouchListener())
+            bringToFront()
         }
-        contentContainer.addView(resizeHandleView)
-        
+
         container.addView(contentContainer)
+        container.addView(resizeHandleView)
         
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
