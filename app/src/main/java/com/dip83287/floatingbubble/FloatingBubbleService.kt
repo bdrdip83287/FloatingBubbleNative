@@ -87,14 +87,7 @@ class FloatingBubbleService : Service() {
     private var savedChildSelectionEnd = -1
     private var savedChildScrollY = 0
 
-    // Child Note পুনরায় খোলার সময় Android-এর focus/keyboard যেন পুরোনো
-    // viewport-কে নিজে থেকে scroll না করে, তার জন্য সাময়িক restore-lock।
-    private var isRestoringChildEditorState = false
-    private var childEditorRestoreRunnable: Runnable? = null
-    private val childEditorRestoreHandler = Handler(Looper.getMainLooper())
-
     private lateinit var editText: EditText
-    private lateinit var titleInput: EditText
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
@@ -2423,116 +2416,108 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor(NOTEPAD_BG_COLOR))
+                setStroke(dpToPx(5), Color.parseColor("#333333"))
+                cornerRadius = 0f
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
         }
         
         val contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(16, 16, 16, 16)
+            setPadding(dpToPx(5), dpToPx(5), dpToPx(5), dpToPx(5))
         }
 
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                dpToPx(50)
             )
-            setOnTouchListener(TitleBarDragListener())
-            setPadding(8, 12, 8, 12)
+            gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#F9E79F"))
+            setPadding(dpToPx(5), 0, dpToPx(5), 0)
+            setOnTouchListener(TitleBarDragListener())
         }
 
-        val backBtn = TextView(this).apply {
-            text = "←"
-            textSize = 24f
-            setTextColor(Color.parseColor("#333333"))
-            setPadding(8, 0, 16, 0)
-            setOnClickListener {
-                hideSelectionHandles()
-                hideFloatingActionBar()
-                showNoteList()
-            }
-        }
-        topBar.addView(backBtn)
-
-        val editorTitle = TextView(this).apply {
-            text = "Edit Note"
+        val titleText = TextView(this).apply {
+            text = note.content.lineSequence().firstOrNull()?.trimEnd()?.ifEmpty { "Untitled Note" } ?: "Untitled Note"
             textSize = 16f
             setTextColor(Color.parseColor("#333333"))
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            setPadding(dpToPx(6), 0, dpToPx(6), 0)
         }
-        topBar.addView(editorTitle)
+        topBar.addView(titleText)
 
-        val minimizeBtn = TextView(this).apply {
-            text = "−"
-            textSize = 28f
-            setTextColor(Color.parseColor("#C0392B"))
-            setPadding(16, 0, 8, 0)
-            setOnClickListener {
-                try {
-                    // আগের debounce save যেন পরে নতুন খোলা Note-এ গিয়ে লেখা না save করে।
-                    saveRunnable?.let { saveHandler.removeCallbacks(it) }
-                    saveRunnable = null
-
-                    // Child Note minimize করার ঠিক আগের editor state সংরক্ষণ করি।
-                    // Selection থাকলে range, না থাকলে cursor position একই থাকবে।
-                    savedChildEditorNoteId = note.id
-                    savedChildSelectionStart = editText.selectionStart.coerceIn(0, editText.text.length)
-                    savedChildSelectionEnd = editText.selectionEnd.coerceIn(0, editText.text.length)
-                    savedChildScrollY = scrollView.scrollY
-                    hasSavedChildEditorState = true
-
-                    // সর্বশেষ title/content সরাসরি save হবে।
-                    saveCurrentNoteData(note.id)
-
-                    hideSelectionHandles()
-                    hideFloatingActionBar()
-
-                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE)
-                        as? InputMethodManager
-                    imm?.hideSoftInputFromWindow(editText.windowToken, 0)
-
-                    // activeNoteId/isChildNoteOpen ইচ্ছাকৃতভাবে রাখা হচ্ছে,
-                    // যাতে Bubble থেকে আবার খুললে এই একই Child Note editor পাওয়া যায়।
-                    activeNoteId = note.id
-                    isChildNoteOpen = true
-
-                    collapseToBubble()
-                } catch (e: Exception) {
-                    EmergencyLog.logException(e, "Child Note minimize")
+        fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
+            return TextView(this).apply {
+                text = icon
+                textSize = 20f
+                setTextColor(Color.parseColor("#333333"))
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                layoutParams = LinearLayout.LayoutParams(dpToPx(38), dpToPx(38)).apply {
+                    marginStart = dpToPx(3)
+                    marginEnd = dpToPx(3)
                 }
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#FFFDF2"))
+                    setStroke(dpToPx(1), Color.parseColor("#B7A96B"))
+                }
+                setOnClickListener { onClick() }
+            }
+        }
+
+        val backBtn = createRoundTopButton("‹") {
+            saveCurrentNoteData(note.id)
+            hideSelectionHandles()
+            hideFloatingActionBar()
+            showNoteList()
+        }
+        topBar.addView(backBtn)
+
+        val shareBtn = createRoundTopButton("↗") {
+            saveCurrentNoteData(note.id)
+            shareLargeText(editText.text.toString())
+        }
+        topBar.addView(shareBtn)
+
+        val minimizeBtn = createRoundTopButton("−") {
+            try {
+                saveRunnable?.let { saveHandler.removeCallbacks(it) }
+                saveRunnable = null
+
+                savedChildEditorNoteId = note.id
+                savedChildSelectionStart = editText.selectionStart.coerceIn(0, editText.text.length)
+                savedChildSelectionEnd = editText.selectionEnd.coerceIn(0, editText.text.length)
+                savedChildScrollY = scrollView.scrollY
+                hasSavedChildEditorState = true
+
+                saveCurrentNoteData(note.id)
+                hideSelectionHandles()
+                hideFloatingActionBar()
+
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.hideSoftInputFromWindow(editText.windowToken, 0)
+
+                activeNoteId = note.id
+                isChildNoteOpen = true
+                collapseToBubble()
+            } catch (e: Exception) {
+                EmergencyLog.logException(e, "Child Note minimize")
             }
         }
         topBar.addView(minimizeBtn)
         contentContainer.addView(topBar)
 
-        // এই editor-টি বর্তমানে যে Note-এর জন্য খোলা হয়েছে সেটি মনে রাখি।
-        activeNoteId = note.id
-        isChildNoteOpen = true
-
-        titleInput = EditText(this).apply {
-            setText(note.title)
-            hint = "Title"
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(8, 16, 8, 8)
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            setTextIsSelectable(true)
-        }
-        contentContainer.addView(titleInput)
-
-        val divider = View(this).apply {
-            setBackgroundColor(Color.parseColor("#DDDDDD"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 2
-            )
-        }
-        contentContainer.addView(divider)
+        // পুরো Child Note এখন একটি মাত্র EditText; আলাদা Title field নেই।
 
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -2547,16 +2532,6 @@ params.y =
             isFocusableInTouchMode = false
             
             setOnScrollChangeListener { _, _, _, _, _ ->
-                // Child Note restore চলাকালীন Android/focus/keyboard-এর
-                // automatic scroll হলে সঙ্গে সঙ্গে saved viewport-এ ফিরিয়ে দিই।
-                if (isRestoringChildEditorState) {
-                    val targetY = savedChildScrollY.coerceAtLeast(0)
-                    if (scrollY != targetY) {
-                        scrollTo(0, targetY)
-                    }
-                    return@setOnScrollChangeListener
-                }
-
                 val currentTime = System.currentTimeMillis()
                 lastScrollTime = currentTime
                 
@@ -3252,6 +3227,11 @@ setOnTouchListener(object : View.OnTouchListener {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    // Top bar title = note content-এর প্রথম লাইন
+                    val firstLineTitle = s?.toString()?.lineSequence()?.firstOrNull()?.trimEnd()
+                        ?.ifEmpty { "Untitled Note" } ?: "Untitled Note"
+                    titleText.text = firstLineTitle
+
                     if (!this@apply.hasSelection()) {
                         hideSelectionHandles()
                         hideFloatingActionBar()
@@ -3271,7 +3251,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         if (index != -1) {
                             val updatedNote = notesList[index].copy(
                                 content = text.toString(),
-                                title = titleInput.text.toString(),
+                                title = text.toString().lineSequence().firstOrNull()?.trimEnd()?.ifEmpty { "Untitled Note" } ?: "Untitled Note",
                                 lastEdited = System.currentTimeMillis()
                             )
                             notesList[index] = updatedNote
@@ -3329,21 +3309,6 @@ setOnTouchListener(object : View.OnTouchListener {
         buttonRow.addView(deleteBtn)
         contentContainer.addView(buttonRow)
 
-        val shareBtn = Button(this).apply {
-            text = "Share Note"
-            setBackgroundColor(Color.parseColor("#2196F3"))
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 8
-            }
-            setOnClickListener {
-                shareLargeText("${titleInput.text}\n\n${editText.text}")
-            }
-        }
-        contentContainer.addView(shareBtn)
 
         val resizeHandleView = TextView(this).apply {
             text = "◢"
@@ -3388,91 +3353,45 @@ setOnTouchListener(object : View.OnTouchListener {
         windowManager.addView(noteView, params)
         
         scrollView.postDelayed({
-            val shouldRestoreChildState =
-                hasSavedChildEditorState && savedChildEditorNoteId == note.id
+            editText.isFocusable = true
+            editText.isFocusableInTouchMode = true
+            editText.requestFocus()
+            
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
 
-            // Restore করার জন্য target state আগে capture করি।
-            // Focus/keyboard-এর কারণে Android পরে scroll করলেও restore-lock
-            // সেটিকে আবার এই একই viewport-এ ফিরিয়ে রাখবে।
-            val restoreScrollY = savedChildScrollY.coerceAtLeast(0)
-            val restoreStart = if (shouldRestoreChildState) {
-                savedChildSelectionStart.coerceIn(0, editText.text.length)
-            } else {
-                editText.selectionStart.coerceIn(0, editText.text.length)
-            }
-            val restoreEnd = if (shouldRestoreChildState) {
-                savedChildSelectionEnd.coerceIn(0, editText.text.length)
-            } else {
-                restoreStart
-            }
+            // Minimize করার সময়কার cursor/selection + scroll position restore করি।
+            if (hasSavedChildEditorState && savedChildEditorNoteId == note.id) {
+                val textLength = editText.text.length
+                val restoreStart = savedChildSelectionStart.coerceIn(0, textLength)
+                val restoreEnd = savedChildSelectionEnd.coerceIn(0, textLength)
 
-            if (shouldRestoreChildState) {
-                // পুরোনো viewport lock প্রথমেই চালু করি—তাই focus দেওয়ার
-                // মুহূর্তে ScrollView কোনো visible jump করতে পারবে না।
-                isRestoringChildEditorState = true
-                childEditorRestoreRunnable?.let {
-                    childEditorRestoreHandler.removeCallbacks(it)
-                }
-
-                scrollView.scrollTo(0, restoreScrollY)
                 try {
                     editText.setSelection(restoreStart, restoreEnd)
                 } catch (_: Exception) {
                     editText.setSelection(restoreStart)
                 }
-            }
 
-            editText.isFocusable = true
-            editText.isFocusableInTouchMode = true
-            editText.requestFocus()
-
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
-
-            if (shouldRestoreChildState) {
-                // Keyboard/layout pass-এর পরও কয়েকটি frame পর্যন্ত একই Y রাখি।
-                // scrollTo() ব্যবহার করা হয়েছে, smoothScroll নয়—তাই কোনো auto-scroll
-                // animation/jump চোখে পড়বে না।
-                val restoreHandler = childEditorRestoreHandler
-                val startedAt = SystemClock.uptimeMillis()
-                val runnable = object : Runnable {
-                    override fun run() {
-                        if (!isRestoringChildEditorState) return
-
+                scrollView.post {
+                    scrollView.scrollTo(0, savedChildScrollY.coerceAtLeast(0))
+                    editText.post {
                         try {
-                            scrollView.scrollTo(0, restoreScrollY)
                             editText.setSelection(restoreStart, restoreEnd)
                         } catch (_: Exception) {
+                            editText.setSelection(restoreStart)
                         }
 
-                        if (SystemClock.uptimeMillis() - startedAt < 900L) {
-                            restoreHandler.postDelayed(this, 16L)
+                        if (restoreStart != restoreEnd) {
+                            showSelectionHandles()
+                            updateHandlePositionsImmediate()
                         } else {
-                            // শেষবার exact position নিশ্চিত করি।
-                            try {
-                                scrollView.scrollTo(0, restoreScrollY)
-                                editText.setSelection(restoreStart, restoreEnd)
-                            } catch (_: Exception) {
-                            }
-
-                            if (restoreStart != restoreEnd) {
-                                showSelectionHandles()
-                                updateHandlePositionsImmediate()
-                            } else {
-                                hideSelectionHandles()
-                                hideFloatingActionBar()
-                            }
-
-                            isRestoringChildEditorState = false
-                            childEditorRestoreRunnable = null
+                            hideSelectionHandles()
+                            hideFloatingActionBar()
                         }
                     }
                 }
 
-                childEditorRestoreRunnable = runnable
-                restoreHandler.post(runnable)
-
-                // State একবার restore cycle শুরু হলে নতুন editor-এ আর apply হবে না।
+                // State একবার restore হয়ে গেলে পরের নতুন editor-এ ভুল করে apply হবে না।
                 hasSavedChildEditorState = false
                 savedChildEditorNoteId = null
             }
@@ -3487,7 +3406,7 @@ setOnTouchListener(object : View.OnTouchListener {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
             val updatedNote = notesList[index].copy(
-                title = titleInput.text.toString().ifEmpty { "Untitled Note" },
+                title = editText.text.toString().lineSequence().firstOrNull()?.trimEnd()?.ifEmpty { "Untitled Note" } ?: "Untitled Note",
                 content = editText.text.toString(),
                 lastEdited = System.currentTimeMillis()
             )
