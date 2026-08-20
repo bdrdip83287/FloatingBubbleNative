@@ -2471,9 +2471,9 @@ params.y =
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(when (icon) {
-                        "‹" -> Color.parseColor("#00B8D4")
-                        "⤴" -> Color.parseColor("#00C853")
-                        else -> Color.parseColor("#FF6D00")
+                        "‹" -> Color.parseColor("#")
+                        "⤴" -> Color.parseColor("green")
+                        else -> Color.parseColor("yellow")
                     })
                     // ইচ্ছাকৃতভাবে কোনো border/stroke নেই
                 }
