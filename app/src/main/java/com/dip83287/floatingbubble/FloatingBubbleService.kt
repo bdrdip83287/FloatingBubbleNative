@@ -3299,7 +3299,7 @@ setOnTouchListener(object : View.OnTouchListener {
             setPadding(0, 0, 0, 0)
             // Position correction: 1dp right, 3dp down.
             translationX = dpToPx(1).toFloat()
-            translationY = dpToPx(7).toFloat()
+            translationY = dpToPx(3).toFloat()
             background = null
             layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
                 rightMargin = 0
@@ -3601,4 +3601,3 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
-    
