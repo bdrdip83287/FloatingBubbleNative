@@ -2472,7 +2472,7 @@ params.y =
                 setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                setPadding(0, 0, 0, 9)
+                setPadding(0, 0, 5, 0)
                 isClickable = true
                 isFocusable = true
                 layoutParams = LinearLayout.LayoutParams(dpToPx(buttonSize), dpToPx(buttonSize)).apply {
