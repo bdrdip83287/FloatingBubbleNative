@@ -2467,7 +2467,7 @@ params.y =
                 text = icon
                 textSize = iconSize
                 // Optical vertical correction: move Back/Share glyphs 2dp upward.
-                translationY = if (icon == "←" || icon == "⤴") dpToPx(0).toFloat() else 0f
+                translationY = if (icon == "←" || icon == "⤴") dpToPx(-5).toFloat() else 0f
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
