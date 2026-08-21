@@ -2461,9 +2461,9 @@ params.y =
         // iconColor  = icon-এর রং। বর্তমানে BLACK।
         // ======================================================
         fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
-            val buttonSize = 22
-            val iconSize = 19f
-            val buttonGap = 4
+            val buttonSize = 24
+            val iconSize = 22f
+            val buttonGap = 6
             return TextView(this).apply {
                 text = icon
                 textSize = iconSize
