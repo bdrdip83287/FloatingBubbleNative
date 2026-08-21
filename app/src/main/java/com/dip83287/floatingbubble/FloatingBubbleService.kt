@@ -2467,12 +2467,12 @@ params.y =
                 text = icon
                 textSize = iconSize
                 // Optical vertical correction: move Back/Share glyphs 2dp upward.
-                translationY = if (icon == "←" || icon == "⤴") dpToPx(-5).toFloat() else 0f
+                translationY = if (icon == "←" || icon == "⤴") dpToPx(0).toFloat() else 0f
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                setPadding(0, 0, 0, 0)
+                setPadding(0, 4, 0, 0)
                 isClickable = true
                 isFocusable = true
                 layoutParams = LinearLayout.LayoutParams(dpToPx(buttonSize), dpToPx(buttonSize)).apply {
