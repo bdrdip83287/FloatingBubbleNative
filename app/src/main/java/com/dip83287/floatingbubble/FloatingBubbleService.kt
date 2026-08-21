@@ -1,3 +1,234 @@
+
+
+Pasted text(4).txt
+Document
+আমি আপনাকে সম্পূর্ণ floatingBubbleService.kt কোডটি পাঠালাম। 
+
+
+
+Pasted markdown.md
+File
+আপনার এবারের কোড দ্বারা আপডেট করার পর বিল্ডে নিচের ইরোর শো করছে। তাই সমস্যা সম্পর্কে  সংক্ষেপে বলুন এবং সমাধান কোড দিন। 
+
+
+Sunday 11:54 PM
+
+Pasted text(5).txt
+Document
+তাহলে এই অনুযায়ী setOnTouchListener এর জন্য  আপনাকে দেয়া কোডটি সম্পূর্ণ আপডেট করে দিন
+
+
+Monday 4:13 PM
+
+Pasted markdown(1).md
+File
+আপনার দেয়া এই কোড দ্বারা আপডেট করার পর বিল্ডে উল্লেখ্য ইরোর শো করছে 
+
+
+
+Pasted markdown(2).md
+File
+যে টেক্সট ফাইলটি দিলাম সেটাই বিল্ডের ইরোর 
+
+
+Pasted markdown(3).md
+File
+আপনার দেয়েই কোড দ্বারা আপডেট করার পর বিল্ডে txt ফাইলে দেয়া  ইরোর শো করছে 
+
+
+Pasted markdown(4).md
+File
+কিন্তু আপনার দেয়া এই কোড দ্বারা আপডেট করার পরেও txt ফাইলে দেয়া  ইরোর শো করছে বিল্ডে।
+
+
+
+Pasted text(6).txt
+Document
+এই txt ফাইলেই আমার পুরো FloatingBubbleService.kt ফাইল
+
+
+Wednesday 6:44 PM
+
+Pasted text(7).txt
+Document
+আপনার দেয়া এই কোড গুলো যুক্ত  করে আমার সসম্পূর্ণ কোডটি আপনাকে দেয়া txt ফাইলের মত করে আপডেট করেছি। এই আপডেট করার পর ডিলেট জোন এবং হোভার আমার চাহিদা মত কাজ করছে। কিন্তু, সমস্যা হল নোটপ্যাডে টাচ করলে কীবোর্ড শো করছে না এবং লেখার জন্য বিভিন্ন টেক্সটে টাচ করলে সেখানে কারসর ব্লিনক করছে না, এবং প্রথমে টেক্সটে  সিংেল টাচ করলে পুরো টেক্সট সিলেক্ট হয়ে যাচ্ছে। 
+
+জি। আপনার v4 কোডের ওপর ভিত্তি করেই শুধু চাওয়া UI পরিবর্তনগুলো করেছি। Delete Zone, Hover, Bubble drag, Resize logic, Selection handles, scrolling, cursor/selection restore, minimize/expand—এসবের মূল কার্যকারিতায় কোনো পরিবর্তন করা হয়নি।
+
+এবার পরিবর্তনগুলো
+buttonSize = 24
+
+iconSize = 23f
+
+buttonGap = 6
+
+প্রতিটি Top-bar button-এর চারপাশে 1dp কালো border
+
+Share icon-এর alignment মাঝখানে ঠিক করা হয়েছে এবং asymmetric padding সরানো হয়েছে।
+
+Minimize button → উজ্জ্বল কমলা #FF8C00
+
+Resize icon → হালকা লাল #FF9999
+
+Resize icon-এর padding 0
+
+Resize icon-এর অবস্থান Bottom + End
+
+Resize handle-এর container ছোট করে 24dp × 24dp করা হয়েছে, যাতে ডান ও নিচের border-এর আরও কাছাকাছি থাকে।
+
+Resize icon-এ কোনো button/background রাখা হয়নি।
+
+ম্যানুয়ালি পরিবর্তনের জায়গা
+Top-bar button:
+
+val buttonSize = 24
+val iconSize = 23f
+val buttonGap = 6
+এখানে:
+
+buttonSize → button-এর আকার
+
+iconSize → icon-এর আকার
+
+buttonGap → button-এর মধ্যকার দূরত্ব
+
+Resize icon-এর আকার পরিবর্তন করতে:
+
+textSize = 24f
+আর resize icon-এর ডান/নিচের অবস্থান:
+
+rightMargin = 0
+bottomMargin = 0
+📄 আপডেটেড সম্পূর্ণ TXT
+FloatingBubbleService_child_note_titlebar_updated_v5.txt
+
+
+FloatingBubbleService_child_note_titlebar_updated_v5.txt
+Document
+
+
+আপনার দেয়া এই কোড দ্বারা আপডেট করার পর অনেক উন্নত হয়েছে। কিন্তু, আরো কিছু মডিফাই প্রয়োজন তাই নিচের মত করে আপডেট করে দিন। 
+
+১. ব্যাক বাটনের আইকন পরিবর্তন করে left arrows চিহ্ন আইকন বসিয়ে দিন। 
+
+২. share বাটন এর ভিতরের শেয়ার আইকন টি নিচে নেমে গেছে, সেটি থাকবে মাঝখানে, মানে আইকনের চার পাশে সমান খালি যায়গা থাকবে, মিনিমাইজ বাটনের মত। 
+৩. চাইল্ড নোটপ্যাডের চারপাশের বরডার সরিয়ে দিন।এবং হালকা শ্যাডো দিয়ে দিন। যেন মনে হয় নোটপ্যাডের নিচে ছায়া পড়েছে। 
+
+জি। আপনার v5 কোডের structure দেখে এবার শুধু আপনার উল্লেখ করা ৩টি পরিবর্তন করেছি। বাকি কার্যকারিতা অপরিবর্তিত রাখা হয়েছে।
+
+পরিবর্তনগুলো
+১. Back icon
+
+আগের ‹ সরিয়ে এখন:
+←
+
+Back button-এর click functionality অপরিবর্তিত।
+
+২. Share icon
+
+Share icon-এর চারপাশে সমান empty space রাখার জন্য:
+
+gravity = Gravity.CENTER
+
+includeFontPadding = false
+
+setPadding(0, 0, 0, 0)
+
+ফলে Minimize icon-এর মতো Share icon-ও button-এর ঠিক মাঝখানে থাকবে।
+
+৩. Child Notepad-এর border সরানো + হালকা shadow
+
+আগের 5dp কালো border সম্পূর্ণ সরানো হয়েছে।
+
+Notepad-এর চারপাশে আর কোনো visible border থাকবে না।
+
+Shadow-এর জন্য elevation 16f → 8f করা হয়েছে, যাতে shadow হালকা ও natural দেখায়।
+
+Content container-এর অতিরিক্ত 5dp padding-ও সরানো হয়েছে, যাতে border-এর জায়গায় কোনো অপ্রয়োজনীয় ফাঁকা অংশ না থাকে।
+
+📄 সম্পূর্ণ আপডেটেড TXT ফাইল
+FloatingBubbleService_child_note_titlebar_updated_v6.txt
+
+আপনার আগের selection, cursor position, scroll position, minimize/restore, bubble, hover, delete zone, resize, drag এবং selection handles-এর logic আমি পরিবর্তন করিনি। 
+
+
+FloatingBubbleService_child_note_titlebar_updated_v6.txt
+Document
+
+
+Today 6:06 PM
+না এখনো ঠিক মত হল না।
+তাই Back icon, Share icon, আরো 2bp উপরে উটাতে হবে। এবং রিসাইজ আইকন 1bp ডানে ও 2bp নিচে নামাতে হবে।সেভাবে আপডেট করে দিবেন। এবং
+resize icone এর প্যাডিং বা মারজিন এর কি কি ভ্যালু আছে এবং কোনটা ডানে, বামে, উপরে, নিচে বাড়ালে কমালে সরে যায় তা সেটাও আমাকে বলে দিবেন।
+
+
+জি। এবার আপনার বলা অনুযায়ী শুধু icon-এর position পরিবর্তন করেছি—button-এর size, gap, touch area বা অন্য কোনো functionality পরিবর্তন করিনি।
+
+এই ভার্সনে পরিবর্তন
+Back icon: আরও 2dp উপরে
+
+Share icon: আরও 2dp উপরে
+
+Resize icon: 1dp ডানে এবং 2dp নিচে
+
+এজন্য translationX / translationY ব্যবহার করেছি। এতে button-এর actual layout বা touch area নষ্ট হবে না।
+
+আপডেটেড সম্পূর্ণ TXT ফাইল — FloatingBubbleService_child_note_titlebar_updated_v7.txt
+
+Resize icon-এর position কীভাবে নিজে পরিবর্তন করবেন
+আপনার কোডে মূলত এই দুটো value থাকবে:
+
+resizeIcon.translationX = dp(1).toFloat()
+resizeIcon.translationY = dp(2).toFloat()
+এগুলোর অর্থ:
+
+Value	কী নিয়ন্ত্রণ করে	কীভাবে সরবে
+translationX = dp(1)	ডানে-বামে	+ করলে ডানে, - করলে বামে
+translationY = dp(2)	উপরে-নিচে	+ করলে নিচে, - করলে উপরে
+উদাহরণ:
+
+resizeIcon.translationX = dp(3).toFloat()
+→ আরও 2dp ডানে যাবে।
+
+resizeIcon.translationX = dp(-2).toFloat()
+→ 2dp বামে যাবে।
+
+resizeIcon.translationY = dp(5).toFloat()
+→ আরও 3dp নিচে যাবে।
+
+resizeIcon.translationY = dp(-1).toFloat()
+→ 1dp উপরে যাবে।
+
+আর যদি Padding ব্যবহার করেন
+setPadding(left, top, right, bottom) হলে:
+
+setPadding(
+    left,
+    top,
+    right,
+    bottom
+)
+Left বাড়ালে → content ডানদিকে সরে যায়
+
+Right বাড়ালে → content বামদিকে সরে যায়
+
+Top বাড়ালে → content নিচে সরে যায়
+
+Bottom বাড়ালে → content উপরে সরে যায়
+
+তবে আপনার resize icon-এর জন্য translationX/Y-ই ব্যবহার করা ভালো, কারণ এতে icon সরবে কিন্তু resize button-এর মূল জায়গা/Touch area পরিবর্তন হবে না। 
+
+
+FloatingBubbleService_child_note_titlebar_updated_v7.txt
+Document
+
+
+No file chosen
+Library
+/
+FloatingBubbleService_child_note_titlebar_updated_v7.txt
+
+
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -2470,7 +2701,7 @@ params.y =
                 setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                setPadding(2, 4, 2, 4)
+                setPadding(0, 0, 0, 0)
                 isClickable = true
                 isFocusable = true
                 layoutParams = LinearLayout.LayoutParams(dpToPx(buttonSize), dpToPx(buttonSize)).apply {
