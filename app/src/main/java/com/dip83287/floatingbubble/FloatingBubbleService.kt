@@ -2131,7 +2131,7 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 8f
         }
         
         val contentContainer = LinearLayout(this).apply {
@@ -2418,15 +2418,14 @@ params.y =
             )
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(NOTEPAD_BG_COLOR))
-                setStroke(dpToPx(5), Color.parseColor("#333333"))
                 cornerRadius = 0f
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 8f
         }
         
         val contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dpToPx(5), dpToPx(5), dpToPx(5), dpToPx(5))
+            setPadding(0, 0, 0, 0)
         }
 
         val topBar = LinearLayout(this).apply {
@@ -2481,7 +2480,7 @@ params.y =
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(when (icon) {
-                        "‹" -> Color.parseColor("#00E5FF")
+                        "←" -> Color.parseColor("#00E5FF")
                         "⤴" -> Color.parseColor("#00FF66")
                         else -> Color.parseColor("#FF8C00")
                     })
@@ -2491,7 +2490,7 @@ params.y =
             }
         }
 
-        val backBtn = createRoundTopButton("‹") {
+        val backBtn = createRoundTopButton("←") {
             saveCurrentNoteData(note.id)
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -3298,8 +3297,8 @@ setOnTouchListener(object : View.OnTouchListener {
             setPadding(0, 0, 0, 0)
             background = null
             layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
-                rightMargin = 3
-                bottomMargin = 3
+                rightMargin = 0
+                bottomMargin = 0
             }
             setOnTouchListener(ResizeTouchListener())
             bringToFront()
