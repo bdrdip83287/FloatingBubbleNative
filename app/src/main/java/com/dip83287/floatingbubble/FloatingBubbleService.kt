@@ -3298,8 +3298,8 @@ setOnTouchListener(object : View.OnTouchListener {
             setPadding(0, 0, 0, 0)
             background = null
             layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
-                rightMargin = 0
-                bottomMargin = 0
+                rightMargin = 3
+                bottomMargin = 3
             }
             setOnTouchListener(ResizeTouchListener())
             bringToFront()
