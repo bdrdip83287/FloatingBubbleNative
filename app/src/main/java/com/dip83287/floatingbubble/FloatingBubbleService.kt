@@ -1,3 +1,4 @@
+
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -2131,7 +2132,7 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 8f
         }
         
         val contentContainer = LinearLayout(this).apply {
@@ -2418,15 +2419,14 @@ params.y =
             )
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(NOTEPAD_BG_COLOR))
-                setStroke(dpToPx(5), Color.parseColor("#333333"))
                 cornerRadius = 0f
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 8f
         }
         
         val contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dpToPx(5), dpToPx(5), dpToPx(5), dpToPx(5))
+            setPadding(0, 0, 0, 0)
         }
 
         val topBar = LinearLayout(this).apply {
@@ -2467,21 +2467,13 @@ params.y =
             return TextView(this).apply {
                 text = icon
                 textSize = iconSize
+                // Optical vertical correction: move Back/Share glyphs 2dp upward.
+                translationY = if (icon == "←" || icon == "⤴") dpToPx(-2).toFloat() else 0f
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-
-                // Back/Share-এর শুধু glyph/icon-কে button-এর ভিতরে 2dp উপরে তোলা হয়েছে।
-                // এখানে পুরো button সরানো হচ্ছে না; শুধু TextView-এর text content উপরে উঠবে।
-                // 2dp -> bottom padding 4dp (CENTER gravity-এর কারণে প্রায় 2dp optical shift)।
-                val iconVerticalPadding = if (icon == "‹" || icon == "⤴") {
-                    dpToPx(4)
-                } else {
-                    0
-                }
-                setPadding(0, 0, 0, iconVerticalPadding)
-
+                setPadding(0, 0, 0, 0)
                 isClickable = true
                 isFocusable = true
                 layoutParams = LinearLayout.LayoutParams(dpToPx(buttonSize), dpToPx(buttonSize)).apply {
@@ -2491,7 +2483,7 @@ params.y =
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(when (icon) {
-                        "‹" -> Color.parseColor("#00E5FF")
+                        "←" -> Color.parseColor("#00E5FF")
                         "⤴" -> Color.parseColor("#00FF66")
                         else -> Color.parseColor("#FF8C00")
                     })
@@ -2501,7 +2493,7 @@ params.y =
             }
         }
 
-        val backBtn = createRoundTopButton("‹") {
+        val backBtn = createRoundTopButton("←") {
             saveCurrentNoteData(note.id)
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -3306,6 +3298,9 @@ setOnTouchListener(object : View.OnTouchListener {
             gravity = Gravity.END or Gravity.BOTTOM
             includeFontPadding = false
             setPadding(0, 0, 0, 0)
+            // Position correction: 1dp right, 3dp down.
+            translationX = dpToPx(1).toFloat()
+            translationY = dpToPx(3).toFloat()
             background = null
             layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
                 rightMargin = 0
