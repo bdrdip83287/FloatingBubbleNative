@@ -2455,14 +2455,14 @@ params.y =
         topBar.addView(titleText)
 
         // ===== CHILD NOTE TOP-BAR MANUAL SIZE CONTROLS =====
-        // buttonSize = প্রতিটি গোল বাটনের সাইজ। 22 থেকে কম/বেশি করুন।
-        // iconSize   = বাটনের ভিতরের icon-এর সাইজ। 19 থেকে কম/বেশি করুন।
-        // buttonGap  = বাটনগুলোর মাঝের ফাঁকা জায়গা। বর্তমানে 4dp।
+        // buttonSize = প্রতিটি গোল বাটনের সাইজ। 24 থেকে কম/বেশি করুন।
+        // iconSize   = বাটনের ভিতরের icon-এর সাইজ। 23 থেকে কম/বেশি করুন।
+        // buttonGap  = বাটনগুলোর মাঝের ফাঁকা জায়গা। বর্তমানে 6dp।
         // iconColor  = icon-এর রং। বর্তমানে BLACK।
         // ======================================================
         fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
             val buttonSize = 24
-            val iconSize = 22f
+            val iconSize = 23f
             val buttonGap = 6
             return TextView(this).apply {
                 text = icon
@@ -2471,6 +2471,7 @@ params.y =
                 setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
+                setPadding(0, 0, 0, 0)
                 isClickable = true
                 isFocusable = true
                 layoutParams = LinearLayout.LayoutParams(dpToPx(buttonSize), dpToPx(buttonSize)).apply {
@@ -2482,9 +2483,9 @@ params.y =
                     setColor(when (icon) {
                         "‹" -> Color.parseColor("#00E5FF")
                         "⤴" -> Color.parseColor("#00FF66")
-                        else -> Color.parseColor("#FFD000")
+                        else -> Color.parseColor("#FF8C00")
                     })
-                    // কোনো border/stroke নেই
+                    setStroke(dpToPx(1), Color.BLACK)
                 }
                 setOnClickListener { onClick() }
             }
@@ -3291,11 +3292,12 @@ setOnTouchListener(object : View.OnTouchListener {
             text = "◢"
             textSize = 24f
             setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-            setTextColor(Color.BLACK)
-            gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#FF9999"))
+            gravity = Gravity.END or Gravity.BOTTOM
             includeFontPadding = false
+            setPadding(0, 0, 0, 0)
             background = null
-            layoutParams = FrameLayout.LayoutParams(dpToPx(30), dpToPx(30), Gravity.BOTTOM or Gravity.END).apply {
+            layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
                 rightMargin = 0
                 bottomMargin = 0
             }
