@@ -2467,7 +2467,7 @@ params.y =
                 text = icon
                 textSize = iconSize
                 // Optical vertical correction: move Back/Share glyphs 2dp upward.
-                translationY = if (icon == "←" || icon == "⤴") dpToPx(-2).toFloat() else 0f
+                translationY = if (icon == "←" || icon == "⤴") dpToPx(-5).toFloat() else 0f
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 setTextColor(Color.BLACK)
                 gravity = Gravity.CENTER
@@ -3299,7 +3299,7 @@ setOnTouchListener(object : View.OnTouchListener {
             setPadding(0, 0, 0, 0)
             // Position correction: 1dp right, 3dp down.
             translationX = dpToPx(1).toFloat()
-            translationY = dpToPx(3).toFloat()
+            translationY = dpToPx(5).toFloat()
             background = null
             layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
                 rightMargin = 0
