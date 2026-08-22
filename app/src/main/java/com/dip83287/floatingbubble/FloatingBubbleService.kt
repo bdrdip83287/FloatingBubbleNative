@@ -1,4 +1,3 @@
-
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -2458,37 +2457,51 @@ params.y =
         // buttonSize = প্রতিটি গোল বাটনের সাইজ। 24 থেকে কম/বেশি করুন।
         // iconSize   = বাটনের ভিতরের icon-এর সাইজ। 23 থেকে কম/বেশি করুন।
         // buttonGap  = বাটনগুলোর মাঝের ফাঁকা জায়গা। বর্তমানে 6dp।
-        // iconColor  = icon-এর রং। বর্তমানে BLACK।
+        // iconColor  = icon-এর রং। বর্তমানে BLACK।\n        // নতুন Unicode/Text icon যোগ করতে createRoundTopButton("SYMBOL") ব্যবহার করুন।
         // ======================================================
         fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
             val buttonSize = 24
             val iconSize = 23f
             val buttonGap = 6
+
             return TextView(this).apply {
+                // সব Top-bar button একই logic ব্যবহার করবে।
+                // Icon নিজেই Unicode/Text symbol; আলাদা Image/Icon resource নেই।
                 text = icon
                 textSize = iconSize
-                // Optical vertical correction: move Back/Share glyphs 2dp upward.
-                translationY = if (icon == "←" || icon == "⤴") dpToPx(-2).toFloat() else 0f
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 setTextColor(Color.BLACK)
+
+                // সব Unicode icon-এর visual box একইভাবে center করা।
+                // Back/Share-এর জন্য আলাদা translation/offset নেই।
                 gravity = Gravity.CENTER
                 includeFontPadding = false
                 setPadding(0, 0, 0, 0)
+
                 isClickable = true
                 isFocusable = true
-                layoutParams = LinearLayout.LayoutParams(dpToPx(buttonSize), dpToPx(buttonSize)).apply {
+
+                layoutParams = LinearLayout.LayoutParams(
+                    dpToPx(buttonSize),
+                    dpToPx(buttonSize)
+                ).apply {
                     marginStart = dpToPx(buttonGap / 2)
                     marginEnd = dpToPx(buttonGap / 2)
                 }
+
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(when (icon) {
-                        "←" -> Color.parseColor("#00E5FF")
-                        "⤴" -> Color.parseColor("#00FF66")
-                        else -> Color.parseColor("#FF8C00")
-                    })
+                    setColor(
+                        when (icon) {
+                            "←" -> Color.parseColor("#00E5FF") // Back
+                            "⤴" -> Color.parseColor("#00FF66") // Share
+                            "−" -> Color.parseColor("#FF8C00") // Minimize
+                            else -> Color.parseColor("#FFFFFF")
+                        }
+                    )
                     setStroke(dpToPx(1), Color.BLACK)
                 }
+
                 setOnClickListener { onClick() }
             }
         }
