@@ -2455,35 +2455,109 @@ params.y =
 
         // ===== CHILD NOTE TOP-BAR MANUAL SIZE CONTROLS =====
         // buttonSize = প্রতিটি গোল বাটনের সাইজ। 24 থেকে কম/বেশি করুন।
-        // iconSize   = বাটনের ভিতরের icon-এর সাইজ। 23 থেকে কম/বেশি করুন।
+        // iconSize   = প্রতিটি vector icon-এর আসল drawing size। 14 থেকে কম/বেশি করুন।
         // buttonGap  = বাটনগুলোর মাঝের ফাঁকা জায়গা। বর্তমানে 6dp।
-        // iconColor  = icon-এর রং। বর্তমানে BLACK।
-        // নতুন Unicode/Text icon যোগ করতে createRoundTopButton("SYMBOL") ব্যবহার করুন।
+        // iconColor  = সব icon-এর রং। বর্তমানে BLACK।
+        //
+        // গুরুত্বপূর্ণ:
+        // Unicode/Text glyph আর ব্যবহার করা হচ্ছে না।
+        // Back/Share/Minimize তিনটিই একই 24dp button box-এর ভিতরে
+        // একই custom Canvas/Path Drawable দিয়ে আঁকা হচ্ছে।
+        // ফলে font-এর glyph size, baseline, ascent/descent-এর কারণে
+        // কোনো icon আর নিচে/উপরে বা বড়/ছোট হবে না।
+        // নতুন icon যোগ করতে createRoundTopButton("icon_name") ব্যবহার করুন।
         // ======================================================
-        fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
+
+        class TopBarIconDrawable(
+            private val iconType: String,
+            private val iconSizePx: Int,
+            private val iconColor: Int
+        ) : Drawable() {
+
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = iconColor
+                style = Paint.Style.STROKE
+                strokeWidth = dpToPx(2).toFloat()
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            }
+
+            override fun draw(canvas: Canvas) {
+                val cx = bounds.exactCenterX()
+                val cy = bounds.exactCenterY()
+                val half = iconSizePx / 2f
+
+                val left = cx - half
+                val right = cx + half
+                val top = cy - half
+                val bottom = cy + half
+
+                when (iconType) {
+                    "back" -> {
+                        // Premium bold left-arrow: perfectly centered inside the same square.
+                        val path = android.graphics.Path().apply {
+                            moveTo(right - iconSizePx * 0.08f, cy)
+                            lineTo(left + iconSizePx * 0.22f, cy)
+                            moveTo(left + iconSizePx * 0.22f, cy)
+                            lineTo(left + iconSizePx * 0.48f, top + iconSizePx * 0.26f)
+                            moveTo(left + iconSizePx * 0.22f, cy)
+                            lineTo(left + iconSizePx * 0.48f, bottom - iconSizePx * 0.26f)
+                        }
+                        canvas.drawPath(path, paint)
+                    }
+
+                    "share" -> {
+                        // Three-node share icon. All coordinates are normalized to the same box.
+                        val nodeRadius = iconSizePx * 0.105f
+                        val p1x = left + iconSizePx * 0.24f
+                        val p1y = cy
+                        val p2x = right - iconSizePx * 0.23f
+                        val p2y = top + iconSizePx * 0.25f
+                        val p3x = right - iconSizePx * 0.23f
+                        val p3y = bottom - iconSizePx * 0.25f
+
+                        canvas.drawLine(p1x, p1y, p2x, p2y, paint)
+                        canvas.drawLine(p1x, p1y, p3x, p3y, paint)
+
+                        paint.style = Paint.Style.FILL
+                        canvas.drawCircle(p1x, p1y, nodeRadius, paint)
+                        canvas.drawCircle(p2x, p2y, nodeRadius, paint)
+                        canvas.drawCircle(p3x, p3y, nodeRadius, paint)
+                        paint.style = Paint.Style.STROKE
+                    }
+
+                    "minimize" -> {
+                        canvas.drawLine(
+                            left + iconSizePx * 0.20f, cy,
+                            right - iconSizePx * 0.20f, cy,
+                            paint
+                        )
+                    }
+                }
+            }
+
+            override fun setAlpha(alpha: Int) {
+                paint.alpha = alpha
+            }
+
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+                paint.colorFilter = colorFilter
+            }
+
+            @Deprecated("Deprecated in Android API")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+
+            override fun getIntrinsicWidth(): Int = iconSizePx
+            override fun getIntrinsicHeight(): Int = iconSizePx
+        }
+
+        fun createRoundTopButton(iconType: String, onClick: () -> Unit): ImageButton {
             val buttonSize = 24
-            val iconSize = 23f
+            val iconSize = 14
             val buttonGap = 6
 
-            return TextView(this).apply {
-                // সব Top-bar button একই logic ব্যবহার করবে।
-                // Icon নিজেই Unicode/Text symbol; আলাদা Image/Icon resource নেই।
-                text = icon
-                textSize = iconSize
-                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-                setTextColor(Color.BLACK)
-
-                // সব Unicode/Text icon-এর জন্য একই centering logic।
-                // কোনো icon-এর জন্য আলাদা translationY/translationX নেই।
-                // Fixed 24dp icon box + CENTER gravity.
-                // Equal 1dp top + 1dp bottom internal breathing room is preserved.
-                gravity = Gravity.CENTER
-                includeFontPadding = true
-                setPadding(0, dpToPx(-5), 0, dpToPx(-8))
-
-                isClickable = true
-                isFocusable = true
-
+            return ImageButton(this).apply {
+                // Fixed button box: সব button-এর আকার এক।
                 layoutParams = LinearLayout.LayoutParams(
                     dpToPx(buttonSize),
                     dpToPx(buttonSize)
@@ -2492,14 +2566,30 @@ params.y =
                     marginEnd = dpToPx(buttonGap / 2)
                 }
 
+                // Icon-এর চারপাশে সমান জায়গা রাখার মূল ব্যবস্থা।
+                // ImageButton-এর image নিজস্ব 14dp square-এর মধ্যে center হবে।
+                gravity = Gravity.CENTER
+                scaleType = ImageView.ScaleType.CENTER
+                setPadding(0, 0, 0, 0)
+                isClickable = true
+                isFocusable = true
+
+                setImageDrawable(
+                    TopBarIconDrawable(
+                        iconType,
+                        dpToPx(iconSize),
+                        Color.BLACK
+                    )
+                )
+
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(
-                        when (icon) {
-                            "⟵" -> Color.parseColor("#00E5FF") // Back
-                            "↗" -> Color.parseColor("#00FF66") // Share
-                            "−" -> Color.parseColor("#FF8C00") // Minimize
-                            else -> Color.parseColor("#FFFFFF")
+                        when (iconType) {
+                            "back" -> Color.parseColor("#00E5FF")
+                            "share" -> Color.parseColor("#00FF66")
+                            "minimize" -> Color.parseColor("#FF8C00")
+                            else -> Color.WHITE
                         }
                     )
                     setStroke(dpToPx(1), Color.BLACK)
@@ -2509,7 +2599,7 @@ params.y =
             }
         }
 
-        val backBtn = createRoundTopButton("⟵") {
+        val backBtn = createRoundTopButton("back") {
             saveCurrentNoteData(note.id)
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -2517,13 +2607,13 @@ params.y =
         }
         topBar.addView(backBtn)
 
-        val shareBtn = createRoundTopButton("↗") {
+        val shareBtn = createRoundTopButton("share") {
             saveCurrentNoteData(note.id)
             shareLargeText(editText.text.toString())
         }
         topBar.addView(shareBtn)
 
-        val minimizeBtn = createRoundTopButton("−") {
+        val minimizeBtn = createRoundTopButton("minimize") {
             try {
                 saveRunnable?.let { saveHandler.removeCallbacks(it) }
                 saveRunnable = null
@@ -3618,4 +3708,3 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
-    
