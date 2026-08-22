@@ -14,6 +14,7 @@ import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
@@ -75,6 +76,12 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
+
+    // Child-note editor undo/redo state
+    private val editorUndoStack = java.util.ArrayDeque<String>()
+    private val editorRedoStack = java.util.ArrayDeque<String>()
+    private var suppressEditorHistory = false
+    private var isEditorLocked = false
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
@@ -1153,6 +1160,7 @@ setupBubbleTouchListener(params)
 
     private fun createTopBarIconButton(
         iconDrawable: Drawable,
+        buttonColor: Int,
         clickAction: () -> Unit
     ): ImageButton {
         val size = dpToPx(24)
@@ -1162,12 +1170,17 @@ setupBubbleTouchListener(params)
                 marginEnd = dpToPx(2)
             }
             setImageDrawable(iconDrawable)
-            setBackgroundColor(Color.TRANSPARENT)
-            background = null
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(buttonColor)
+                setStroke(dpToPx(1), Color.BLACK)
+            }
+            background = bg
             setPadding(0, 0, 0, 0)
             minimumWidth = 0
             minimumHeight = 0
             scaleType = ImageView.ScaleType.CENTER
+            elevation = dpToPx(2).toFloat()
             contentDescription = null
             isFocusable = true
             isClickable = true
@@ -1264,6 +1277,80 @@ setupBubbleTouchListener(params)
                 canvas.drawLine(left, cy, right, cy, paint)
             }
 
+            override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+        }
+    }
+
+    private fun createTopBarUndoDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        val path = android.graphics.Path()
+        val cx = w * 0.50f
+        val cy = h * 0.50f
+        val r = w * 0.28f
+        val rect = RectF(cx - r, cy - r, cx + r, cy + r)
+        canvas.drawArc(rect, 215f, 250f, false, paint)
+        val ah = w * 0.18f
+        val arrow = android.graphics.Path().apply {
+            moveTo(w * 0.18f, h * 0.47f)
+            lineTo(w * 0.38f, h * 0.30f)
+            lineTo(w * 0.36f, h * 0.48f)
+            close()
+        }
+        canvas.drawPath(arrow, paint)
+    }
+
+    private fun createTopBarRedoDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        val cx = w * 0.50f
+        val cy = h * 0.50f
+        val r = w * 0.28f
+        val rect = RectF(cx - r, cy - r, cx + r, cy + r)
+        canvas.drawArc(rect, 35f, 250f, false, paint)
+        val arrow = android.graphics.Path().apply {
+            moveTo(w * 0.82f, h * 0.47f)
+            lineTo(w * 0.62f, h * 0.30f)
+            lineTo(w * 0.64f, h * 0.48f)
+            close()
+        }
+        canvas.drawPath(arrow, paint)
+    }
+
+    private fun createTopBarPasteDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        val left = w * 0.25f
+        val top = h * 0.27f
+        val right = w * 0.75f
+        val bottom = h * 0.82f
+        canvas.drawRoundRect(RectF(left, top, right, bottom), w * 0.07f, w * 0.07f, paint)
+        canvas.drawRoundRect(RectF(w * 0.38f, h * 0.16f, w * 0.62f, h * 0.34f), w * 0.05f, w * 0.05f, paint)
+    }
+
+    private fun createTopBarLockDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        canvas.drawRoundRect(RectF(w * 0.24f, h * 0.42f, w * 0.76f, h * 0.82f), w * 0.07f, w * 0.07f, paint)
+        val arc = RectF(w * 0.34f, h * 0.18f, w * 0.66f, h * 0.58f)
+        canvas.drawArc(arc, 180f, 180f, false, paint)
+        canvas.drawCircle(w * 0.50f, h * 0.60f, w * 0.045f, paint)
+    }
+
+    private fun createTopBarDeleteDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        canvas.drawRoundRect(RectF(w * 0.28f, h * 0.30f, w * 0.72f, h * 0.82f), w * 0.05f, w * 0.05f, paint)
+        canvas.drawLine(w * 0.22f, h * 0.25f, w * 0.78f, h * 0.25f, paint)
+        canvas.drawLine(w * 0.40f, h * 0.18f, w * 0.60f, h * 0.18f, paint)
+        canvas.drawLine(w * 0.42f, h * 0.40f, w * 0.42f, h * 0.70f, paint)
+        canvas.drawLine(w * 0.58f, h * 0.40f, w * 0.58f, h * 0.70f, paint)
+    }
+
+    private fun createStrokePathDrawable(drawer: (Canvas, Float, Float, Paint) -> Unit): Drawable {
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                style = Paint.Style.STROKE
+                strokeWidth = dpToPx(2).toFloat()
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            }
+            override fun draw(canvas: Canvas) {
+                drawer(canvas, bounds.width().toFloat(), bounds.height().toFloat(), paint)
+            }
             override fun setAlpha(alpha: Int) { paint.alpha = alpha }
             override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
             override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
@@ -2235,7 +2322,7 @@ params.y =
         
         val contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(16, 16, 16, 16)
+            setPadding(0, 0, 0, 0)
         }
 
         val topBar = LinearLayout(this).apply {
@@ -2516,6 +2603,7 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = dpToPx(8).toFloat()
         }
         
         val contentContainer = LinearLayout(this).apply {
@@ -2525,70 +2613,68 @@ params.y =
 
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(35)
             )
-            setOnTouchListener(TitleBarDragListener())
-            setPadding(8, 12, 8, 12)
+            setPadding(dpToPx(3), 0, dpToPx(3), 0)
             setBackgroundColor(Color.parseColor("#F9E79F"))
+            setOnTouchListener(TitleBarDragListener())
         }
 
-        val backBtn = createTopBarIconButton(
-            createTopBarBackDrawable()
-        ) {
+        val backBtn = createTopBarIconButton(createTopBarBackDrawable(), Color.rgb(90, 190, 255)) {
             hideSelectionHandles()
             hideFloatingActionBar()
             showNoteList()
         }
         topBar.addView(backBtn)
 
-        val editorTitle = TextView(this).apply {
-            text = "Edit Note"
-            textSize = 16f
-            setTextColor(Color.parseColor("#333333"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            gravity = Gravity.CENTER
+        // Intentionally blank left/center title area.
+        val emptyTitleSpace = Space(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
         }
-        topBar.addView(editorTitle)
+        topBar.addView(emptyTitleSpace)
 
-        val shareTopBtn = createTopBarIconButton(
-            createTopBarShareDrawable()
-        ) {
-            shareLargeText("${titleInput.text}\n\n${editText.text}")
+        val undoBtn = createTopBarIconButton(createTopBarUndoDrawable(), Color.rgb(110, 225, 145)) { undoEditorChange() }
+        val redoBtn = createTopBarIconButton(createTopBarRedoDrawable(), Color.rgb(95, 210, 205)) { redoEditorChange() }
+        val pasteBtnTop = createTopBarIconButton(createTopBarPasteDrawable(), Color.rgb(255, 220, 80)) {
+            pasteIntoEditor()
         }
-        topBar.addView(shareTopBtn)
-
-        val minimizeBtn = createTopBarIconButton(
-            createTopBarMinimizeDrawable()
-        ) {
+        val lockBtn = createTopBarIconButton(createTopBarLockDrawable(), Color.rgb(195, 145, 255)) {
+            toggleEditorLock()
+        }
+        val deleteBtn = createTopBarIconButton(createTopBarDeleteDrawable(), Color.rgb(255, 105, 105)) {
+            deleteCurrentEditorNote(note.id)
+        }
+        val shareTopBtn = createTopBarIconButton(createTopBarShareDrawable(), Color.rgb(75, 205, 255)) {
+            val title = getEditorAutoTitle(editText.text.toString())
+            shareLargeText(if (title.isEmpty()) editText.text.toString() else "$title\n\n${editText.text}")
+        }
+        val minimizeBtn = createTopBarIconButton(createTopBarMinimizeDrawable(), Color.rgb(255, 145, 0)) {
             collapseToBubble()
         }
+
+        topBar.addView(undoBtn)
+        topBar.addView(redoBtn)
+        topBar.addView(pasteBtnTop)
+        topBar.addView(lockBtn)
+        topBar.addView(deleteBtn)
+        topBar.addView(shareTopBtn)
         topBar.addView(minimizeBtn)
         contentContainer.addView(topBar)
 
-        titleInput = EditText(this).apply {
-            setText(note.title)
-            hint = "Title"
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(8, 16, 8, 8)
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            setTextIsSelectable(true)
+        val noteMetaBar = TextView(this).apply {
+            val number = notesList.indexOfFirst { it.id == note.id } + 1
+            val title = getEditorAutoTitle(note.content)
+            text = "$number. ${if (title.isEmpty()) "Untitled Note" else title}"
+            textSize = 12f
+            setTextColor(Color.parseColor("#444444"))
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            setPadding(dpToPx(8), 0, dpToPx(8), 0)
+            setBackgroundColor(Color.parseColor("#FFF0B8"))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(20))
         }
-        contentContainer.addView(titleInput)
-
-        val divider = View(this).apply {
-            setBackgroundColor(Color.parseColor("#DDDDDD"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 2
-            )
-        }
-        contentContainer.addView(divider)
+        contentContainer.addView(noteMetaBar)
 
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -2653,13 +2739,18 @@ params.y =
             }
         }
         
+        editorUndoStack.clear()
+        editorRedoStack.clear()
+        suppressEditorHistory = false
+        isEditorLocked = false
+
         editText = EditText(this).apply {
             setText(note.content)
             hint = "Write your note here..."
             textSize = 15f
             gravity = Gravity.TOP or Gravity.START
             setPadding(18, 18, 18, 18)
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            background = null
             
             setLineSpacing(0f, 1.15f)
             setHorizontallyScrolling(false)
@@ -3292,9 +3383,22 @@ setOnTouchListener(object : View.OnTouchListener {
 
 // -------INTERVEL-----            
             addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                private var beforeTextSnapshot = ""
+
+                override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (!suppressEditorHistory) beforeTextSnapshot = s?.toString() ?: ""
+                }
                 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    val liveTitle = getEditorAutoTitle(s?.toString() ?: "")
+                    val liveNumber = notesList.indexOfFirst { it.id == note.id } + 1
+                    noteMetaBar.text = "$liveNumber. ${if (liveTitle.isEmpty()) "Untitled Note" else liveTitle}"
+
+                    if (!suppressEditorHistory && beforeTextSnapshot != s?.toString()) {
+                        editorUndoStack.addLast(beforeTextSnapshot)
+                        while (editorUndoStack.size > 100) editorUndoStack.removeFirst()
+                        editorRedoStack.clear()
+                    }
                     if (!this@apply.hasSelection()) {
                         hideSelectionHandles()
                         hideFloatingActionBar()
@@ -3314,7 +3418,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         if (index != -1) {
                             val updatedNote = notesList[index].copy(
                                 content = text.toString(),
-                                title = titleInput.text.toString(),
+                                title = getEditorAutoTitle(text.toString()).ifEmpty { "Untitled Note" },
                                 lastEdited = System.currentTimeMillis()
                             )
                             notesList[index] = updatedNote
@@ -3332,19 +3436,25 @@ setOnTouchListener(object : View.OnTouchListener {
         scrollView.addView(editText)
         contentContainer.addView(scrollView)
 
+        container.addView(contentContainer)
+
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 18f
-            setTextColor(Color.parseColor("#999999"))
+            setTextColor(Color.parseColor("#F28B82"))
             gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
-            lp.topMargin = 8
-            layoutParams = lp
+            includeFontPadding = false
+            setPadding(0, 0, 0, 0)
+            background = null
+            layoutParams = FrameLayout.LayoutParams(dpToPx(18), dpToPx(18), Gravity.END or Gravity.BOTTOM).apply {
+                rightMargin = 0
+                bottomMargin = 0
+            }
             setOnTouchListener(ResizeTouchListener())
+            bringToFront()
         }
-        contentContainer.addView(resizeHandleView)
-        
-        container.addView(contentContainer)
+        container.addView(resizeHandleView)
+
         
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -3388,11 +3498,82 @@ setOnTouchListener(object : View.OnTouchListener {
         return selectionStart != selectionEnd
     }
 
+    private fun getEditorAutoTitle(content: String): String {
+        return content.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            ?.take(80)
+            ?: ""
+    }
+
+    private fun undoEditorChange() {
+        if (!::editText.isInitialized || editorUndoStack.isEmpty()) return
+        val current = editText.text.toString()
+        val previous = editorUndoStack.removeLast()
+        editorRedoStack.addLast(current)
+        suppressEditorHistory = true
+        editText.setText(previous)
+        editText.setSelection(previous.length.coerceAtMost(previous.length))
+        suppressEditorHistory = false
+    }
+
+    private fun redoEditorChange() {
+        if (!::editText.isInitialized || editorRedoStack.isEmpty()) return
+        val current = editText.text.toString()
+        val next = editorRedoStack.removeLast()
+        editorUndoStack.addLast(current)
+        suppressEditorHistory = true
+        editText.setText(next)
+        editText.setSelection(next.length.coerceAtMost(next.length))
+        suppressEditorHistory = false
+    }
+
+    private fun pasteIntoEditor() {
+        if (!::editText.isInitialized || isEditorLocked) return
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip ?: return
+        if (clip.itemCount <= 0) return
+        val pasted = clip.getItemAt(0).coerceToText(this).toString()
+        val start = editText.selectionStart.coerceAtLeast(0)
+        val end = editText.selectionEnd.coerceAtLeast(0)
+        val a = minOf(start, end)
+        val b = maxOf(start, end)
+        editText.text.replace(a, b, pasted)
+        editText.setSelection((a + pasted.length).coerceAtMost(editText.length()))
+    }
+
+    private fun toggleEditorLock() {
+        if (!::editText.isInitialized) return
+        isEditorLocked = !isEditorLocked
+        editText.isFocusable = !isEditorLocked
+        editText.isFocusableInTouchMode = !isEditorLocked
+        editText.isCursorVisible = !isEditorLocked
+        editText.isLongClickable = !isEditorLocked
+        if (isEditorLocked) {
+            editText.clearFocus()
+            hideSelectionHandles()
+            hideFloatingActionBar()
+        } else {
+            editText.requestFocus()
+        }
+    }
+
+    private fun deleteCurrentEditorNote(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index < 0) return
+        notesList.removeAt(index)
+        saveNotesToPrefs()
+        updateBubbleCount()
+        hideSelectionHandles()
+        hideFloatingActionBar()
+        showNoteList()
+    }
+
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
             val updatedNote = notesList[index].copy(
-                title = titleInput.text.toString().ifEmpty { "Untitled Note" },
+                title = getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
                 content = editText.text.toString(),
                 lastEdited = System.currentTimeMillis()
             )
@@ -3463,7 +3644,7 @@ setOnTouchListener(object : View.OnTouchListener {
             private val contentView = itemView.findViewById<TextView>(android.R.id.text2)
 
             fun bind(note: NoteItem) {
-                titleView.text = note.title
+                titleView.text = "${position + 1}. ${if (note.title.isBlank()) "Untitled Note" else note.title}"
                 val preview = if (note.content.length > 50) note.content.take(50) + "..." else note.content
                 contentView.text = preview.ifEmpty { "No content" }
                 
