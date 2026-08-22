@@ -9,7 +9,6 @@ import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.view.Gravity
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
@@ -74,21 +73,8 @@ class FloatingBubbleService : Service() {
     private var bubbleView: View? = null
     private var noteView: View? = null
     private var isExpanded = false
-
-    // বর্তমানে কোন Child Note editor খোলা আছে তা মনে রাখে।
-    // Bubble-এ minimize করার পর আবার Bubble চাপলে একই editor পুনরায় খুলবে।
-    private var activeNoteId: Long? = null
-    private var isChildNoteOpen = false
-
-    // Child Note minimize করার সময় editor-এর transient state সংরক্ষণ করে।
-    // এতে cursor/selection এবং ScrollView position হুবহু restore করা যায়।
-    private var hasSavedChildEditorState = false
-    private var savedChildEditorNoteId: Long? = null
-    private var savedChildSelectionStart = -1
-    private var savedChildSelectionEnd = -1
-    private var savedChildScrollY = 0
-
     private lateinit var editText: EditText
+    private lateinit var titleInput: EditText
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
@@ -1049,20 +1035,6 @@ setupBubbleTouchListener(params)
         if (noteView != null) return
         
         try {
-            // যদি Bubble-এ minimize করার সময় কোনো Child Note editor খোলা ছিল,
-            // তাহলে Note List নয়, সেই একই Child Note editor-ই পুনরায় খুলবে।
-            if (isChildNoteOpen && activeNoteId != null) {
-                val activeNote = notesList.firstOrNull { it.id == activeNoteId }
-                if (activeNote != null) {
-                    openEditorForNote(activeNote)
-                    return
-                } else {
-                    // Note আর না থাকলে নিরাপদভাবে Note List-এ fallback করবে।
-                    activeNoteId = null
-                    isChildNoteOpen = false
-                }
-            }
-
             val container = createFullNotePad()
             noteView = container
             
@@ -1169,6 +1141,132 @@ setupBubbleTouchListener(params)
             }
         } catch (e: Exception) {
             EmergencyLog.logException(e, "collapseToBubble")
+        }
+    }
+
+    // ============================================================
+    // Top Bar Icons - Canvas + Path + Drawable
+    // Unicode/Text glyph সম্পূর্ণ বাদ দেওয়া হয়েছে।
+    // তিনটি icon একই 24dp x 24dp coordinate system ব্যবহার করে,
+    // তাই visual size ও vertical/horizontal alignment একই থাকে।
+    // ============================================================
+
+    private fun createTopBarIconButton(
+        iconDrawable: Drawable,
+        clickAction: () -> Unit
+    ): ImageButton {
+        val size = dpToPx(24)
+        return ImageButton(this).apply {
+            layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                marginStart = dpToPx(2)
+                marginEnd = dpToPx(2)
+            }
+            setImageDrawable(iconDrawable)
+            setBackgroundColor(Color.TRANSPARENT)
+            background = null
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minimumHeight = 0
+            scaleType = ImageView.ScaleType.CENTER
+            contentDescription = null
+            isFocusable = true
+            isClickable = true
+            setOnClickListener { clickAction() }
+        }
+    }
+
+    private fun createTopBarBackDrawable(): Drawable {
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                style = Paint.Style.STROKE
+                strokeWidth = dpToPx(2).toFloat()
+                strokeCap = Paint.Cap.SQUARE
+                strokeJoin = Paint.Join.ROUND
+            }
+
+            override fun draw(canvas: Canvas) {
+                val w = bounds.width().toFloat()
+                val h = bounds.height().toFloat()
+                val cy = h / 2f
+                val left = w * 0.20f
+                val right = w * 0.78f
+                val head = w * 0.20f
+                val path = android.graphics.Path().apply {
+                    moveTo(right, cy)
+                    lineTo(left + head, cy)
+                    moveTo(left + head, cy)
+                    lineTo(left + head * 1.65f, cy - h * 0.22f)
+                    moveTo(left + head, cy)
+                    lineTo(left + head * 1.65f, cy + h * 0.22f)
+                }
+                canvas.drawPath(path, paint)
+            }
+
+            override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+        }
+    }
+
+    private fun createTopBarShareDrawable(): Drawable {
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                style = Paint.Style.STROKE
+                strokeWidth = dpToPx(2).toFloat()
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            }
+
+            override fun draw(canvas: Canvas) {
+                val w = bounds.width().toFloat()
+                val h = bounds.height().toFloat()
+                val left = w * 0.22f
+                val right = w * 0.76f
+                val cy = h * 0.50f
+                val top = h * 0.25f
+                val bottom = h * 0.75f
+
+                // Center share node
+                canvas.drawCircle(left, cy, w * 0.085f, paint)
+                // Top node
+                canvas.drawCircle(right, top, w * 0.085f, paint)
+                // Bottom node
+                canvas.drawCircle(right, bottom, w * 0.085f, paint)
+
+                // Connecting lines
+                canvas.drawLine(left + w * 0.10f, cy - h * 0.035f, right - w * 0.10f, top + h * 0.035f, paint)
+                canvas.drawLine(left + w * 0.10f, cy + h * 0.035f, right - w * 0.10f, bottom - h * 0.035f, paint)
+            }
+
+            override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+        }
+    }
+
+    private fun createTopBarMinimizeDrawable(): Drawable {
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(255, 145, 0)
+                style = Paint.Style.STROKE
+                strokeWidth = dpToPx(2).toFloat()
+                strokeCap = Paint.Cap.ROUND
+            }
+
+            override fun draw(canvas: Canvas) {
+                val w = bounds.width().toFloat()
+                val h = bounds.height().toFloat()
+                val left = w * 0.22f
+                val right = w * 0.78f
+                val cy = h / 2f
+                canvas.drawLine(left, cy, right, cy, paint)
+            }
+
+            override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
         }
     }
 
@@ -2132,7 +2230,7 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 8f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
         }
         
         val contentContainer = LinearLayout(this).apply {
@@ -2417,232 +2515,80 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor(NOTEPAD_BG_COLOR))
-                cornerRadius = 0f
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 8f
+            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
         }
         
         val contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 0, 0, 0)
+            setPadding(16, 16, 16, 16)
         }
 
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(40)
+                LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#F9E79F"))
-            setPadding(dpToPx(5), 0, dpToPx(5), 0)
             setOnTouchListener(TitleBarDragListener())
+            setPadding(8, 12, 8, 12)
+            setBackgroundColor(Color.parseColor("#F9E79F"))
         }
 
-        val titleText = TextView(this).apply {
-            text = note.content.lineSequence().firstOrNull()?.trimEnd()?.ifEmpty { "Untitled Note" } ?: "Untitled Note"
-            textSize = 16f
-            setTextColor(Color.parseColor("#333333"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-            setPadding(dpToPx(6), 0, dpToPx(6), 0)
-        }
-        topBar.addView(titleText)
-
-        // ===== CHILD NOTE TOP-BAR MANUAL SIZE CONTROLS =====
-        // buttonSize = প্রতিটি গোল বাটনের সাইজ। 24 থেকে কম/বেশি করুন।
-        // iconSize   = প্রতিটি vector icon-এর আসল drawing size। 14 থেকে কম/বেশি করুন।
-        // buttonGap  = বাটনগুলোর মাঝের ফাঁকা জায়গা। বর্তমানে 6dp।
-        // iconColor  = সব icon-এর রং। বর্তমানে BLACK।
-        //
-        // গুরুত্বপূর্ণ:
-        // Unicode/Text glyph আর ব্যবহার করা হচ্ছে না।
-        // Back/Share/Minimize তিনটিই একই 24dp button box-এর ভিতরে
-        // একই custom Canvas/Path Drawable দিয়ে আঁকা হচ্ছে।
-        // ফলে font-এর glyph size, baseline, ascent/descent-এর কারণে
-        // কোনো icon আর নিচে/উপরে বা বড়/ছোট হবে না।
-        // নতুন icon যোগ করতে createRoundTopButton("icon_name") ব্যবহার করুন।
-        // ======================================================
-
-        class TopBarIconDrawable(
-            private val iconType: String,
-            private val iconSizePx: Int,
-            private val iconColor: Int
-        ) : Drawable() {
-
-            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = iconColor
-                style = Paint.Style.STROKE
-                strokeWidth = dpToPx(2).toFloat()
-                strokeCap = Paint.Cap.ROUND
-                strokeJoin = Paint.Join.ROUND
-            }
-
-            override fun draw(canvas: Canvas) {
-                val cx = bounds.exactCenterX()
-                val cy = bounds.exactCenterY()
-                val half = iconSizePx / 2f
-
-                val left = cx - half
-                val right = cx + half
-                val top = cy - half
-                val bottom = cy + half
-
-                when (iconType) {
-                    "back" -> {
-                        // Premium bold left-arrow: perfectly centered inside the same square.
-                        val path = android.graphics.Path().apply {
-                            moveTo(right - iconSizePx * 0.08f, cy)
-                            lineTo(left + iconSizePx * 0.22f, cy)
-                            moveTo(left + iconSizePx * 0.22f, cy)
-                            lineTo(left + iconSizePx * 0.48f, top + iconSizePx * 0.26f)
-                            moveTo(left + iconSizePx * 0.22f, cy)
-                            lineTo(left + iconSizePx * 0.48f, bottom - iconSizePx * 0.26f)
-                        }
-                        canvas.drawPath(path, paint)
-                    }
-
-                    "share" -> {
-                        // Three-node share icon. All coordinates are normalized to the same box.
-                        val nodeRadius = iconSizePx * 0.105f
-                        val p1x = left + iconSizePx * 0.24f
-                        val p1y = cy
-                        val p2x = right - iconSizePx * 0.23f
-                        val p2y = top + iconSizePx * 0.25f
-                        val p3x = right - iconSizePx * 0.23f
-                        val p3y = bottom - iconSizePx * 0.25f
-
-                        canvas.drawLine(p1x, p1y, p2x, p2y, paint)
-                        canvas.drawLine(p1x, p1y, p3x, p3y, paint)
-
-                        paint.style = Paint.Style.FILL
-                        canvas.drawCircle(p1x, p1y, nodeRadius, paint)
-                        canvas.drawCircle(p2x, p2y, nodeRadius, paint)
-                        canvas.drawCircle(p3x, p3y, nodeRadius, paint)
-                        paint.style = Paint.Style.STROKE
-                    }
-
-                    "minimize" -> {
-                        canvas.drawLine(
-                            left + iconSizePx * 0.20f, cy,
-                            right - iconSizePx * 0.20f, cy,
-                            paint
-                        )
-                    }
-                }
-            }
-
-            override fun setAlpha(alpha: Int) {
-                paint.alpha = alpha
-            }
-
-            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
-                paint.colorFilter = colorFilter
-            }
-
-            @Deprecated("Deprecated in Android API")
-            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
-
-            override fun getIntrinsicWidth(): Int = iconSizePx
-            override fun getIntrinsicHeight(): Int = iconSizePx
-        }
-
-        fun createRoundTopButton(iconType: String, onClick: () -> Unit): ImageButton {
-            val buttonSize = 24
-            val iconSize = 14
-            val buttonGap = 6
-
-            return ImageButton(this).apply {
-                // Fixed button box: সব button-এর আকার এক।
-                layoutParams = LinearLayout.LayoutParams(
-                    dpToPx(buttonSize),
-                    dpToPx(buttonSize)
-                ).apply {
-                    marginStart = dpToPx(buttonGap / 2)
-                    marginEnd = dpToPx(buttonGap / 2)
-                }
-
-                // Icon-এর চারপাশে সমান জায়গা রাখার মূল ব্যবস্থা।
-                // ImageButton-এর image নিজস্ব 14dp square-এর মধ্যে center হবে।
-                gravity = Gravity.CENTER
-                scaleType = ImageView.ScaleType.CENTER
-                setPadding(0, 0, 0, 0)
-                isClickable = true
-                isFocusable = true
-
-                setImageDrawable(
-                    TopBarIconDrawable(
-                        iconType,
-                        dpToPx(iconSize),
-                        Color.BLACK
-                    )
-                )
-
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(
-                        when (iconType) {
-                            "back" -> Color.parseColor("#00E5FF")
-                            "share" -> Color.parseColor("#00FF66")
-                            "minimize" -> Color.parseColor("#FF8C00")
-                            else -> Color.WHITE
-                        }
-                    )
-                    setStroke(dpToPx(1), Color.BLACK)
-                }
-
-                setOnClickListener { onClick() }
-            }
-        }
-
-        val backBtn = createRoundTopButton("back") {
-            saveCurrentNoteData(note.id)
+        val backBtn = createTopBarIconButton(
+            createTopBarBackDrawable()
+        ) {
             hideSelectionHandles()
             hideFloatingActionBar()
             showNoteList()
         }
         topBar.addView(backBtn)
 
-        val shareBtn = createRoundTopButton("share") {
-            saveCurrentNoteData(note.id)
-            shareLargeText(editText.text.toString())
+        val editorTitle = TextView(this).apply {
+            text = "Edit Note"
+            textSize = 16f
+            setTextColor(Color.parseColor("#333333"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER
         }
-        topBar.addView(shareBtn)
+        topBar.addView(editorTitle)
 
-        val minimizeBtn = createRoundTopButton("minimize") {
-            try {
-                saveRunnable?.let { saveHandler.removeCallbacks(it) }
-                saveRunnable = null
+        val shareTopBtn = createTopBarIconButton(
+            createTopBarShareDrawable()
+        ) {
+            shareLargeText("${titleInput.text}\n\n${editText.text}")
+        }
+        topBar.addView(shareTopBtn)
 
-                savedChildEditorNoteId = note.id
-                savedChildSelectionStart = editText.selectionStart.coerceIn(0, editText.text.length)
-                savedChildSelectionEnd = editText.selectionEnd.coerceIn(0, editText.text.length)
-                savedChildScrollY = scrollView.scrollY
-                hasSavedChildEditorState = true
-
-                saveCurrentNoteData(note.id)
-                hideSelectionHandles()
-                hideFloatingActionBar()
-
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                imm?.hideSoftInputFromWindow(editText.windowToken, 0)
-
-                activeNoteId = note.id
-                isChildNoteOpen = true
-                collapseToBubble()
-            } catch (e: Exception) {
-                EmergencyLog.logException(e, "Child Note minimize")
-            }
+        val minimizeBtn = createTopBarIconButton(
+            createTopBarMinimizeDrawable()
+        ) {
+            collapseToBubble()
         }
         topBar.addView(minimizeBtn)
         contentContainer.addView(topBar)
 
-        // পুরো Child Note এখন একটি মাত্র EditText; আলাদা Title field নেই।
+        titleInput = EditText(this).apply {
+            setText(note.title)
+            hint = "Title"
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(8, 16, 8, 8)
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            setTextIsSelectable(true)
+        }
+        contentContainer.addView(titleInput)
+
+        val divider = View(this).apply {
+            setBackgroundColor(Color.parseColor("#DDDDDD"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 2
+            )
+        }
+        contentContainer.addView(divider)
 
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -2778,61 +2724,32 @@ setOnTouchListener(object : View.OnTouchListener {
     private var moveCount = 0
 
     private var selectionMagnifier: Magnifier? = null
+
     private var lastMagnifierTime = 0L
     private var lastHandleUpdateTime = 0L
+
     private val frameInterval = 16L
 
-    // Native EditText touch handling has to receive the normal editing gesture.
-    // Custom selection/dragging takes control only after it is actually detected.
-    private var nativeTouchActive = false
-    private var customGestureActive = false
-
-    private fun dispatchToNativeEditText(event: MotionEvent): Boolean {
-        return try {
-            this@apply.onTouchEvent(event)
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "dispatchToNativeEditText")
-            false
-        }
-    }
-
-    private fun cancelNativeEditTextGesture() {
-        if (!nativeTouchActive) return
-
-        try {
-            val now = android.os.SystemClock.uptimeMillis()
-            val cancelEvent = MotionEvent.obtain(
-                now,
-                now,
-                MotionEvent.ACTION_CANCEL,
-                lastTouchX,
-                lastTouchY,
-                0
-            )
-            this@apply.onTouchEvent(cancelEvent)
-            cancelEvent.recycle()
-        } catch (e: Exception) {
-            EmergencyLog.logException(
-                e,
-                "cancelNativeEditTextGesture"
-            )
-        }
-
-        nativeTouchActive = false
-    }
-
     private fun createMagnifier() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return
+        }
 
         if (selectionMagnifier == null) {
+
             val density = resources.displayMetrics.density
-            selectionMagnifier = Magnifier.Builder(this@apply)
-                .setSize(
-                    (130f * density).toInt(),
-                    (50f * density).toInt()
-                )
-                .setCornerRadius(15f * density)
-                .build()
+
+            selectionMagnifier =
+                Magnifier.Builder(this@apply)
+                    .setSize(
+                        (130f * density).toInt(),
+                        (50f * density).toInt()
+                    )
+                    .setCornerRadius(
+                        15f * density
+                    )
+                    .build()
         }
     }
 
@@ -2841,51 +2758,87 @@ setOnTouchListener(object : View.OnTouchListener {
         rawY: Float,
         force: Boolean = false
     ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return
+        }
 
         val now = System.currentTimeMillis()
-        if (!force && now - lastMagnifierTime < frameInterval) return
+
+        if (!force &&
+            now - lastMagnifierTime < frameInterval
+        ) {
+            return
+        }
+
         lastMagnifierTime = now
 
         try {
+
             createMagnifier()
 
             val location = IntArray(2)
+
             this@apply.getLocationOnScreen(location)
 
             val localX =
-                (rawX - location[0]).coerceIn(
+                (
+                    rawX - location[0]
+                ).coerceIn(
                     0f,
                     this@apply.width.toFloat()
                 )
 
             val localY =
-                (rawY - location[1]).coerceIn(
+                (
+                    rawY - location[1]
+                ).coerceIn(
                     0f,
                     this@apply.height.toFloat()
                 )
 
-            selectionMagnifier?.show(localX, localY)
+            selectionMagnifier?.show(
+                localX,
+                localY
+            )
+
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "showSelectionMagnifier")
+
+            EmergencyLog.logException(
+                e,
+                "showSelectionMagnifier"
+            )
         }
     }
 
     private fun hideSelectionMagnifier() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return
+        }
 
         try {
+
             selectionMagnifier?.dismiss()
+
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "hideSelectionMagnifier")
+
+            EmergencyLog.logException(
+                e,
+                "hideSelectionMagnifier"
+            )
         }
 
         lastMagnifierTime = 0L
     }
 
     private fun updateHandlesThrottled() {
+
         val now = System.currentTimeMillis()
-        if (now - lastHandleUpdateTime < frameInterval) return
+
+        if (now - lastHandleUpdateTime < frameInterval) {
+            return
+        }
 
         lastHandleUpdateTime = now
 
@@ -2895,6 +2848,7 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun updateSelectedTextDuringDrag() {
+
         val start = this@apply.selectionStart
         val end = this@apply.selectionEnd
 
@@ -2904,12 +2858,22 @@ setOnTouchListener(object : View.OnTouchListener {
             start == end ||
             start > this@apply.text.length ||
             end > this@apply.text.length
-        ) return
+        ) {
+            return
+        }
 
-        val selected = this@apply.text.substring(start, end)
-        if (selected.isEmpty()) return
+        val selected =
+            this@apply.text.substring(
+                start,
+                end
+            )
+
+        if (selected.isEmpty()) {
+            return
+        }
 
         currentSelectedText = selected
+
         isActionBarTemporarilyHidden = true
     }
 
@@ -2921,24 +2885,18 @@ setOnTouchListener(object : View.OnTouchListener {
         when (event.actionMasked) {
 
             MotionEvent.ACTION_DOWN -> {
-                val currentTime = System.currentTimeMillis()
+
+                val currentTime =
+                    System.currentTimeMillis()
+
                 val x = event.x
                 val y = event.y
 
-                // IMPORTANT:
-                // Read the previous tap position BEFORE overwriting lastTouchX/Y.
-                val previousTouchTime = lastTouchTime
-                val previousTouchX = lastTouchX
-                val previousTouchY = lastTouchY
-
-                val isDoubleTap =
-                    previousTouchTime > 0L &&
-                    currentTime - previousTouchTime < 300L &&
-                    Math.abs(x - previousTouchX) < 50f &&
-                    Math.abs(y - previousTouchY) < 50f
-
                 velocityTracker?.recycle()
-                velocityTracker = VelocityTracker.obtain()
+
+                velocityTracker =
+                    VelocityTracker.obtain()
+
                 velocityTracker?.addMovement(event)
 
                 cancelLongPress()
@@ -2947,30 +2905,25 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSelecting = false
                 isDragging = false
                 hasMoved = false
-                isSingleTap = !isDoubleTap
+                isSingleTap = true
+
                 isScrollingDetected = false
                 scrollConfirmed = false
-                customGestureActive = false
 
                 totalDistance = 0f
                 moveCount = 0
+
                 touchStartX = x
                 touchStartY = y
 
-                /*
-                 * For a normal tap, let the real EditText receive ACTION_DOWN.
-                 * This is what restores native cursor/keyboard/editing behavior.
-                 * For a double-tap, the native first tap has already completed;
-                 * the second tap is handled by our custom word-selection logic.
-                 */
-                if (!isDoubleTap) {
-                    nativeTouchActive = dispatchToNativeEditText(event)
-                } else {
-                    nativeTouchActive = false
+                if (
+                    currentTime - lastTouchTime < 300 &&
+                    Math.abs(x - lastTouchX) < 50 &&
+                    Math.abs(y - lastTouchY) < 50
+                ) {
 
                     isSelecting = true
                     isSingleTap = false
-                    customGestureActive = true
 
                     selectWordAtPosition(
                         this@apply,
@@ -2979,97 +2932,136 @@ setOnTouchListener(object : View.OnTouchListener {
                         true
                     )
 
-                    if (this@apply.hasSelection()) {
-                        v.parent.requestDisallowInterceptTouchEvent(true)
-                    }
-                }
+                } else {
 
-                if (!isDoubleTap) {
-                    val downX = x
-                    val downY = y
-                    val downRawX = event.rawX
-                    val downRawY = event.rawY
+                    val runnable =
+                        Runnable {
 
-                    val runnable = Runnable {
-                        // A movement/scroll means this was not a long press.
-                        if (hasMoved || isScrollingDetected || customGestureActive) {
-                            return@Runnable
-                        }
+                            isSelecting = true
+                            isSingleTap = false
 
-                        // Native EditText has already received the DOWN event.
-                        // We now take control for custom word selection.
-                        cancelNativeEditTextGesture()
-
-                        isSelecting = true
-                        isSingleTap = false
-                        customGestureActive = true
-
-                        selectWordAtPosition(
-                            this@apply,
-                            downX,
-                            downY,
-                            true
-                        )
-
-                        if (this@apply.hasSelection()) {
-                            v.parent.requestDisallowInterceptTouchEvent(true)
-                            showSelectionMagnifier(
-                                downRawX,
-                                downRawY,
+                            selectWordAtPosition(
+                                this@apply,
+                                x,
+                                y,
                                 true
                             )
+
+                            v.parent
+                                .requestDisallowInterceptTouchEvent(
+                                    true
+                                )
                         }
-                    }
 
                     longPressRunnable = runnable
-                    longPressHandler.postDelayed(runnable, 300L)
+
+                    longPressHandler.postDelayed(
+                        runnable,
+                        300
+                    )
                 }
 
-                // Update only AFTER double-tap detection.
                 lastTouchTime = currentTime
                 lastTouchX = x
                 lastTouchY = y
 
-                if (!customGestureActive) {
-                    v.parent.requestDisallowInterceptTouchEvent(false)
-                }
+                v.parent
+                    .requestDisallowInterceptTouchEvent(
+                        false
+                    )
 
-                // We manually dispatch to EditText when nativeTouchActive is true.
-                // Returning true prevents View from dispatching the same event twice.
-                return true
+                return false
             }
 
             MotionEvent.ACTION_MOVE -> {
+
                 velocityTracker?.addMovement(event)
+
                 moveCount++
 
-                val dx = Math.abs(event.x - touchStartX)
-                val dy = Math.abs(event.y - touchStartY)
+                val dx =
+                    Math.abs(
+                        event.x - touchStartX
+                    )
+
+                val dy =
+                    Math.abs(
+                        event.y - touchStartY
+                    )
+
                 val distance = sqrt(
-                    (dx.toDouble() * dx.toDouble()) +
-                    (dy.toDouble() * dy.toDouble())
-                ).toFloat()
+    (dx.toDouble() * dx.toDouble()) +
+    (dy.toDouble() * dy.toDouble())
+).toFloat()
 
                 totalDistance += distance
 
                 if (dx > 10 || dy > 10) {
+
                     hasMoved = true
                     isSingleTap = false
-                    cancelLongPress()
                 }
 
-                // Custom selection drag has priority over native scrolling.
                 if (
-                    customGestureActive &&
-                    isSelecting &&
+                    !isScrollingDetected &&
+                    !isSelecting &&
+                    !isDragging &&
+                    hasMoved
+                ) {
+
+                    velocityTracker
+                        ?.computeCurrentVelocity(1000)
+
+                    val velX =
+                        velocityTracker?.xVelocity
+                            ?: 0f
+
+                    val velY =
+                        velocityTracker?.yVelocity
+                            ?: 0f
+
+                    val velocity = sqrt(
+    (velX.toDouble() * velX.toDouble()) +
+    (velY.toDouble() * velY.toDouble())
+).toFloat()
+
+                    if (
+                        totalDistance > 30 ||
+                        velocity > 100 ||
+                        moveCount > 3
+                    ) {
+
+                        isScrollingDetected = true
+                        scrollConfirmed = true
+                        isDragging = false
+                        isSingleTap = false
+
+                        cancelLongPress()
+                        hideSelectionMagnifier()
+
+                        v.parent
+                            .requestDisallowInterceptTouchEvent(
+                                false
+                            )
+
+                        return true
+                    }
+                }
+
+                if (
+                    !isScrollingDetected &&
+                    !scrollConfirmed &&
                     this@apply.hasSelection() &&
                     (dx > 20 || dy > 20)
                 ) {
+
                     isDragging = true
                     isSingleTap = false
-                    nativeTouchActive = false
 
-                    v.parent.requestDisallowInterceptTouchEvent(true)
+                    v.parent
+                        .requestDisallowInterceptTouchEvent(
+                            true
+                        )
 
                     handleDragSelection(
                         this@apply,
@@ -3078,220 +3070,172 @@ setOnTouchListener(object : View.OnTouchListener {
 
                     updateSelectedTextDuringDrag()
 
+                    /*
+                     * Magnifier এবং handle update
+                     * সর্বোচ্চ ~60 FPS।
+                     */
                     showSelectionMagnifier(
                         event.rawX,
                         event.rawY
                     )
 
                     updateHandlesThrottled()
+
                     return true
                 }
 
                 if (
                     isDragging &&
-                    customGestureActive &&
                     this@apply.hasSelection()
                 ) {
+
                     updateSelectedTextDuringDrag()
+
                     showSelectionMagnifier(
                         event.rawX,
                         event.rawY
                     )
+
                     updateHandlesThrottled()
+
                     return true
-                }
-
-                // Detect normal ScrollView scrolling before native editing gets
-                // a chance to turn the gesture into something else.
-                if (
-                    !customGestureActive &&
-                    !isScrollingDetected &&
-                    hasMoved
-                ) {
-                    velocityTracker?.computeCurrentVelocity(1000)
-
-                    val velX = velocityTracker?.xVelocity ?: 0f
-                    val velY = velocityTracker?.yVelocity ?: 0f
-                    val velocity = sqrt(
-                        (velX.toDouble() * velX.toDouble()) +
-                        (velY.toDouble() * velY.toDouble())
-                    ).toFloat()
-
-                    if (
-                        totalDistance > 30 ||
-                        velocity > 100 ||
-                        moveCount > 3
-                    ) {
-                        isScrollingDetected = true
-                        scrollConfirmed = true
-                        isSingleTap = false
-                        cancelLongPress()
-                        hideSelectionMagnifier()
-
-                        if (this@apply.hasSelection()) {
-                            currentSelectedText = this@apply.text.substring(
-                                this@apply.selectionStart,
-                                this@apply.selectionEnd
-                            )
-                        }
-
-                        v.parent.requestDisallowInterceptTouchEvent(false)
-
-                        // Pass the current MOVE to native EditText so that the
-                        // already-started native gesture remains consistent.
-                        if (nativeTouchActive) {
-                            dispatchToNativeEditText(event)
-                        }
-
-                        return true
-                    }
-                }
-
-                // Normal tap/editing/scrolling gesture: keep native EditText
-                // receiving the complete event stream until custom selection
-                // actually takes control.
-                if (!customGestureActive && nativeTouchActive) {
-                    dispatchToNativeEditText(event)
                 }
 
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
-                velocityTracker?.addMovement(event)
+
                 velocityTracker?.recycle()
                 velocityTracker = null
 
                 cancelLongPress()
                 hideSelectionMagnifier()
 
-                v.parent.requestDisallowInterceptTouchEvent(false)
+                v.parent
+                    .requestDisallowInterceptTouchEvent(
+                        false
+                    )
 
-                /*
-                 * NORMAL SINGLE TAP
-                 * -----------------
-                 * Do NOT manually setSelection() here. Native EditText has
-                 * already calculated the exact cursor position and will also
-                 * handle keyboard/cursor blinking correctly.
-                 */
                 if (
                     isSingleTap &&
                     !hasMoved &&
                     !isSelecting &&
                     !isDragging &&
-                    !isScrollingDetected &&
-                    !scrollConfirmed &&
-                    !customGestureActive
+                    !scrollConfirmed
                 ) {
-                    if (nativeTouchActive) {
-                        dispatchToNativeEditText(event)
-                    } else {
-                        // Safety fallback for an unusual focus state.
-                        this@apply.requestFocus()
-                        val offset = getOffsetAtPosition(
-                            this@apply,
-                            event.x,
-                            event.y
-                        )
-                        if (offset >= 0) {
-                            this@apply.setSelection(offset, offset)
+
+                    if (this@apply.hasSelection()) {
+
+                        val offset =
+                            getOffsetAtPosition(
+                                this@apply,
+                                lastTouchX,
+                                lastTouchY
+                            )
+
+                        if (
+                            offset >= 0 &&
+                            offset <=
+                            this@apply.text.length
+                        ) {
+
+                            this@apply.setSelection(
+                                offset,
+                                offset
+                            )
                         }
-                    }
 
-                    hideSelectionHandles()
-                    hideFloatingActionBar()
-                    isActionBarTemporarilyHidden = false
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
 
-                    this@apply.post {
-                        this@apply.requestFocus()
-                        val imm = this@apply.context.getSystemService(
-                            Context.INPUT_METHOD_SERVICE
-                        ) as? InputMethodManager
-                        imm?.showSoftInput(
-                            this@apply,
-                            InputMethodManager.SHOW_IMPLICIT
-                        )
+                        isActionBarTemporarilyHidden =
+                            false
                     }
-                } else if (
-                    !customGestureActive &&
-                    nativeTouchActive &&
-                    !isScrollingDetected
-                ) {
-                    // Complete native gesture for non-custom interactions.
-                    dispatchToNativeEditText(event)
                 }
 
                 if (
-                    customGestureActive &&
-                    isDragging &&
+                    (hasMoved || scrollConfirmed) &&
                     this@apply.hasSelection()
                 ) {
-                    val start = this@apply.selectionStart
-                    val end = this@apply.selectionEnd
+
+                    val start =
+                        this@apply.selectionStart
+
+                    val end =
+                        this@apply.selectionEnd
 
                     if (
                         start >= 0 &&
                         end > start &&
                         end <= this@apply.text.length
                     ) {
-                        val selected = this@apply.text.substring(start, end)
+
+                        val selected =
+                            this@apply.text.substring(
+                                start,
+                                end
+                            )
 
                         if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            isActionBarTemporarilyHidden = false
-                            showFloatingActionBar(selected)
+
+                            currentSelectedText =
+                                selected
+
+                            isActionBarTemporarilyHidden =
+                                false
+
+                            showFloatingActionBar(
+                                selected
+                            )
+
                             showSelectionHandles()
+
                             updateHandlePositionsImmediate()
                         }
                     }
                 }
 
                 if (
-                    customGestureActive &&
+                    !isSelecting &&
+                    this@apply.hasSelection() &&
                     !isDragging &&
-                    this@apply.hasSelection()
+                    !isSingleTap &&
+                    !scrollConfirmed
                 ) {
-                    val start = this@apply.selectionStart
-                    val end = this@apply.selectionEnd
+
+                    val start =
+                        this@apply.selectionStart
+
+                    val end =
+                        this@apply.selectionEnd
 
                     if (
                         start >= 0 &&
                         end > start &&
                         end <= this@apply.text.length
                     ) {
-                        val selected = this@apply.text.substring(start, end)
+
+                        val selected =
+                            this@apply.text.substring(
+                                start,
+                                end
+                            )
 
                         if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            isActionBarTemporarilyHidden = false
-                            showFloatingActionBar(selected)
+
+                            currentSelectedText =
+                                selected
+
+                            isActionBarTemporarilyHidden =
+                                false
+
+                            showFloatingActionBar(
+                                selected
+                            )
+
                             showSelectionHandles()
-                            updateHandlePositionsImmediate()
-                        }
-                    }
-                }
 
-                // For a native scroll gesture, preserve the selection and let
-                // ScrollView perform its normal scrolling behavior.
-                if (
-                    isScrollingDetected &&
-                    this@apply.hasSelection()
-                ) {
-                    val start = this@apply.selectionStart
-                    val end = this@apply.selectionEnd
-
-                    if (
-                        start >= 0 &&
-                        end > start &&
-                        end <= this@apply.text.length
-                    ) {
-                        val selected = this@apply.text.substring(start, end)
-
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            isActionBarTemporarilyHidden = false
-                            showFloatingActionBar(selected)
-                            showSelectionHandles()
                             updateHandlePositionsImmediate()
                         }
                     }
@@ -3303,25 +3247,22 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSingleTap = false
                 scrollConfirmed = false
                 isScrollingDetected = false
-                nativeTouchActive = false
-                customGestureActive = false
 
                 return true
             }
 
             MotionEvent.ACTION_CANCEL -> {
+
                 velocityTracker?.recycle()
                 velocityTracker = null
 
                 cancelLongPress()
                 hideSelectionMagnifier()
 
-                // Finish/cancel the native gesture if it was active.
-                if (nativeTouchActive) {
-                    dispatchToNativeEditText(event)
-                }
-
-                v.parent.requestDisallowInterceptTouchEvent(false)
+                v.parent
+                    .requestDisallowInterceptTouchEvent(
+                        false
+                    )
 
                 isSelecting = false
                 isDragging = false
@@ -3329,19 +3270,21 @@ setOnTouchListener(object : View.OnTouchListener {
                 isSingleTap = false
                 scrollConfirmed = false
                 isScrollingDetected = false
-                nativeTouchActive = false
-                customGestureActive = false
 
                 return true
             }
         }
 
-        return true
+        return false
     }
 
     private fun cancelLongPress() {
+
         longPressRunnable?.let {
-            longPressHandler.removeCallbacks(it)
+
+            longPressHandler
+                .removeCallbacks(it)
+
             longPressRunnable = null
         }
     }
@@ -3352,11 +3295,6 @@ setOnTouchListener(object : View.OnTouchListener {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    // Top bar title = note content-এর প্রথম লাইন
-                    val firstLineTitle = s?.toString()?.lineSequence()?.firstOrNull()?.trimEnd()
-                        ?.ifEmpty { "Untitled Note" } ?: "Untitled Note"
-                    titleText.text = firstLineTitle
-
                     if (!this@apply.hasSelection()) {
                         hideSelectionHandles()
                         hideFloatingActionBar()
@@ -3376,7 +3314,7 @@ setOnTouchListener(object : View.OnTouchListener {
                         if (index != -1) {
                             val updatedNote = notesList[index].copy(
                                 content = text.toString(),
-                                title = text.toString().lineSequence().firstOrNull()?.trimEnd()?.ifEmpty { "Untitled Note" } ?: "Untitled Note",
+                                title = titleInput.text.toString(),
                                 lastEdited = System.currentTimeMillis()
                             )
                             notesList[index] = updatedNote
@@ -3394,31 +3332,19 @@ setOnTouchListener(object : View.OnTouchListener {
         scrollView.addView(editText)
         contentContainer.addView(scrollView)
 
-        // Save/Delete bottom bar সম্পূর্ণ বাদ দেওয়া হয়েছে।
-        // Resize handle এখন নোটপ্যাডের একদম bottom-right corner-এ থাকবে।
         val resizeHandleView = TextView(this).apply {
-            // শুধু bold resize arrow — কোনো button/background নেই
             text = "◢"
-            textSize = 24f
-            setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-            setTextColor(Color.parseColor("#FF9999"))
+            textSize = 18f
+            setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
-            includeFontPadding = false
-            setPadding(0, 0, 0, 0)
-            // Position correction: 1dp right, 3dp down.
-            translationX = dpToPx(1).toFloat()
-            translationY = dpToPx(3).toFloat()
-            background = null
-            layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
-                rightMargin = 0
-                bottomMargin = 0
-            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
+            lp.topMargin = 8
+            layoutParams = lp
             setOnTouchListener(ResizeTouchListener())
-            bringToFront()
         }
-
+        contentContainer.addView(resizeHandleView)
+        
         container.addView(contentContainer)
-        container.addView(resizeHandleView)
         
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -3455,42 +3381,6 @@ setOnTouchListener(object : View.OnTouchListener {
             
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
-
-            // Minimize করার সময়কার cursor/selection + scroll position restore করি।
-            if (hasSavedChildEditorState && savedChildEditorNoteId == note.id) {
-                val textLength = editText.text.length
-                val restoreStart = savedChildSelectionStart.coerceIn(0, textLength)
-                val restoreEnd = savedChildSelectionEnd.coerceIn(0, textLength)
-
-                try {
-                    editText.setSelection(restoreStart, restoreEnd)
-                } catch (_: Exception) {
-                    editText.setSelection(restoreStart)
-                }
-
-                scrollView.post {
-                    scrollView.scrollTo(0, savedChildScrollY.coerceAtLeast(0))
-                    editText.post {
-                        try {
-                            editText.setSelection(restoreStart, restoreEnd)
-                        } catch (_: Exception) {
-                            editText.setSelection(restoreStart)
-                        }
-
-                        if (restoreStart != restoreEnd) {
-                            showSelectionHandles()
-                            updateHandlePositionsImmediate()
-                        } else {
-                            hideSelectionHandles()
-                            hideFloatingActionBar()
-                        }
-                    }
-                }
-
-                // State একবার restore হয়ে গেলে পরের নতুন editor-এ ভুল করে apply হবে না।
-                hasSavedChildEditorState = false
-                savedChildEditorNoteId = null
-            }
         }, 300)
     }
 
@@ -3498,11 +3388,11 @@ setOnTouchListener(object : View.OnTouchListener {
         return selectionStart != selectionEnd
     }
 
-    private fun saveCurrentNoteData(noteId: Long) {
+    private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
             val updatedNote = notesList[index].copy(
-                title = editText.text.toString().lineSequence().firstOrNull()?.trimEnd()?.ifEmpty { "Untitled Note" } ?: "Untitled Note",
+                title = titleInput.text.toString().ifEmpty { "Untitled Note" },
                 content = editText.text.toString(),
                 lastEdited = System.currentTimeMillis()
             )
@@ -3510,13 +3400,6 @@ setOnTouchListener(object : View.OnTouchListener {
             saveNotesToPrefs()
             notesAdapter.updateList(notesList)
             updateBubbleCount()
-        }
-    }
-
-    private fun saveCurrentNote(noteId: Long) {
-        val index = notesList.indexOfFirst { it.id == noteId }
-        if (index != -1) {
-            saveCurrentNoteData(noteId)
             Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -3525,18 +3408,6 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun showNoteList() {
-        // Child editor থেকে সত্যিকার অর্থে Note List-এ ফিরে এলে
-        // active Child Note state clear হবে।
-        activeNoteId = null
-        isChildNoteOpen = false
-
-        // সত্যিকার অর্থে Child Note থেকে বের হলে পুরোনো cursor/selection state আর রাখব না।
-        hasSavedChildEditorState = false
-        savedChildEditorNoteId = null
-        savedChildSelectionStart = -1
-        savedChildSelectionEnd = -1
-        savedChildScrollY = 0
-
         hideSelectionHandles()
         hideFloatingActionBar()
         val container = createFullNotePad()
