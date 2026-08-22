@@ -2479,7 +2479,7 @@ params.y =
                 // Equal 1dp top + 1dp bottom internal breathing room is preserved.
                 gravity = Gravity.CENTER
                 includeFontPadding = true
-                setPadding(0, dpToPx(-5), 0, dpToPx(0))
+                setPadding(0, dpToPx(-5), 0, dpToPx(1))
 
                 isClickable = true
                 isFocusable = true
@@ -2496,7 +2496,7 @@ params.y =
                     shape = GradientDrawable.OVAL
                     setColor(
                         when (icon) {
-                            "<" -> Color.parseColor("#00E5FF") // Back
+                            "⟵" -> Color.parseColor("#00E5FF") // Back
                             "↗" -> Color.parseColor("#00FF66") // Share
                             "−" -> Color.parseColor("#FF8C00") // Minimize
                             else -> Color.parseColor("#FFFFFF")
@@ -3316,7 +3316,7 @@ setOnTouchListener(object : View.OnTouchListener {
             setPadding(0, 0, 0, 0)
             // Position correction: 1dp right, 3dp down.
             translationX = dpToPx(1).toFloat()
-            translationY = dpToPx(7).toFloat()
+            translationY = dpToPx(3).toFloat()
             background = null
             layoutParams = FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.BOTTOM or Gravity.END).apply {
                 rightMargin = 0
@@ -3618,3 +3618,4 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
+    
