@@ -2479,7 +2479,7 @@ params.y =
                 // Equal 1dp top + 1dp bottom internal breathing room is preserved.
                 gravity = Gravity.CENTER
                 includeFontPadding = true
-                setPadding(0, dpToPx(-8), 0, dpToPx(-8))
+                setPadding(0, dpToPx(-5), 0, dpToPx(0))
 
                 isClickable = true
                 isFocusable = true
@@ -2496,7 +2496,7 @@ params.y =
                     shape = GradientDrawable.OVAL
                     setColor(
                         when (icon) {
-                            "⟵" -> Color.parseColor("#00E5FF") // Back
+                            "<" -> Color.parseColor("#00E5FF") // Back
                             "↗" -> Color.parseColor("#00FF66") // Share
                             "−" -> Color.parseColor("#FF8C00") // Minimize
                             else -> Color.parseColor("#FFFFFF")
