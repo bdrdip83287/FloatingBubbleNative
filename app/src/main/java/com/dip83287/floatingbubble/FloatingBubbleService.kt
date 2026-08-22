@@ -2479,7 +2479,7 @@ params.y =
                 // Equal 1dp top + 1dp bottom internal breathing room is preserved.
                 gravity = Gravity.CENTER
                 includeFontPadding = true
-                setPadding(0, dpToPx(0), 0, dpToPx(5))
+                setPadding(0, dpToPx(0), 0, dpToPx(-5))
 
                 isClickable = true
                 isFocusable = true
