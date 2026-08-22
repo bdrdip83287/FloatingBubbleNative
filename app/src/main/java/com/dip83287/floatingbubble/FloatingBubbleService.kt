@@ -2457,7 +2457,8 @@ params.y =
         // buttonSize = প্রতিটি গোল বাটনের সাইজ। 24 থেকে কম/বেশি করুন।
         // iconSize   = বাটনের ভিতরের icon-এর সাইজ। 23 থেকে কম/বেশি করুন।
         // buttonGap  = বাটনগুলোর মাঝের ফাঁকা জায়গা। বর্তমানে 6dp।
-        // iconColor  = icon-এর রং। বর্তমানে BLACK।\n        // নতুন Unicode/Text icon যোগ করতে createRoundTopButton("SYMBOL") ব্যবহার করুন।
+        // iconColor  = icon-এর রং। বর্তমানে BLACK।
+        // নতুন Unicode/Text icon যোগ করতে createRoundTopButton("SYMBOL") ব্যবহার করুন।
         // ======================================================
         fun createRoundTopButton(icon: String, onClick: () -> Unit): TextView {
             val buttonSize = 24
@@ -2474,9 +2475,11 @@ params.y =
 
                 // সব Unicode/Text icon-এর জন্য একই centering logic।
                 // কোনো icon-এর জন্য আলাদা translationY/translationX নেই।
+                // Fixed 24dp icon box + CENTER gravity.
+                // Equal 1dp top + 1dp bottom internal breathing room is preserved.
                 gravity = Gravity.CENTER
-                includeFontPadding = false
-                setPadding(0, 0, 0, 0)
+                includeFontPadding = true
+                setPadding(0, dpToPx(1), 0, dpToPx(1))
 
                 isClickable = true
                 isFocusable = true
