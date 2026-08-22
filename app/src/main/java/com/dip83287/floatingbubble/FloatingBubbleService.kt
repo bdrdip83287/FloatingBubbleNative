@@ -2472,8 +2472,8 @@ params.y =
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 setTextColor(Color.BLACK)
 
-                // সব Unicode icon-এর visual box একইভাবে center করা।
-                // Back/Share-এর জন্য আলাদা translation/offset নেই।
+                // সব Unicode/Text icon-এর জন্য একই centering logic।
+                // কোনো icon-এর জন্য আলাদা translationY/translationX নেই।
                 gravity = Gravity.CENTER
                 includeFontPadding = false
                 setPadding(0, 0, 0, 0)
@@ -2493,8 +2493,8 @@ params.y =
                     shape = GradientDrawable.OVAL
                     setColor(
                         when (icon) {
-                            "←" -> Color.parseColor("#00E5FF") // Back
-                            "⤴" -> Color.parseColor("#00FF66") // Share
+                            "⟵" -> Color.parseColor("#00E5FF") // Back
+                            "↗" -> Color.parseColor("#00FF66") // Share
                             "−" -> Color.parseColor("#FF8C00") // Minimize
                             else -> Color.parseColor("#FFFFFF")
                         }
@@ -2506,7 +2506,7 @@ params.y =
             }
         }
 
-        val backBtn = createRoundTopButton("←") {
+        val backBtn = createRoundTopButton("⟵") {
             saveCurrentNoteData(note.id)
             hideSelectionHandles()
             hideFloatingActionBar()
@@ -2514,7 +2514,7 @@ params.y =
         }
         topBar.addView(backBtn)
 
-        val shareBtn = createRoundTopButton("⤴") {
+        val shareBtn = createRoundTopButton("↗") {
             saveCurrentNoteData(note.id)
             shareLargeText(editText.text.toString())
         }
