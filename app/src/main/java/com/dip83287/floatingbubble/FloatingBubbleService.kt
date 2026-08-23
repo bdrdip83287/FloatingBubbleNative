@@ -2841,32 +2841,27 @@ params.y =
             
 setOnTouchListener(object : View.OnTouchListener {
     /*
-     * IMPORTANT:
-     * The EditText itself must receive the complete touch stream.
-     * Consuming MOVE/UP here breaks Android's native cursor placement,
-     * scrolling, double-tap selection and long-press selection.
-     *
-     * Therefore this listener only OBSERVES the gesture and always returns
-     * false. Android EditText remains responsible for the actual interaction.
+     * The EditText keeps the complete native touch stream. We only observe it
+     * and add the custom selection UI/character-by-character long-press drag.
+     * Returning false is essential for normal cursor placement, scrolling and
+     * keyboard behaviour.
      */
     private val gestureDetector = GestureDetector(
         this@FloatingBubbleService,
         object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean {
-                return true
-            }
+            override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                // Android's native EditText selection is normally enough.
-                // Explicitly select the word so the custom editor behaves
-                // consistently even when the editor is inside an overlay.
                 try {
-                    selectWordAtPosition(
-                        this@apply,
-                        e.x,
-                        e.y,
-                        true
-                    )
+                    selectWordAtPosition(this@apply, e.x, e.y, true)
+                    showSelectionHandles()
+                    updateHandlePositionsImmediate()
+                    val a = this@apply.selectionStart
+                    val b = this@apply.selectionEnd
+                    if (a >= 0 && b > a) {
+                        currentSelectedText = this@apply.text.substring(a, b)
+                        showFloatingActionBar(currentSelectedText)
+                    }
                 } catch (ex: Exception) {
                     EmergencyLog.logException(ex, "EditText double tap")
                 }
@@ -2874,11 +2869,39 @@ setOnTouchListener(object : View.OnTouchListener {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                // Native EditText handles the actual long-press selection.
-                // This flag only tells our observer that this is an intentional
-                // selection gesture, so scrolling afterwards will not be
-                // mistaken for an accidental selection.
                 longPressTriggered = true
+                tapCandidate = false
+
+                // A new long-press must work even when another selection already
+                // exists. Start the new selection exactly at the pressed character.
+                selectionAnchor = getOffsetAtPosition(
+                    this@apply,
+                    e.x,
+                    e.y
+                ).coerceIn(0, this@apply.length())
+
+                // First long-press selects the word under the finger. If the
+                // finger then moves, ACTION_MOVE replaces that word selection
+                // with precise character-by-character range selection.
+                selectWordAtPosition(this@apply, e.x, e.y, true)
+                currentSelectedText = if (this@apply.hasSelection()) {
+                    this@apply.text.substring(
+                        this@apply.selectionStart,
+                        this@apply.selectionEnd
+                    )
+                } else {
+                    ""
+                }
+                if (currentSelectedText.isNotEmpty()) {
+                    showSelectionHandles()
+                    updateHandlePositionsImmediate()
+                    showFloatingActionBar(currentSelectedText)
+                }
+
+                // Keep the parent ScrollView from stealing the long-press drag.
+                e.let { _ ->
+                    // The actual parent request is also repeated in ACTION_MOVE.
+                }
             }
         }
     )
@@ -2889,11 +2912,9 @@ setOnTouchListener(object : View.OnTouchListener {
     private var longPressTriggered = false
     private var selectionAtDown = false
     private var tapCandidate = false
+    private var selectionAnchor = -1
 
-    override fun onTouch(
-        v: View,
-        event: MotionEvent
-    ): Boolean {
+    override fun onTouch(v: View, event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
 
         when (event.actionMasked) {
@@ -2904,14 +2925,10 @@ setOnTouchListener(object : View.OnTouchListener {
                 longPressTriggered = false
                 selectionAtDown = this@apply.hasSelection()
                 tapCandidate = true
+                selectionAnchor = -1
 
-                // Focus only. Do NOT open the keyboard here; doing so on DOWN
-                // makes the keyboard appear even when the user only scrolls.
                 this@apply.requestFocus()
                 this@apply.isCursorVisible = true
-
-                // Do not disallow parent interception. ScrollView must receive
-                // MOVE events normally.
                 v.parent?.requestDisallowInterceptTouchEvent(false)
             }
 
@@ -2922,22 +2939,58 @@ setOnTouchListener(object : View.OnTouchListener {
                     (dx.toDouble() * dx.toDouble()) +
                     (dy.toDouble() * dy.toDouble())
                 ).toFloat()
-
                 val touchSlopPx =
                     ViewConfiguration.get(this@FloatingBubbleService).scaledTouchSlop.toFloat()
 
                 if (distance > touchSlopPx) {
                     touchMoved = true
                     tapCandidate = false
+                }
 
-                    // If there was no selection when the gesture started and
-                    // this was not a genuine long-press, never allow a tiny
-                    // movement to become a text selection.
-                    if (!selectionAtDown && !longPressTriggered && this@apply.hasSelection()) {
+                if (longPressTriggered) {
+                    // Long-press + drag is text selection, not scrolling.
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    if (selectionAnchor < 0) {
+                        selectionAnchor = getOffsetAtPosition(
+                            this@apply, touchStartX, touchStartY
+                        ).coerceIn(0, this@apply.length())
+                    }
+
+                    if (distance > touchSlopPx) {
+                        val newOffset = getOffsetAtPosition(
+                            this@apply, event.x, event.y
+                        ).coerceIn(0, this@apply.length())
+
+                        // Anchor remains fixed; only the moving endpoint changes.
+                        // This gives true character-by-character selection.
+                        if (newOffset <= selectionAnchor) {
+                            this@apply.setSelection(newOffset, selectionAnchor)
+                        } else {
+                            this@apply.setSelection(selectionAnchor, newOffset)
+                        }
+
+                        if (this@apply.hasSelection()) {
+                            currentSelectedText = this@apply.text.substring(
+                                this@apply.selectionStart,
+                                this@apply.selectionEnd
+                            )
+                            showSelectionHandles()
+                            updateHandlePositionsImmediate()
+                            showFloatingActionBar(currentSelectedText)
+                        } else {
+                            hideSelectionHandles()
+                            hideFloatingActionBar()
+                        }
+                    }
+                } else {
+                    // Ordinary movement remains available to the ScrollView.
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+
+                    // Prevent accidental selection caused by a small drag when
+                    // there was no selection and no long-press gesture.
+                    if (!selectionAtDown && distance > touchSlopPx && this@apply.hasSelection()) {
                         val offset = getOffsetAtPosition(
-                            this@apply,
-                            touchStartX,
-                            touchStartY
+                            this@apply, touchStartX, touchStartY
                         ).coerceIn(0, this@apply.length())
                         this@apply.setSelection(offset)
                         hideSelectionHandles()
@@ -2947,58 +3000,62 @@ setOnTouchListener(object : View.OnTouchListener {
             }
 
             MotionEvent.ACTION_UP -> {
-                // Keyboard is requested ONLY after a genuine tap.
-                // A scroll therefore does not cause the keyboard to pop up.
-                if (tapCandidate && !touchMoved) {
+                v.parent?.requestDisallowInterceptTouchEvent(false)
+
+                if (tapCandidate && !touchMoved && !longPressTriggered) {
                     this@apply.requestFocus()
                     this@apply.isCursorVisible = true
                     this@apply.post {
                         try {
                             val imm = getSystemService(Context.INPUT_METHOD_SERVICE)
                                 as InputMethodManager
-                            imm.showSoftInput(
-                                this@apply,
-                                InputMethodManager.SHOW_IMPLICIT
-                            )
+                            imm.showSoftInput(this@apply, InputMethodManager.SHOW_IMPLICIT)
                         } catch (ex: Exception) {
                             EmergencyLog.logException(ex, "EditText show keyboard")
                         }
                     }
-                }
 
-                // Native EditText has already placed the cursor/selection.
-                // Update custom handles/action bar only after the gesture ends.
-                if (this@apply.hasSelection()) {
-                    try {
-                        currentSelectedText = this@apply.text.substring(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
-                        if (currentSelectedText.isNotEmpty()) {
-                            showSelectionHandles()
-                            updateHandlePositionsImmediate()
-                            showFloatingActionBar(currentSelectedText)
-                        }
-                    } catch (ex: Exception) {
-                        EmergencyLog.logException(ex, "EditText selection UI")
+                    // A single tap on an existing selection collapses it at the
+                    // native cursor position and MUST hide the custom UI too.
+                    if (selectionAtDown && this@apply.hasSelection()) {
+                        val offset = getOffsetAtPosition(
+                            this@apply, event.x, event.y
+                        ).coerceIn(0, this@apply.length())
+                        this@apply.setSelection(offset)
                     }
+
+                    if (selectionAtDown) {
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
+                        currentSelectedText = ""
+                    }
+                } else if (longPressTriggered && this@apply.hasSelection()) {
+                    currentSelectedText = this@apply.text.substring(
+                        this@apply.selectionStart,
+                        this@apply.selectionEnd
+                    )
+                    showSelectionHandles()
+                    updateHandlePositionsImmediate()
+                    showFloatingActionBar(currentSelectedText)
                 }
 
                 touchMoved = false
                 tapCandidate = false
                 longPressTriggered = false
                 selectionAtDown = false
+                selectionAnchor = -1
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                v.parent?.requestDisallowInterceptTouchEvent(false)
                 touchMoved = false
                 tapCandidate = false
                 longPressTriggered = false
                 selectionAtDown = false
+                selectionAnchor = -1
             }
         }
 
-        // CRITICAL: false = let EditText/ScrollView process the event normally.
         return false
     }
 })
@@ -3063,24 +3120,48 @@ setOnTouchListener(object : View.OnTouchListener {
             val restoreY = savedEditorScrollY
             val restoreX = savedEditorScrollX
 
+            // Restore selection/cursor without allowing EditText to decide the
+            // viewport. The saved ScrollView position is authoritative.
             editText.post {
                 try {
                     val len = editText.length()
                     val start = restoreStart.coerceIn(0, len)
                     val end = restoreEnd.coerceIn(0, len)
+
                     editText.requestFocus()
+                    editText.isCursorVisible = false
                     editText.setSelection(start, end)
 
-                    // Disable automatic cursor scrolling while restoring the viewport.
-                    editText.isCursorVisible = true
-                    scrollView.scrollTo(restoreX, restoreY)
+                    // Restore only the viewport that was visible at minimize.
+                    // Do it after layout, then once more before the first stable
+                    // frame so setSelection() cannot pull the view to the cursor.
                     scrollView.post {
                         scrollView.scrollTo(restoreX, restoreY)
-                        updateHandlePositionsImmediate()
+                        editText.post {
+                            scrollView.scrollTo(restoreX, restoreY)
+                            editText.isCursorVisible = true
+
+                            if (start != end) {
+                                currentSelectedText = editText.text.substring(start, end)
+                                showSelectionHandles()
+                                updateHandlePositionsImmediate()
+                                showFloatingActionBar(currentSelectedText)
+                            } else {
+                                hideSelectionHandles()
+                                hideFloatingActionBar()
+                            }
+
+                            // One final posted restore prevents Android's
+                            // cursor-visibility change from moving the viewport.
+                            scrollView.post {
+                                scrollView.scrollTo(restoreX, restoreY)
+                            }
+                            restoreEditorStatePending = false
+                        }
                     }
-                    restoreEditorStatePending = false
                 } catch (e: Exception) {
                     EmergencyLog.logException(e, "restoreEditorState")
+                    restoreEditorStatePending = false
                 }
             }
         } else {
