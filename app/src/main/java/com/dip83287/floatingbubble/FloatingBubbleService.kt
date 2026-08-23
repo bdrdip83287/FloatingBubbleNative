@@ -2841,6 +2841,9 @@ params.y =
             
 setOnTouchListener(object : View.OnTouchListener {
 
+    // Single tap = cursor placement only.
+    // Long press = selection.
+    // Movement beyond touch-slop = scrolling/dragging, never selection.
     private var lastTouchTime = 0L
     private var lastTouchX = 0f
     private var lastTouchY = 0f
@@ -3064,50 +3067,31 @@ setOnTouchListener(object : View.OnTouchListener {
                 touchStartX = x
                 touchStartY = y
 
-                if (
-                    currentTime - lastTouchTime < 300 &&
-                    Math.abs(x - lastTouchX) < 50 &&
-                    Math.abs(y - lastTouchY) < 50
-                ) {
+                // IMPORTANT: a normal single tap must NEVER select text.
+                // Word selection is reserved for a genuine long-press only.
+                // This also removes the old double-tap timing logic that could
+                // occasionally turn a normal second tap into a selection.
+                val runnable = Runnable {
+                    // If the finger moved enough to be a scroll, never enter
+                    // selection mode even if the delayed callback fires late.
+                    if (!hasMoved && !isScrollingDetected && !scrollConfirmed) {
+                        isSelecting = true
+                        isSingleTap = false
 
-                    isSelecting = true
-                    isSingleTap = false
+                        selectWordAtPosition(
+                            this@apply,
+                            x,
+                            y,
+                            true
+                        )
 
-                    selectWordAtPosition(
-                        this@apply,
-                        x,
-                        y,
-                        true
-                    )
-
-                } else {
-
-                    val runnable =
-                        Runnable {
-
-                            isSelecting = true
-                            isSingleTap = false
-
-                            selectWordAtPosition(
-                                this@apply,
-                                x,
-                                y,
-                                true
-                            )
-
-                            v.parent
-                                .requestDisallowInterceptTouchEvent(
-                                    true
-                                )
-                        }
-
-                    longPressRunnable = runnable
-
-                    longPressHandler.postDelayed(
-                        runnable,
-                        300
-                    )
+                        v.parent
+                            .requestDisallowInterceptTouchEvent(true)
+                    }
                 }
+
+                longPressRunnable = runnable
+                longPressHandler.postDelayed(runnable, 350)
 
                 lastTouchTime = currentTime
                 lastTouchX = x
@@ -3144,10 +3128,13 @@ setOnTouchListener(object : View.OnTouchListener {
 
                 totalDistance += distance
 
-                if (dx > 10 || dy > 10) {
-
+                // As soon as the finger moves beyond Android's touch-slop,
+                // this gesture is a scroll/drag, NOT a tap/long-press.
+                val touchSlopPx = (8f * resources.displayMetrics.density).coerceAtLeast(8f)
+                if (distance > touchSlopPx) {
                     hasMoved = true
                     isSingleTap = false
+                    cancelLongPress()
                 }
 
                 if (
@@ -3174,9 +3161,8 @@ setOnTouchListener(object : View.OnTouchListener {
 ).toFloat()
 
                     if (
-                        totalDistance > 30 ||
-                        velocity > 100 ||
-                        moveCount > 3
+                        distance > touchSlopPx ||
+                        totalDistance > 24f
                     ) {
 
                         isScrollingDetected = true
@@ -3186,6 +3172,8 @@ setOnTouchListener(object : View.OnTouchListener {
 
                         cancelLongPress()
                         hideSelectionMagnifier()
+                        isSelecting = false
+                        isDragging = false
 
                         v.parent
                             .requestDisallowInterceptTouchEvent(
@@ -3573,8 +3561,14 @@ setOnTouchListener(object : View.OnTouchListener {
             // Do NOT force-open the keyboard on a normal note open.
             // The keyboard will appear naturally when the user touches the editor.
             editText.post {
+                // New/open-from-list note: always start at the very top.
+                // Do not place the cursor at the end because EditText may then
+                // auto-scroll the ScrollView to the bottom.
                 editText.requestFocus()
-                editText.setSelection(editText.length())
+                editText.setSelection(0, 0)
+                scrollView.post {
+                    scrollView.scrollTo(0, 0)
+                }
             }
         }
     }
