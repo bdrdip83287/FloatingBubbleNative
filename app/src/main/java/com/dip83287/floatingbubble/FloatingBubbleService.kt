@@ -90,6 +90,8 @@ class FloatingBubbleService : Service() {
     private var savedEditorSelectionEnd = 0
     private var savedEditorScrollY = 0
     private var savedEditorScrollX = 0
+    private var savedEditorEditTextScrollY = 0
+    private var savedEditorEditTextScrollX = 0
 
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
@@ -1110,8 +1112,14 @@ setupBubbleTouchListener(params)
         if (::editText.isInitialized && currentEditingNoteId != null) {
             savedEditorSelectionStart = editText.selectionStart.coerceAtLeast(0)
             savedEditorSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
+            // Save BOTH containers. The visible front view is determined by
+            // the ScrollView, while EditText can also have its own internal
+            // scroll offset. Saving both prevents Android from changing the
+            // viewport when the cursor/selection is restored.
             savedEditorScrollY = scrollView.scrollY.coerceAtLeast(0)
             savedEditorScrollX = scrollView.scrollX.coerceAtLeast(0)
+            savedEditorEditTextScrollY = editText.scrollY.coerceAtLeast(0)
+            savedEditorEditTextScrollX = editText.scrollX.coerceAtLeast(0)
             restoreEditorStatePending = true
 
             // Persist the latest text immediately so minimize cannot lose edits.
@@ -3155,27 +3163,43 @@ setOnTouchListener(object : View.OnTouchListener {
             val restoreEnd = savedEditorSelectionEnd
             val restoreY = savedEditorScrollY
             val restoreX = savedEditorScrollX
+            val restoreEditY = savedEditorEditTextScrollY
+            val restoreEditX = savedEditorEditTextScrollX
 
-            // Restore selection/cursor without allowing EditText to decide the
-            // viewport. The saved ScrollView position is authoritative.
+            // IMPORTANT: Do not requestFocus() while restoring a minimized child
+            // note. Android EditText may automatically scroll the cursor into
+            // view when focus/selection is restored. That is the source of the
+            // unwanted jump to the cursor.
+            //
+            // The viewport saved at minimize is authoritative. We restore the
+            // selection while the editor is not focused, then restore BOTH the
+            // outer ScrollView and the EditText's own scroll offsets.
             editText.post {
                 try {
                     val len = editText.length()
                     val start = restoreStart.coerceIn(0, len)
                     val end = restoreEnd.coerceIn(0, len)
 
-                    editText.requestFocus()
-                    editText.isCursorVisible = false
+                    editText.isCursorVisible = true
                     editText.setSelection(start, end)
 
-                    // Restore only the viewport that was visible at minimize.
-                    // Do it after layout, then once more before the first stable
-                    // frame so setSelection() cannot pull the view to the cursor.
-                    scrollView.post {
-                        scrollView.scrollTo(restoreX, restoreY)
-                        editText.post {
+                    fun restoreExactViewport() {
+                        try {
+                            // First restore the EditText's internal viewport.
+                            editText.scrollTo(restoreEditX, restoreEditY)
+                            // Then restore the outer viewport that the user saw.
                             scrollView.scrollTo(restoreX, restoreY)
-                            editText.isCursorVisible = true
+                        } catch (_: Exception) { }
+                    }
+
+                    // Restore before the first visible stable frame.
+                    restoreExactViewport()
+
+                    scrollView.post {
+                        restoreExactViewport()
+
+                        editText.post {
+                            restoreExactViewport()
 
                             if (start != end) {
                                 currentSelectedText = editText.text.substring(start, end)
@@ -3187,12 +3211,13 @@ setOnTouchListener(object : View.OnTouchListener {
                                 hideFloatingActionBar()
                             }
 
-                            // One final posted restore prevents Android's
-                            // cursor-visibility change from moving the viewport.
-                            scrollView.post {
-                                scrollView.scrollTo(restoreX, restoreY)
+                            // A final animation-frame restore catches any layout
+                            // pass that might otherwise move the viewport. No
+                            // smooth-scroll or cursor-following operation is used.
+                            editText.postOnAnimation {
+                                restoreExactViewport()
+                                restoreEditorStatePending = false
                             }
-                            restoreEditorStatePending = false
                         }
                     }
                 } catch (e: Exception) {
