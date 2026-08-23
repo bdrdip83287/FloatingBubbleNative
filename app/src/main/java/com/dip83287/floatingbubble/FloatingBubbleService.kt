@@ -1416,6 +1416,88 @@ setupBubbleTouchListener(params)
         }
     }
     
+    // ================================================================
+    // Shared custom magnifier for BOTH selection-handle dragging and
+    // long-press + drag character selection.
+    // ================================================================
+    private var customSelectionMagnifier: Magnifier? = null
+    private var customMagnifierTarget: EditText? = null
+    private var lastCustomMagnifierTime = 0L
+    private val customMagnifierFrameInterval = 16L
+
+    private fun createCustomSelectionMagnifier() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
+        if (customMagnifierTarget !== editText) {
+            try {
+                customSelectionMagnifier?.dismiss()
+            } catch (_: Exception) {
+            }
+            customSelectionMagnifier = null
+            customMagnifierTarget = editText
+        }
+
+        if (customSelectionMagnifier == null) {
+            val density = resources.displayMetrics.density
+            customSelectionMagnifier = Magnifier.Builder(editText)
+                .setSize(
+                    (130f * density).toInt(),
+                    (50f * density).toInt()
+                )
+                .setCornerRadius(15f * density)
+                .build()
+        }
+    }
+
+    private fun showCustomSelectionMagnifier(
+        rawX: Float,
+        rawY: Float,
+        force: Boolean = false
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
+        val now = System.currentTimeMillis()
+        if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) {
+            return
+        }
+        lastCustomMagnifierTime = now
+
+        try {
+            createCustomSelectionMagnifier()
+
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
+
+            val localX = (rawX - location[0]).coerceIn(
+                0f,
+                editText.width.toFloat()
+            )
+            val localY = (rawY - location[1]).coerceIn(
+                0f,
+                editText.height.toFloat()
+            )
+
+            // Exactly the same Magnifier configuration and positioning logic
+            // used by the custom selection handles.
+            customSelectionMagnifier?.show(localX, localY)
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "showCustomSelectionMagnifier")
+        }
+    }
+
+    private fun hideCustomSelectionMagnifier() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
+        try {
+            customSelectionMagnifier?.dismiss()
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "hideCustomSelectionMagnifier")
+        }
+
+        lastCustomMagnifierTime = 0L
+        customMagnifierTarget = null
+    }
+
     private fun createSelectionHandles(): Pair<View, View> {
         val leftHandle = ImageView(this).apply {
             setImageDrawable(createCircleHandleDrawable())
@@ -1446,118 +1528,7 @@ setupBubbleTouchListener(params)
     private var initialSelectionEnd = 0
 
     private var lastUpdateTime = 0L
-    private var lastMagnifierTime = 0L
-
-    private var magnifier: Magnifier? = null
-
     private val frameInterval = 16L
-
-    private fun createHandleMagnifier() {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            return
-        }
-
-        if (magnifier == null) {
-
-            val density = resources.displayMetrics.density
-
-            magnifier =
-                Magnifier.Builder(editText)
-                    .setSize(
-                        (130f * density).toInt(),
-                        (50f * density).toInt()
-                    )
-                    .setCornerRadius(
-                        15f * density
-                    )
-                    .build()
-        }
-    }
-
-    private fun showHandleMagnifier(
-        rawX: Float,
-        rawY: Float,
-        force: Boolean = false
-    ) {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            return
-        }
-
-        val now =
-            System.currentTimeMillis()
-
-        if (
-            !force &&
-            now - lastMagnifierTime < frameInterval
-        ) {
-            return
-        }
-
-        lastMagnifierTime = now
-
-        try {
-
-            createHandleMagnifier()
-
-            val location =
-                IntArray(2)
-
-            editText.getLocationOnScreen(
-                location
-            )
-
-            val localX =
-                (
-                    rawX - location[0]
-                ).coerceIn(
-                    0f,
-                    editText.width.toFloat()
-                )
-
-            val localY =
-                (
-                    rawY - location[1]
-                ).coerceIn(
-                    0f,
-                    editText.height.toFloat()
-                )
-
-            magnifier?.show(
-                localX,
-                localY
-            )
-
-        } catch (e: Exception) {
-
-            EmergencyLog.logException(
-                e,
-                "showHandleMagnifier"
-            )
-        }
-    }
-
-    private fun hideHandleMagnifier() {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            return
-        }
-
-        try {
-
-            magnifier?.dismiss()
-
-        } catch (e: Exception) {
-
-            EmergencyLog.logException(
-                e,
-                "hideHandleMagnifier"
-            )
-        }
-
-        lastMagnifierTime = 0L
-    }
 
     override fun onTouch(
         v: View,
@@ -1584,7 +1555,7 @@ setupBubbleTouchListener(params)
 
                 editText.requestFocus()
 
-                showHandleMagnifier(
+                showCustomSelectionMagnifier(
                     event.rawX,
                     event.rawY,
                     true
@@ -1603,7 +1574,7 @@ setupBubbleTouchListener(params)
                     frameInterval
                 ) {
 
-                    showHandleMagnifier(
+                    showCustomSelectionMagnifier(
                         event.rawX,
                         event.rawY
                     )
@@ -1701,7 +1672,7 @@ setupBubbleTouchListener(params)
                 /*
                  * Magnifier update throttled.
                  */
-                showHandleMagnifier(
+                showCustomSelectionMagnifier(
                     event.rawX,
                     event.rawY
                 )
@@ -1747,7 +1718,7 @@ setupBubbleTouchListener(params)
                 isDraggingLeftHandle = false
                 isDraggingRightHandle = false
 
-                hideHandleMagnifier()
+                hideCustomSelectionMagnifier()
 
                 if (editText.hasSelection()) {
 
@@ -1796,7 +1767,7 @@ setupBubbleTouchListener(params)
                 isDraggingLeftHandle = false
                 isDraggingRightHandle = false
 
-                hideHandleMagnifier()
+                hideCustomSelectionMagnifier()
 
                 return true
             }
@@ -2995,6 +2966,14 @@ setOnTouchListener(object : View.OnTouchListener {
                     }
 
                     if (distance > touchSlopPx) {
+                        // Use the EXACT same custom Magnifier used by the
+                        // selection handles. The focal point follows the
+                        // finger while the selection expands character-by-character.
+                        showCustomSelectionMagnifier(
+                            event.rawX,
+                            event.rawY
+                        )
+
                         val movingOffset = offsetAt(event.x, event.y)
                         val a = minOf(selectionAnchor, movingOffset)
                         val b = maxOf(selectionAnchor, movingOffset)
@@ -3033,6 +3012,8 @@ setOnTouchListener(object : View.OnTouchListener {
                 val wasMoved = touchMoved
 
                 if (wasLongPress) {
+                    hideCustomSelectionMagnifier()
+
                     // Keep the final selection exactly where the drag ended.
                     if (this@apply.hasSelection()) {
                         updateCustomSelectionUi()
@@ -3101,6 +3082,7 @@ setOnTouchListener(object : View.OnTouchListener {
 
             MotionEvent.ACTION_CANCEL -> {
                 cancelPendingLongPress()
+                hideCustomSelectionMagnifier()
                 v.parent?.requestDisallowInterceptTouchEvent(false)
                 longPressTriggered = false
                 secondTapCandidate = false
