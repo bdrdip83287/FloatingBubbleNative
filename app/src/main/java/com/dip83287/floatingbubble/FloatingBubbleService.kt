@@ -82,6 +82,15 @@ class FloatingBubbleService : Service() {
     private val editorRedoStack = java.util.ArrayDeque<String>()
     private var suppressEditorHistory = false
     private var isEditorLocked = false
+
+    // Child-note state that must survive minimize -> bubble -> expand.
+    private var currentEditingNoteId: Long? = null
+    private var restoreEditorStatePending = false
+    private var savedEditorSelectionStart = 0
+    private var savedEditorSelectionEnd = 0
+    private var savedEditorScrollY = 0
+    private var savedEditorScrollX = 0
+
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
@@ -1042,6 +1051,16 @@ setupBubbleTouchListener(params)
         if (noteView != null) return
         
         try {
+            // If a child note was minimized, reopen that SAME child editor.
+            // Never fall back to the Note List in that case.
+            currentEditingNoteId?.let { id ->
+                val activeNote = notesList.firstOrNull { it.id == id }
+                if (activeNote != null) {
+                    openEditorForNote(activeNote)
+                    return
+                }
+            }
+
             val container = createFullNotePad()
             noteView = container
             
@@ -1085,6 +1104,28 @@ setupBubbleTouchListener(params)
 
     private fun collapseToBubble() {
         if (!isExpanded) return
+
+        // Capture the exact editor state BEFORE the child note is removed.
+        // This includes cursor/selection and the visible scroll position.
+        if (::editText.isInitialized && currentEditingNoteId != null) {
+            savedEditorSelectionStart = editText.selectionStart.coerceAtLeast(0)
+            savedEditorSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
+            savedEditorScrollY = scrollView.scrollY.coerceAtLeast(0)
+            savedEditorScrollX = scrollView.scrollX.coerceAtLeast(0)
+            restoreEditorStatePending = true
+
+            // Persist the latest text immediately so minimize cannot lose edits.
+            val activeId = currentEditingNoteId!!
+            val index = notesList.indexOfFirst { it.id == activeId }
+            if (index >= 0) {
+                notesList[index] = notesList[index].copy(
+                    content = editText.text.toString(),
+                    title = getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
+                    lastEdited = System.currentTimeMillis()
+                )
+                saveNotesToPrefs()
+            }
+        }
 
         hideSelectionHandles()
         hideFloatingActionBar()
@@ -2597,18 +2638,25 @@ params.y =
     }
 
     private fun openEditorForNote(note: NoteItem) {
+        currentEditingNoteId = note.id
+
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = dpToPx(8).toFloat()
+            // No border. Elevation provides a soft downward-looking shadow.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                elevation = dpToPx(14).toFloat()
+                translationZ = dpToPx(2).toFloat()
+            }
         }
         
         val contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(16, 16, 16, 16)
+            // No inset/padding around the child note: no fake border/edge.
+            setPadding(0, 0, 0, 0)
         }
 
         val topBar = LinearLayout(this).apply {
@@ -2763,7 +2811,9 @@ params.y =
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             
-            setTextIsSelectable(true)
+            // Editable EditText already supports cursor/selection.
+            // Keeping text selectable here can make the first tap select the whole text.
+            isHapticFeedbackEnabled = false
             isLongClickable = true
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
@@ -2992,6 +3042,13 @@ setOnTouchListener(object : View.OnTouchListener {
 
                 cancelLongPress()
                 hideSelectionMagnifier()
+
+                // Normal tap: focus the editor and allow Android to place the cursor.
+                // No manual selection and no vibration.
+                this@apply.requestFocus()
+                this@apply.isCursorVisible = true
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(this@apply, InputMethodManager.SHOW_IMPLICIT)
 
                 isSelecting = false
                 isDragging = false
@@ -3484,14 +3541,42 @@ setOnTouchListener(object : View.OnTouchListener {
         
         windowManager.addView(noteView, params)
         
-        scrollView.postDelayed({
-            editText.isFocusable = true
-            editText.isFocusableInTouchMode = true
-            editText.requestFocus()
-            
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_FORCED)
-        }, 300)
+        // Restore the exact cursor/selection and visible scroll position only when
+        // this editor came back from a minimized child-note bubble.
+        if (restoreEditorStatePending) {
+            val restoreStart = savedEditorSelectionStart
+            val restoreEnd = savedEditorSelectionEnd
+            val restoreY = savedEditorScrollY
+            val restoreX = savedEditorScrollX
+
+            editText.post {
+                try {
+                    val len = editText.length()
+                    val start = restoreStart.coerceIn(0, len)
+                    val end = restoreEnd.coerceIn(0, len)
+                    editText.requestFocus()
+                    editText.setSelection(start, end)
+
+                    // Disable automatic cursor scrolling while restoring the viewport.
+                    editText.isCursorVisible = true
+                    scrollView.scrollTo(restoreX, restoreY)
+                    scrollView.post {
+                        scrollView.scrollTo(restoreX, restoreY)
+                        updateHandlePositionsImmediate()
+                    }
+                    restoreEditorStatePending = false
+                } catch (e: Exception) {
+                    EmergencyLog.logException(e, "restoreEditorState")
+                }
+            }
+        } else {
+            // Do NOT force-open the keyboard on a normal note open.
+            // The keyboard will appear naturally when the user touches the editor.
+            editText.post {
+                editText.requestFocus()
+                editText.setSelection(editText.length())
+            }
+        }
     }
 
     private fun EditText.hasSelection(): Boolean {
@@ -3564,6 +3649,8 @@ setOnTouchListener(object : View.OnTouchListener {
         notesList.removeAt(index)
         saveNotesToPrefs()
         updateBubbleCount()
+        currentEditingNoteId = null
+        restoreEditorStatePending = false
         hideSelectionHandles()
         hideFloatingActionBar()
         showNoteList()
@@ -3589,6 +3676,8 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun showNoteList() {
+        currentEditingNoteId = null
+        restoreEditorStatePending = false
         hideSelectionHandles()
         hideFloatingActionBar()
         val container = createFullNotePad()
