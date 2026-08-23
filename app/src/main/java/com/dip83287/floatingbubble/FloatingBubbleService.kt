@@ -2814,8 +2814,6 @@ params.y =
             // Editable EditText already supports cursor/selection.
             // Keeping text selectable here can make the first tap select the whole text.
             isHapticFeedbackEnabled = false
-            // Native long-click selection is disabled so it cannot override
-            // the custom character-by-character long-press selection.
             isLongClickable = false
             customInsertionActionModeCallback = null
             customSelectionActionModeCallback = null
@@ -2842,102 +2840,134 @@ params.y =
             })
             
 setOnTouchListener(object : View.OnTouchListener {
+    /*
+     * FINAL TOUCH/SELECTION FIX v5
+     *
+     * 1) Double tap is detected here instead of relying on EditText's native
+     *    double-tap selection, so the custom selection is not overwritten.
+     * 2) Native long-click selection is disabled; our own long-press handler
+     *    starts selection and keeps the parent ScrollView from taking MOVE
+     *    events after the long press.
+     * 3) Long-press + drag uses one fixed character offset as the anchor and
+     *    changes only the other endpoint. Therefore the range grows/shrinks
+     *    character-by-character rather than word-by-word.
+     * 4) Before long-press, MOVE remains native so normal scrolling works.
+     */
+
+    private val touchHandler = Handler(Looper.getMainLooper())
+    private var longPressRunnable: Runnable? = null
 
     private var touchStartX = 0f
     private var touchStartY = 0f
+    private var lastTapTime = 0L
+    private var lastTapX = 0f
+    private var lastTapY = 0f
+
     private var touchMoved = false
     private var longPressTriggered = false
+    private var secondTapCandidate = false
     private var selectionAtDown = false
-    private var tapCandidate = false
     private var selectionAnchor = -1
 
-    private var lastTapUpTimeLocal = 0L
-    private var lastTapUpXLocal = 0f
-    private var lastTapUpYLocal = 0f
+    private val touchSlopPx = ViewConfiguration
+        .get(this@FloatingBubbleService)
+        .scaledTouchSlop
+        .toFloat()
 
-    private val touchSlopPx: Float
-        get() = ViewConfiguration.get(this@FloatingBubbleService)
-            .scaledTouchSlop.toFloat()
+    private val doubleTapTimeout = ViewConfiguration.getDoubleTapTimeout().toLong()
+    private val doubleTapDistance = dpToPx(48).toFloat()
+    private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
 
-    private val doubleTapTimeoutMs = 350L
-    private val doubleTapSlopPx: Float
-        get() = 48f * resources.displayMetrics.density
+    private fun cancelPendingLongPress() {
+        longPressRunnable?.let { touchHandler.removeCallbacks(it) }
+        longPressRunnable = null
+    }
 
-    private val customLongPressHandler = Handler(Looper.getMainLooper())
-    private val customLongPressRunnable = Runnable {
-        if (!touchMoved && tapCandidate) {
-            longPressTriggered = true
-            tapCandidate = false
+    private fun offsetAt(x: Float, y: Float): Int {
+        return try {
+            val layout = this@apply.layout ?: return this@apply.selectionStart.coerceAtLeast(0)
+            val textLength = this@apply.length()
+            if (textLength == 0) return 0
 
-            selectionAnchor = getOffsetAtPosition(
-                this@apply, touchStartX, touchStartY
-            ).coerceIn(0, this@apply.length())
-
-            // Long press starts with ONE character.
-            val firstEnd = (selectionAnchor + 1).coerceAtMost(this@apply.length())
-            if (firstEnd > selectionAnchor) {
-                this@apply.setSelection(selectionAnchor, firstEnd)
-                currentSelectedText = this@apply.text.substring(
-                    selectionAnchor, firstEnd
-                )
-                showSelectionHandles()
-                updateHandlePositionsImmediate()
-                showFloatingActionBar(currentSelectedText)
-            }
+            val vertical = (this@apply.scrollY + y.toInt())
+                .coerceIn(0, layout.height.coerceAtLeast(1) - 1)
+            val line = layout.getLineForVertical(vertical)
+            val horizontal = x + this@apply.scrollX
+            layout.getOffsetForHorizontal(line, horizontal)
+                .coerceIn(0, textLength)
+        } catch (_: Exception) {
+            0
         }
     }
 
-    private fun cancelCustomLongPress() {
-        customLongPressHandler.removeCallbacks(customLongPressRunnable)
+    private fun updateCustomSelectionUi() {
+        if (!this@apply.hasSelection()) {
+            currentSelectedText = ""
+            hideSelectionHandles()
+            hideFloatingActionBar()
+            return
+        }
+
+        val start = minOf(this@apply.selectionStart, this@apply.selectionEnd)
+        val end = maxOf(this@apply.selectionStart, this@apply.selectionEnd)
+        if (start < 0 || end > this@apply.length() || start >= end) return
+
+        currentSelectedText = this@apply.text.substring(start, end)
+        showSelectionHandles()
+        updateHandlePositionsImmediate()
+        showFloatingActionBar(currentSelectedText)
     }
 
-    private fun performManualDoubleTap(x: Float, y: Float): Boolean {
-        val now = System.currentTimeMillis()
-        val dt = now - lastTapUpTimeLocal
-        val dx = abs(x - lastTapUpXLocal)
-        val dy = abs(y - lastTapUpYLocal)
+    private fun beginCustomLongPress(x: Float, y: Float) {
+        if (this@apply.length() == 0) return
 
-        if (dt in 1..doubleTapTimeoutMs &&
-            dx <= doubleTapSlopPx && dy <= doubleTapSlopPx
-        ) {
-            cancelCustomLongPress()
-            selectWordAtPosition(this@apply, x, y, true)
+        longPressTriggered = true
+        secondTapCandidate = false
+        selectionAnchor = offsetAt(x, y)
 
-            val a = this@apply.selectionStart
-            val b = this@apply.selectionEnd
-            if (a >= 0 && b > a) {
-                currentSelectedText = this@apply.text.substring(a, b)
-                showSelectionHandles()
-                updateHandlePositionsImmediate()
-                showFloatingActionBar(currentSelectedText)
-            }
-
-            lastTapUpTimeLocal = 0L
-            return a >= 0 && b > a
-        }
-        return false
+        // Start from the character under the finger. The initial visual
+        // selection is the word, but as soon as the finger moves the word is
+        // replaced by an exact character-range anchored at selectionAnchor.
+        selectWordAtPosition(this@apply, x, y, true)
+        updateCustomSelectionUi()
     }
 
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                cancelPendingLongPress()
+
                 touchStartX = event.x
                 touchStartY = event.y
                 touchMoved = false
                 longPressTriggered = false
                 selectionAtDown = this@apply.hasSelection()
-                tapCandidate = true
-                selectionAnchor = -1
 
-                cancelCustomLongPress()
-                customLongPressHandler.postDelayed(
-                    customLongPressRunnable,
-                    ViewConfiguration.getLongPressTimeout().toLong()
-                )
+                val now = System.currentTimeMillis()
+                val withinTime = now - lastTapTime <= doubleTapTimeout
+                val dxTap = event.x - lastTapX
+                val dyTap = event.y - lastTapY
+                val withinDistance =
+                    (dxTap * dxTap + dyTap * dyTap) <=
+                        (doubleTapDistance * doubleTapDistance)
+
+                secondTapCandidate = withinTime && withinDistance
+                selectionAnchor = -1
 
                 this@apply.requestFocus()
                 this@apply.isCursorVisible = true
                 v.parent?.requestDisallowInterceptTouchEvent(false)
+
+                val downX = event.x
+                val downY = event.y
+                longPressRunnable = Runnable {
+                    if (!touchMoved) {
+                        beginCustomLongPress(downX, downY)
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                }
+                touchHandler.postDelayed(longPressRunnable!!, longPressTimeout)
+
                 return false
             }
 
@@ -2945,97 +2975,105 @@ setOnTouchListener(object : View.OnTouchListener {
                 val dx = event.x - touchStartX
                 val dy = event.y - touchStartY
                 val distance = sqrt(
-                    dx.toDouble() * dx.toDouble() +
-                    dy.toDouble() * dy.toDouble()
+                    (dx.toDouble() * dx.toDouble()) +
+                    (dy.toDouble() * dy.toDouble())
                 ).toFloat()
 
                 if (distance > touchSlopPx) {
                     touchMoved = true
-                    tapCandidate = false
-                    if (!longPressTriggered) cancelCustomLongPress()
                 }
 
                 if (longPressTriggered) {
+                    // After long press, consume the drag so EditText's native
+                    // word-selection machinery cannot replace our character
+                    // range, while the parent ScrollView stays locked out.
+                    cancelPendingLongPress()
                     v.parent?.requestDisallowInterceptTouchEvent(true)
 
                     if (selectionAnchor < 0) {
-                        selectionAnchor = getOffsetAtPosition(
-                            this@apply, touchStartX, touchStartY
-                        ).coerceIn(0, this@apply.length())
+                        selectionAnchor = offsetAt(touchStartX, touchStartY)
                     }
 
                     if (distance > touchSlopPx) {
-                        val newOffset = getOffsetAtPosition(
-                            this@apply, event.x, event.y
-                        ).coerceIn(0, this@apply.length())
+                        val movingOffset = offsetAt(event.x, event.y)
+                        val a = minOf(selectionAnchor, movingOffset)
+                        val b = maxOf(selectionAnchor, movingOffset)
 
-                        // Fixed anchor + moving endpoint. Android selection
-                        // offsets are character offsets, so every endpoint
-                        // change represents character-by-character selection.
-                        if (newOffset < selectionAnchor) {
-                            this@apply.setSelection(newOffset, selectionAnchor)
-                        } else if (newOffset > selectionAnchor) {
-                            this@apply.setSelection(selectionAnchor, newOffset)
+                        if (a != b) {
+                            this@apply.setSelection(a, b)
+                            updateCustomSelectionUi()
                         } else {
-                            this@apply.setSelection(selectionAnchor)
-                        }
-
-                        val startSel = minOf(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
-                        val endSel = maxOf(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
-
-                        if (startSel != endSel) {
-                            currentSelectedText = this@apply.text.substring(
-                                startSel, endSel
-                            )
-                            showSelectionHandles()
-                            updateHandlePositionsImmediate()
-                            showFloatingActionBar(currentSelectedText)
+                            this@apply.setSelection(a)
+                            hideSelectionHandles()
+                            hideFloatingActionBar()
+                            currentSelectedText = ""
                         }
                     }
+
                     return true
                 }
 
-                v.parent?.requestDisallowInterceptTouchEvent(false)
-
-                if (!selectionAtDown &&
-                    distance > touchSlopPx &&
-                    this@apply.hasSelection()
-                ) {
-                    val offset = getOffsetAtPosition(
-                        this@apply, touchStartX, touchStartY
-                    ).coerceIn(0, this@apply.length())
-                    this@apply.setSelection(offset)
-                    hideSelectionHandles()
-                    hideFloatingActionBar()
-                    currentSelectedText = ""
+                // Before long press, do not consume MOVE. This preserves the
+                // normal ScrollView scrolling path and native cursor behaviour.
+                if (distance > touchSlopPx) {
+                    cancelPendingLongPress()
+                    secondTapCandidate = false
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
                 }
+
                 return false
             }
 
             MotionEvent.ACTION_UP -> {
-                cancelCustomLongPress()
+                cancelPendingLongPress()
                 v.parent?.requestDisallowInterceptTouchEvent(false)
 
                 val wasLongPress = longPressTriggered
+                val wasSecondTap = secondTapCandidate
                 val wasMoved = touchMoved
 
-                if (!wasLongPress && !wasMoved) {
-                    // Explicitly detect the second tap before native EditText
-                    // gets a chance to collapse the selection.
-                    if (performManualDoubleTap(event.x, event.y)) {
-                        tapCandidate = false
-                        return true
+                if (wasLongPress) {
+                    // Keep the final selection exactly where the drag ended.
+                    if (this@apply.hasSelection()) {
+                        updateCustomSelectionUi()
                     }
 
-                    lastTapUpTimeLocal = System.currentTimeMillis()
-                    lastTapUpXLocal = event.x
-                    lastTapUpYLocal = event.y
+                    lastTapTime = 0L
+                    lastTapX = event.x
+                    lastTapY = event.y
+                    longPressTriggered = false
+                    secondTapCandidate = false
+                    selectionAnchor = -1
+                    touchMoved = false
+                    return true
+                }
+
+                if (!wasMoved && wasSecondTap) {
+                    // IMPORTANT: post the selection so EditText's own ACTION_UP
+                    // processing finishes first. Otherwise native EditText can
+                    // immediately replace our custom word selection.
+                    val doubleX = event.x
+                    val doubleY = event.y
+                    touchHandler.post {
+                        try {
+                            selectWordAtPosition(this@apply, doubleX, doubleY, true)
+                            updateCustomSelectionUi()
+                        } catch (ex: Exception) {
+                            EmergencyLog.logException(ex, "Custom double tap selection")
+                        }
+                    }
+
+                    lastTapTime = 0L
+                } else if (!wasMoved) {
+                    // A normal single tap should only collapse an existing
+                    // selection; otherwise native EditText places the cursor.
+                    if (selectionAtDown && this@apply.hasSelection()) {
+                        val offset = offsetAt(event.x, event.y)
+                        this@apply.setSelection(offset)
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
+                        currentSelectedText = ""
+                    }
 
                     this@apply.requestFocus()
                     this@apply.isCursorVisible = true
@@ -3043,72 +3081,39 @@ setOnTouchListener(object : View.OnTouchListener {
                         try {
                             val imm = getSystemService(Context.INPUT_METHOD_SERVICE)
                                 as InputMethodManager
-                            imm.showSoftInput(
-                                this@apply,
-                                InputMethodManager.SHOW_IMPLICIT
-                            )
+                            imm.showSoftInput(this@apply, InputMethodManager.SHOW_IMPLICIT)
                         } catch (ex: Exception) {
                             EmergencyLog.logException(ex, "EditText show keyboard")
                         }
                     }
 
-                    if (selectionAtDown && this@apply.hasSelection()) {
-                        val offset = getOffsetAtPosition(
-                            this@apply, event.x, event.y
-                        ).coerceIn(0, this@apply.length())
-                        this@apply.setSelection(offset)
-                        hideSelectionHandles()
-                        hideFloatingActionBar()
-                        currentSelectedText = ""
-                    }
-                    return false
+                    lastTapTime = System.currentTimeMillis()
+                    lastTapX = event.x
+                    lastTapY = event.y
                 }
 
-                if (wasLongPress) {
-                    if (this@apply.hasSelection()) {
-                        val startSel = minOf(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
-                        val endSel = maxOf(
-                            this@apply.selectionStart,
-                            this@apply.selectionEnd
-                        )
-                        if (startSel != endSel) {
-                            currentSelectedText = this@apply.text.substring(
-                                startSel, endSel
-                            )
-                            showSelectionHandles()
-                            updateHandlePositionsImmediate()
-                            showFloatingActionBar(currentSelectedText)
-                        }
-                    }
-                    longPressTriggered = false
-                    tapCandidate = false
-                    selectionAnchor = -1
-                    return true
-                }
-
-                touchMoved = false
-                tapCandidate = false
                 longPressTriggered = false
+                secondTapCandidate = false
                 selectionAnchor = -1
+                touchMoved = false
                 return false
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                cancelCustomLongPress()
+                cancelPendingLongPress()
                 v.parent?.requestDisallowInterceptTouchEvent(false)
-                touchMoved = false
-                tapCandidate = false
                 longPressTriggered = false
+                secondTapCandidate = false
                 selectionAnchor = -1
+                touchMoved = false
                 return false
             }
         }
+
         return false
     }
 })
+        }
         
         scrollView.addView(editText)
         contentContainer.addView(scrollView)
