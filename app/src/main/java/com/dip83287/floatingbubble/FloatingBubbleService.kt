@@ -77,6 +77,9 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
+    // Reference to the child-note metadata/title bar.
+    // Kept nullable because it is created only when the child editor is opened.
+    private var noteMetaBarRef: TextView? = null
 
     // Child-note editor undo/redo state
     private val editorUndoStack = java.util.ArrayDeque<String>()
