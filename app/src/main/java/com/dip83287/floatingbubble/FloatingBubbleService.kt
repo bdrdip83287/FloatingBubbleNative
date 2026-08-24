@@ -18,6 +18,7 @@ import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.net.Uri
 import android.os.*
@@ -1128,7 +1129,10 @@ setupBubbleTouchListener(params)
             if (index >= 0) {
                 notesList[index] = notesList[index].copy(
                     content = editText.text.toString(),
-                    title = getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
+                    title = if (::titleInput.isInitialized && titleInput.text.toString().trim().isNotEmpty())
+                    titleInput.text.toString().trim()
+                else
+                    getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
                     lastEdited = System.currentTimeMillis()
                 )
                 saveNotesToPrefs()
@@ -1229,6 +1233,11 @@ setupBubbleTouchListener(params)
             minimumWidth = 0
             minimumHeight = 0
             scaleType = ImageView.ScaleType.CENTER
+            // Keep the 24dp button, but render every icon 1px smaller.
+            imageMatrix = Matrix().apply {
+                val iconScale = ((size - dpToPx(2)).toFloat() / size.toFloat())
+                setScale(iconScale, iconScale, size / 2f, size / 2f)
+            }
             elevation = dpToPx(2).toFloat()
             contentDescription = null
             isFocusable = true
@@ -2674,11 +2683,40 @@ params.y =
         }
         topBar.addView(backBtn)
 
-        // Intentionally blank left/center title area.
-        val emptyTitleSpace = Space(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+        // Editable note title. If the user has not supplied a manual title,
+        // the first line of the note is used automatically.
+        titleInput = EditText(this).apply {
+            val initialTitle = note.title.trim().ifEmpty {
+                getEditorAutoTitle(note.content)
+            }
+            setText(initialTitle)
+            setTextColor(Color.parseColor("#333333"))
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setSingleLine(true)
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            background = null
+            includeFontPadding = false
+            setPadding(dpToPx(4), 0, dpToPx(4), 0)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            hint = "Note title"
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isCursorVisible = true
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    val index = notesList.indexOfFirst { it.id == note.id }
+                    if (index >= 0) {
+                        notesList[index] = notesList[index].copy(title = s?.toString()?.trim().orEmpty())
+                        saveNotesToPrefs()
+                    }
+                    noteMetaBarRef?.text = buildNoteMetaTitle(note.id, s?.toString().orEmpty(), note.content)
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
         }
-        topBar.addView(emptyTitleSpace)
+        topBar.addView(titleInput)
 
         val undoBtn = createTopBarIconButton(createTopBarUndoDrawable(), Color.rgb(255, 220, 80)) { undoEditorChange() }
         val redoBtn = createTopBarIconButton(createTopBarRedoDrawable(), Color.rgb(255, 220, 80)) { redoEditorChange() }
@@ -2701,9 +2739,7 @@ params.y =
         contentContainer.addView(topBar)
 
         val noteMetaBar = TextView(this).apply {
-            val number = notesList.indexOfFirst { it.id == note.id } + 1
-            val title = getEditorAutoTitle(note.content)
-            text = "$number. ${if (title.isEmpty()) "Untitled Note" else title}"
+            text = buildNoteMetaTitle(note.id, note.title, note.content)
             textSize = 12f
             setTextColor(Color.parseColor("#444444"))
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
@@ -2711,6 +2747,7 @@ params.y =
             setBackgroundColor(Color.parseColor("#FFF0B8"))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(20))
         }
+        noteMetaBarRef = noteMetaBar
         contentContainer.addView(noteMetaBar)
 
         scrollView = ScrollView(this).apply {
@@ -3132,6 +3169,9 @@ setOnTouchListener(object : View.OnTouchListener {
                 rightMargin = 0
                 bottomMargin = 0
             }
+            // Positive Y moves the resize icon downward; 2dp makes it sit against
+            // the bottom zero-line without adding any margin.
+            translationY = dpToPx(2).toFloat()
             setOnTouchListener(ResizeTouchListener())
             bringToFront()
         }
@@ -3253,6 +3293,12 @@ setOnTouchListener(object : View.OnTouchListener {
 
     private fun EditText.hasSelection(): Boolean {
         return selectionStart != selectionEnd
+    }
+
+    private fun buildNoteMetaTitle(noteId: Long, manualTitle: String, content: String): String {
+        val number = notesList.indexOfFirst { it.id == noteId } + 1
+        val title = manualTitle.trim().ifEmpty { getEditorAutoTitle(content) }
+        return "$number. ${if (title.isEmpty()) "Untitled Note" else title}"
     }
 
     private fun getEditorAutoTitle(content: String): String {
