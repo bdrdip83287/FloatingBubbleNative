@@ -1250,6 +1250,9 @@ setupBubbleTouchListener(params)
             override fun draw(canvas: Canvas) {
                 val w = bounds.width().toFloat()
                 val h = bounds.height().toFloat()
+                canvas.save()
+                val iconScale = ((w - dpToPx(1).toFloat()).coerceAtLeast(1f)) / w
+                canvas.scale(iconScale, iconScale, w / 2f, h / 2f)
                 val cy = h / 2f
                 val left = w * 0.20f
                 val right = w * 0.78f
@@ -1263,6 +1266,7 @@ setupBubbleTouchListener(params)
                     lineTo(left + head * 1.65f, cy + h * 0.22f)
                 }
                 canvas.drawPath(path, paint)
+                canvas.restore()
             }
 
             override fun setAlpha(alpha: Int) { paint.alpha = alpha }
@@ -1284,6 +1288,9 @@ setupBubbleTouchListener(params)
             override fun draw(canvas: Canvas) {
                 val w = bounds.width().toFloat()
                 val h = bounds.height().toFloat()
+                canvas.save()
+                val iconScale = ((w - dpToPx(1).toFloat()).coerceAtLeast(1f)) / w
+                canvas.scale(iconScale, iconScale, w / 2f, h / 2f)
                 val left = w * 0.22f
                 val right = w * 0.76f
                 val cy = h * 0.50f
@@ -1300,6 +1307,7 @@ setupBubbleTouchListener(params)
                 // Connecting lines
                 canvas.drawLine(left + w * 0.10f, cy - h * 0.035f, right - w * 0.10f, top + h * 0.035f, paint)
                 canvas.drawLine(left + w * 0.10f, cy + h * 0.035f, right - w * 0.10f, bottom - h * 0.035f, paint)
+                canvas.restore()
             }
 
             override fun setAlpha(alpha: Int) { paint.alpha = alpha }
@@ -1320,10 +1328,14 @@ setupBubbleTouchListener(params)
             override fun draw(canvas: Canvas) {
                 val w = bounds.width().toFloat()
                 val h = bounds.height().toFloat()
+                canvas.save()
+                val iconScale = ((w - dpToPx(1).toFloat()).coerceAtLeast(1f)) / w
+                canvas.scale(iconScale, iconScale, w / 2f, h / 2f)
                 val left = w * 0.22f
                 val right = w * 0.78f
                 val cy = h / 2f
                 canvas.drawLine(left, cy, right, cy, paint)
+                canvas.restore()
             }
 
             override fun setAlpha(alpha: Int) { paint.alpha = alpha }
@@ -1398,7 +1410,13 @@ setupBubbleTouchListener(params)
                 strokeJoin = Paint.Join.ROUND
             }
             override fun draw(canvas: Canvas) {
-                drawer(canvas, bounds.width().toFloat(), bounds.height().toFloat(), paint)
+                val w = bounds.width().toFloat()
+                val h = bounds.height().toFloat()
+                canvas.save()
+                val iconScale = ((w - dpToPx(1).toFloat()).coerceAtLeast(1f)) / w
+                canvas.scale(iconScale, iconScale, w / 2f, h / 2f)
+                drawer(canvas, w, h, paint)
+                canvas.restore()
             }
             override fun setAlpha(alpha: Int) { paint.alpha = alpha }
             override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
@@ -2649,7 +2667,7 @@ params.y =
             setOnTouchListener(TitleBarDragListener())
         }
 
-        val backBtn = createTopBarIconButton(createTopBarBackDrawable(), Color.rgb(90, 190, 255)) {
+        val backBtn = createTopBarIconButton(createTopBarBackDrawable(), Color.rgb(255, 220, 80)) {
             hideSelectionHandles()
             hideFloatingActionBar()
             showNoteList()
@@ -2662,30 +2680,22 @@ params.y =
         }
         topBar.addView(emptyTitleSpace)
 
-        val undoBtn = createTopBarIconButton(createTopBarUndoDrawable(), Color.rgb(110, 225, 145)) { undoEditorChange() }
-        val redoBtn = createTopBarIconButton(createTopBarRedoDrawable(), Color.rgb(95, 210, 205)) { redoEditorChange() }
+        val undoBtn = createTopBarIconButton(createTopBarUndoDrawable(), Color.rgb(255, 220, 80)) { undoEditorChange() }
+        val redoBtn = createTopBarIconButton(createTopBarRedoDrawable(), Color.rgb(255, 220, 80)) { redoEditorChange() }
         val pasteBtnTop = createTopBarIconButton(createTopBarPasteDrawable(), Color.rgb(255, 220, 80)) {
             pasteIntoEditor()
         }
-        val lockBtn = createTopBarIconButton(createTopBarLockDrawable(), Color.rgb(195, 145, 255)) {
-            toggleEditorLock()
-        }
-        val deleteBtn = createTopBarIconButton(createTopBarDeleteDrawable(), Color.rgb(255, 105, 105)) {
-            deleteCurrentEditorNote(note.id)
-        }
-        val shareTopBtn = createTopBarIconButton(createTopBarShareDrawable(), Color.rgb(75, 205, 255)) {
+        val shareTopBtn = createTopBarIconButton(createTopBarShareDrawable(), Color.rgb(255, 220, 80)) {
             val title = getEditorAutoTitle(editText.text.toString())
             shareLargeText(if (title.isEmpty()) editText.text.toString() else "$title\n\n${editText.text}")
         }
-        val minimizeBtn = createTopBarIconButton(createTopBarMinimizeDrawable(), Color.rgb(255, 145, 0)) {
+        val minimizeBtn = createTopBarIconButton(createTopBarMinimizeDrawable(), Color.rgb(255, 220, 80)) {
             collapseToBubble()
         }
 
         topBar.addView(undoBtn)
         topBar.addView(redoBtn)
         topBar.addView(pasteBtnTop)
-        topBar.addView(lockBtn)
-        topBar.addView(deleteBtn)
         topBar.addView(shareTopBtn)
         topBar.addView(minimizeBtn)
         contentContainer.addView(topBar)
