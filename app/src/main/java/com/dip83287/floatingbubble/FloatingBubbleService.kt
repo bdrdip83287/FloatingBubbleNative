@@ -86,6 +86,7 @@ class FloatingBubbleService : Service() {
     private val editorRedoStack = java.util.ArrayDeque<String>()
     private var suppressEditorHistory = false
     private var isEditorLocked = false
+    private var lastEditorText = ""
 
     // Child-note state that must survive minimize -> bubble -> expand.
     private var currentEditingNoteId: Long? = null
@@ -1237,7 +1238,8 @@ setupBubbleTouchListener(params)
                 setStroke(dpToPx(1), Color.BLACK)
             }
             background = bg
-            setPadding(0, 0, 0, 0)
+            // Keep a uniform 2px gap between the custom icon and the black button border.
+            setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
             minimumWidth = 0
             minimumHeight = 0
             scaleType = ImageView.ScaleType.CENTER
@@ -1354,6 +1356,16 @@ setupBubbleTouchListener(params)
             override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
             override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
         }
+    }
+
+    private fun createTopBarCloseDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        // Bold red X for closing the currently visible child note.
+        paint.color = Color.rgb(220, 35, 35)
+        paint.strokeWidth = dpToPx(2).toFloat()
+        paint.strokeCap = Paint.Cap.ROUND
+        val inset = w * 0.24f
+        canvas.drawLine(inset, inset, w - inset, h - inset, paint)
+        canvas.drawLine(w - inset, inset, inset, h - inset, paint)
     }
 
     private fun createTopBarUndoDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
@@ -2710,11 +2722,16 @@ params.y =
             collapseToBubble()
         }
 
+        val closeBtn = createTopBarIconButton(createTopBarCloseDrawable(), Color.rgb(255, 220, 80)) {
+            closeChildNotePad(note.id)
+        }
+
         topBar.addView(undoBtn)
         topBar.addView(redoBtn)
         topBar.addView(pasteBtnTop)
         topBar.addView(shareTopBtn)
         topBar.addView(minimizeBtn)
+        topBar.addView(closeBtn)
         contentContainer.addView(topBar)
 
         // ============================================================
@@ -2870,6 +2887,7 @@ params.y =
         editorRedoStack.clear()
         suppressEditorHistory = false
         isEditorLocked = false
+        lastEditorText = note.content
 
         editText = EditText(this).apply {
             setText(note.content)
@@ -2953,6 +2971,35 @@ params.y =
 
                 override fun afterTextChanged(s: Editable?) {
                 }
+            })
+
+            // Real editor history: every user text change stores the exact previous
+            // document state. Undo/Redo themselves set suppressEditorHistory so
+            // they do not create recursive history entries.
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(
+                    s: CharSequence?, start: Int, count: Int, after: Int
+                ) {
+                    if (!suppressEditorHistory) {
+                        editorUndoStack.addLast(s?.toString() ?: "")
+                        // Keep history bounded so long editing sessions do not grow
+                        // memory without limit.
+                        while (editorUndoStack.size > 100) {
+                            editorUndoStack.removeFirst()
+                        }
+                        editorRedoStack.clear()
+                    }
+                }
+
+                override fun onTextChanged(
+                    s: CharSequence?, start: Int, before: Int, count: Int
+                ) {
+                    if (!suppressEditorHistory) {
+                        lastEditorText = s?.toString() ?: ""
+                    }
+                }
+
+                override fun afterTextChanged(s: Editable?) { }
             })
             
 setOnTouchListener(object : View.OnTouchListener {
@@ -3391,25 +3438,39 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun undoEditorChange() {
-        if (!::editText.isInitialized || editorUndoStack.isEmpty()) return
+        if (!::editText.isInitialized || editorUndoStack.isEmpty() || isEditorLocked) return
+
         val current = editText.text.toString()
         val previous = editorUndoStack.removeLast()
         editorRedoStack.addLast(current)
+
         suppressEditorHistory = true
         editText.setText(previous)
-        editText.setSelection(previous.length.coerceAtMost(previous.length))
+        editText.setSelection(previous.length.coerceIn(0, editText.length()))
         suppressEditorHistory = false
+        lastEditorText = previous
+
+        editText.requestFocus()
+        editText.invalidate()
+        updateHandlePositionsSafe()
     }
 
     private fun redoEditorChange() {
-        if (!::editText.isInitialized || editorRedoStack.isEmpty()) return
+        if (!::editText.isInitialized || editorRedoStack.isEmpty() || isEditorLocked) return
+
         val current = editText.text.toString()
         val next = editorRedoStack.removeLast()
         editorUndoStack.addLast(current)
+
         suppressEditorHistory = true
         editText.setText(next)
-        editText.setSelection(next.length.coerceAtMost(next.length))
+        editText.setSelection(next.length.coerceIn(0, editText.length()))
         suppressEditorHistory = false
+        lastEditorText = next
+
+        editText.requestFocus()
+        editText.invalidate()
+        updateHandlePositionsSafe()
     }
 
     private fun pasteIntoEditor() {
@@ -3439,6 +3500,54 @@ setOnTouchListener(object : View.OnTouchListener {
             hideFloatingActionBar()
         } else {
             editText.requestFocus()
+        }
+    }
+
+    private fun closeChildNotePad(noteId: Long) {
+        if (currentEditingNoteId != noteId || noteView == null) return
+
+        try {
+            // Save edits before removing the child editor from the screen.
+            val index = notesList.indexOfFirst { it.id == noteId }
+            if (index >= 0 && ::editText.isInitialized) {
+                val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+                val contentText = editText.text.toString()
+                val finalTitle = rawTitle.ifEmpty {
+                    getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+                }
+                notesList[index] = notesList[index].copy(
+                    title = finalTitle,
+                    content = contentText,
+                    lastEdited = System.currentTimeMillis()
+                )
+                saveNotesToPrefs()
+                notesAdapter.updateList(notesList)
+                updateBubbleCount()
+            }
+
+            hideSelectionHandles()
+            hideFloatingActionBar()
+            saveNotepadSizeAndPosition(
+                currentNotepadWidth,
+                currentNotepadHeight,
+                (noteView?.layoutParams as? WindowManager.LayoutParams)?.x ?: notepadPosX,
+                (noteView?.layoutParams as? WindowManager.LayoutParams)?.y ?: notepadPosY
+            )
+
+            noteView?.let {
+                try { windowManager.removeView(it) } catch (_: Exception) { }
+            }
+            noteView = null
+            isExpanded = false
+            currentEditingNoteId = null
+            restoreEditorStatePending = false
+            resetHandleReferences()
+
+            // The child note disappears, while the floating bubble remains available
+            // for opening the note list again.
+            createBubble()
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "closeChildNotePad")
         }
     }
 
