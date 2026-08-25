@@ -53,10 +53,14 @@ class FloatingBubbleService : Service() {
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
     private val NOTEPAD_TITLE = "Floating Notes"
-    private val NOTEPAD_MIN_WIDTH = 380
-    private val NOTEPAD_MIN_HEIGHT = 500
-    private val NOTEPAD_MAX_WIDTH = 650
-    private val NOTEPAD_MAX_HEIGHT = 850
+    // Child notepad resize limits. Minimum is exactly 120px × 120px.
+    // Maximum is the current device display size, allowing full-screen access.
+    private val NOTEPAD_MIN_WIDTH = 120
+    private val NOTEPAD_MIN_HEIGHT = 120
+    private val NOTEPAD_MAX_WIDTH: Int
+        get() = resources.displayMetrics.widthPixels
+    private val NOTEPAD_MAX_HEIGHT: Int
+        get() = resources.displayMetrics.heightPixels
 
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
@@ -272,7 +276,9 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
 
     private fun loadSavedPositions() {
         currentNotepadWidth = prefs.getInt(KEY_NOTEPAD_WIDTH, NOTEPAD_MIN_WIDTH)
+            .coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
         currentNotepadHeight = prefs.getInt(KEY_NOTEPAD_HEIGHT, NOTEPAD_MIN_HEIGHT)
+            .coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
         notepadPosX = prefs.getInt(KEY_NOTEPAD_X, 0)
         notepadPosY = prefs.getInt(KEY_NOTEPAD_Y, 0)
     }
@@ -2648,9 +2654,14 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            // No border. Elevation provides a soft downward-looking shadow.
+            // Rounded child-notepad surface: exactly 5px corner radius, no border.
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(Color.parseColor(NOTEPAD_BG_COLOR))
+                cornerRadius = 5f
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                clipToOutline = true
                 elevation = dpToPx(14).toFloat()
                 translationZ = dpToPx(2).toFloat()
             }
@@ -3598,32 +3609,57 @@ setOnTouchListener(object : View.OnTouchListener {
                     resizeTouchTime = System.currentTimeMillis()
                     return true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
                     if (isResizing) {
                         val dx = event.rawX.toInt() - resizeStartX
                         val dy = event.rawY.toInt() - resizeStartY
-                        val newWidth = (resizeStartWidth + dx).coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
-                        val newHeight = (resizeStartHeight + dy).coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
-                        
+                        val params = noteView?.layoutParams as? WindowManager.LayoutParams
+
+                        // Maximum size is the full current display. This also lets the
+                        // resize handle reach the complete screen area instead of the
+                        // previous fixed 650 × 850 limit.
+                        val screenWidth = resources.displayMetrics.widthPixels
+                        val screenHeight = resources.displayMetrics.heightPixels
+
+                        val availableWidth = (screenWidth - (params?.x ?: 0)).coerceAtLeast(NOTEPAD_MIN_WIDTH)
+                        val availableHeight = (screenHeight - (params?.y ?: 0)).coerceAtLeast(NOTEPAD_MIN_HEIGHT)
+
+                        val newWidth = (resizeStartWidth + dx)
+                            .coerceIn(NOTEPAD_MIN_WIDTH, availableWidth.coerceAtMost(NOTEPAD_MAX_WIDTH))
+                        val newHeight = (resizeStartHeight + dy)
+                            .coerceIn(NOTEPAD_MIN_HEIGHT, availableHeight.coerceAtMost(NOTEPAD_MAX_HEIGHT))
+
                         if (newWidth != currentNotepadWidth || newHeight != currentNotepadHeight) {
                             currentNotepadWidth = newWidth
                             currentNotepadHeight = newHeight
-                            noteView?.layoutParams?.width = currentNotepadWidth
-                            noteView?.layoutParams?.height = currentNotepadHeight
-                            windowManager.updateViewLayout(noteView, noteView?.layoutParams)
+
+                            params?.let {
+                                it.width = currentNotepadWidth
+                                it.height = currentNotepadHeight
+                                windowManager.updateViewLayout(noteView, it)
+                            }
                         }
                         return true
                     }
                 }
+
                 MotionEvent.ACTION_UP -> {
                     isResizing = false
-                    val params = noteView?.layoutParams as WindowManager.LayoutParams
+                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
                     if (params != null && System.currentTimeMillis() - resizeTouchTime > 100) {
                         saveNotepadSizeAndPosition(
-                            currentNotepadWidth, currentNotepadHeight,
-                            params.x, params.y
+                            currentNotepadWidth,
+                            currentNotepadHeight,
+                            params.x,
+                            params.y
                         )
                     }
+                    return true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    isResizing = false
                     return true
                 }
             }
