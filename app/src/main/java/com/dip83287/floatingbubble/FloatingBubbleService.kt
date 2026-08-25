@@ -18,7 +18,6 @@ import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.net.Uri
 import android.os.*
@@ -77,9 +76,6 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
-    // Reference to the child-note metadata/title bar.
-    // Kept nullable because it is created only when the child editor is opened.
-    private var noteMetaBarRef: TextView? = null
 
     // Child-note editor undo/redo state
     private val editorUndoStack = java.util.ArrayDeque<String>()
@@ -1130,12 +1126,15 @@ setupBubbleTouchListener(params)
             val activeId = currentEditingNoteId!!
             val index = notesList.indexOfFirst { it.id == activeId }
             if (index >= 0) {
+                val contentText = editText.text.toString()
+                val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+                val finalTitle = rawTitle.ifEmpty {
+                    getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+                }
+
                 notesList[index] = notesList[index].copy(
-                    content = editText.text.toString(),
-                    title = if (::titleInput.isInitialized && titleInput.text.toString().trim().isNotEmpty())
-                    titleInput.text.toString().trim()
-                else
-                    getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
+                    content = contentText,
+                    title = finalTitle,
                     lastEdited = System.currentTimeMillis()
                 )
                 saveNotesToPrefs()
@@ -1219,7 +1218,7 @@ setupBubbleTouchListener(params)
         buttonColor: Int,
         clickAction: () -> Unit
     ): ImageButton {
-        val size = dpToPx(24)
+        val size = dpToPx(22)
         return ImageButton(this).apply {
             layoutParams = LinearLayout.LayoutParams(size, size).apply {
                 marginStart = dpToPx(2)
@@ -1236,11 +1235,6 @@ setupBubbleTouchListener(params)
             minimumWidth = 0
             minimumHeight = 0
             scaleType = ImageView.ScaleType.CENTER
-            // Keep the 24dp button, but render every icon 1px smaller.
-            imageMatrix = Matrix().apply {
-                val iconScale = ((size - dpToPx(2)).toFloat() / size.toFloat())
-                setScale(iconScale, iconScale, size / 2f, size / 2f)
-            }
             elevation = dpToPx(2).toFloat()
             contentDescription = null
             isFocusable = true
@@ -2680,46 +2674,17 @@ params.y =
         }
 
         val backBtn = createTopBarIconButton(createTopBarBackDrawable(), Color.rgb(255, 220, 80)) {
-            hideSelectionHandles()
-            hideFloatingActionBar()
-            showNoteList()
+            // Save the current child note first so an edited title/content is
+            // not lost when the Back button returns to the note list.
+            saveCurrentNote(note.id)
         }
         topBar.addView(backBtn)
 
-        // Editable note title. If the user has not supplied a manual title,
-        // the first line of the note is used automatically.
-        titleInput = EditText(this).apply {
-            val initialTitle = note.title.trim().ifEmpty {
-                getEditorAutoTitle(note.content)
-            }
-            setText(initialTitle)
-            setTextColor(Color.parseColor("#333333"))
-            textSize = 14f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setSingleLine(true)
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            background = null
-            includeFontPadding = false
-            setPadding(dpToPx(4), 0, dpToPx(4), 0)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-            hint = "Note title"
-            isFocusable = true
-            isFocusableInTouchMode = true
-            isCursorVisible = true
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    val index = notesList.indexOfFirst { it.id == note.id }
-                    if (index >= 0) {
-                        notesList[index] = notesList[index].copy(title = s?.toString()?.trim().orEmpty())
-                        saveNotesToPrefs()
-                    }
-                    noteMetaBarRef?.text = buildNoteMetaTitle(note.id, s?.toString().orEmpty(), note.content)
-                }
-                override fun afterTextChanged(s: Editable?) {}
-            })
+        // Intentionally blank left/center title area.
+        val emptyTitleSpace = Space(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
         }
-        topBar.addView(titleInput)
+        topBar.addView(emptyTitleSpace)
 
         val undoBtn = createTopBarIconButton(createTopBarUndoDrawable(), Color.rgb(255, 220, 80)) { undoEditorChange() }
         val redoBtn = createTopBarIconButton(createTopBarRedoDrawable(), Color.rgb(255, 220, 80)) { redoEditorChange() }
@@ -2741,17 +2706,91 @@ params.y =
         topBar.addView(minimizeBtn)
         contentContainer.addView(topBar)
 
-        val noteMetaBar = TextView(this).apply {
-            text = buildNoteMetaTitle(note.id, note.title, note.content)
+        // ============================================================
+        // EDITABLE TITLE BAR
+        // ============================================================
+        // The number is kept in a small fixed TextView, while the title itself
+        // is a real EditText. Therefore the user can freely edit the title
+        // without accidentally changing the note's serial number.
+        var titleWasEditedManually = false
+
+        val titleBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(20)
+            )
+            setPadding(0, 0, 0, 0)
+            setBackgroundColor(Color.parseColor("#FFF0B8"))
+        }
+
+        val noteNumberText = TextView(this).apply {
+            val number = notesList.indexOfFirst { it.id == note.id } + 1
+            text = "$number."
             textSize = 12f
             setTextColor(Color.parseColor("#444444"))
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            setPadding(dpToPx(8), 0, dpToPx(8), 0)
-            setBackgroundColor(Color.parseColor("#FFF0B8"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(20))
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            includeFontPadding = false
+            layoutParams = LinearLayout.LayoutParams(
+                dpToPx(24),
+                dpToPx(20)
+            )
         }
-        noteMetaBarRef = noteMetaBar
-        contentContainer.addView(noteMetaBar)
+        titleBar.addView(noteNumberText)
+
+        val initialAutoTitle = getEditorAutoTitle(note.content)
+        val initialTitle = if (note.title.isNotBlank() && note.title != "Untitled Note") {
+            note.title
+        } else {
+            initialAutoTitle
+        }
+
+        titleInput = EditText(this).apply {
+            setText(initialTitle)
+            textSize = 12f
+            setTextColor(Color.parseColor("#444444"))
+            setSingleLine(true)
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            setPadding(dpToPx(4), 0, dpToPx(8), 0)
+            background = null
+            includeFontPadding = false
+            isCursorVisible = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = true
+            isLongClickable = true
+            inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                    InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            hint = "Title"
+
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                dpToPx(20),
+                1f
+            )
+
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(
+                    s: CharSequence?, start: Int, count: Int, after: Int
+                ) { }
+
+                override fun onTextChanged(
+                    s: CharSequence?, start: Int, before: Int, count: Int
+                ) {
+                    if (hasFocus()) {
+                        titleWasEditedManually = true
+                    }
+                }
+
+                override fun afterTextChanged(s: Editable?) { }
+            })
+        }
+        titleBar.addView(titleInput)
+        contentContainer.addView(titleBar)
+
 
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -2866,6 +2905,43 @@ params.y =
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            })
+
+            // Keep the title automatically synchronized with the first line of
+            // the note until the user manually edits the title field.
+            addTextChangedListener(object : TextWatcher {
+                private var internalChange = false
+
+                override fun beforeTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    count: Int,
+                    after: Int
+                ) {
+                }
+
+                override fun onTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    before: Int,
+                    count: Int
+                ) {
+                    if (internalChange || titleWasEditedManually) return
+
+                    val autoTitle = getEditorAutoTitle(s?.toString().orEmpty())
+                    val number = notesList.indexOfFirst { it.id == note.id } + 1
+                    val newTitle = autoTitle
+
+                    if (titleInput.text.toString() != newTitle) {
+                        internalChange = true
+                        titleInput.setText(newTitle)
+                        titleInput.setSelection(titleInput.text.length)
+                        internalChange = false
+                    }
+                }
+
+                override fun afterTextChanged(s: Editable?) {
+                }
             })
             
 setOnTouchListener(object : View.OnTouchListener {
@@ -3172,9 +3248,6 @@ setOnTouchListener(object : View.OnTouchListener {
                 rightMargin = 0
                 bottomMargin = 0
             }
-            // Positive Y moves the resize icon downward; 2dp makes it sit against
-            // the bottom zero-line without adding any margin.
-            translationY = dpToPx(2).toFloat()
             setOnTouchListener(ResizeTouchListener())
             bringToFront()
         }
@@ -3298,12 +3371,6 @@ setOnTouchListener(object : View.OnTouchListener {
         return selectionStart != selectionEnd
     }
 
-    private fun buildNoteMetaTitle(noteId: Long, manualTitle: String, content: String): String {
-        val number = notesList.indexOfFirst { it.id == noteId } + 1
-        val title = manualTitle.trim().ifEmpty { getEditorAutoTitle(content) }
-        return "$number. ${if (title.isEmpty()) "Untitled Note" else title}"
-    }
-
     private fun getEditorAutoTitle(content: String): String {
         return content.lineSequence()
             .map { it.trim() }
@@ -3380,9 +3447,20 @@ setOnTouchListener(object : View.OnTouchListener {
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
+            val rawTitle = if (::titleInput.isInitialized) {
+                titleInput.text.toString().trim()
+            } else {
+                ""
+            }
+
+            val contentText = editText.text.toString()
+            val finalTitle = rawTitle.ifEmpty {
+                getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+            }
+
             val updatedNote = notesList[index].copy(
-                title = getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
-                content = editText.text.toString(),
+                title = finalTitle,
+                content = contentText,
                 lastEdited = System.currentTimeMillis()
             )
             notesList[index] = updatedNote
