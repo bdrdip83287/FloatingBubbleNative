@@ -1225,7 +1225,7 @@ setupBubbleTouchListener(params)
         buttonColor: Int,
         clickAction: () -> Unit
     ): ImageButton {
-        val size = dpToPx(22)
+        val size = dpToPx(24)
         return ImageButton(this).apply {
             layoutParams = LinearLayout.LayoutParams(size, size).apply {
                 marginStart = dpToPx(2)
@@ -3543,9 +3543,10 @@ setOnTouchListener(object : View.OnTouchListener {
             restoreEditorStatePending = false
             resetHandleReferences()
 
-            // The child note disappears, while the floating bubble remains available
-            // for opening the note list again.
-            createBubble()
+            // Close means the child note AND its floating bubble both disappear.
+            // Do not recreate the bubble here. Stopping the service also removes
+            // any remaining overlay immediately through onDestroy().
+            deleteBubble()
         } catch (e: Exception) {
             EmergencyLog.logException(e, "closeChildNotePad")
         }
