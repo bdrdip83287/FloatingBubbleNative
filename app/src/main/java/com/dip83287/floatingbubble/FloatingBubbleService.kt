@@ -47,13 +47,13 @@ class FloatingBubbleService : Service() {
 
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
-    private val BUBBLE_ICON = "ðŸ“"
+    private val BUBBLE_ICON = "📝"
     private val BUBBLE_SIZE = 110
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
     private val NOTEPAD_TITLE = "Floating Notes"
-    // Child notepad resize limits. Minimum is exactly 120px Ã— 120px.
+    // Child notepad resize limits. Minimum is exactly 120px × 120px.
     // Maximum is the current device display size, allowing full-screen access.
     private val NOTEPAD_MIN_WIDTH = 120
     private val NOTEPAD_MIN_HEIGHT = 120
@@ -317,7 +317,7 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         }
 
         val cross = TextView(this).apply {
-            text = "âœ•"
+            text = "✕"
             textSize = 35f
             setTextColor(Color.WHITE)
             setTypeface(null, android.graphics.Typeface.BOLD)
@@ -450,9 +450,9 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
                     lp.height = size
 
                     /*
-                     * à¦—à§à¦°à§à¦¤à§à¦¬à¦ªà§‚à¦°à§à¦£:
-                     * à¦¶à§à¦§à§ View-à¦à¦° layoutParams à¦¨à§Ÿ,
-                     * WindowManager-à¦à¦° actual overlay window-à¦“ resize à¦¹à¦¬à§‡à¥¤
+                     * গুরুত্বপূর্ণ:
+                     * শুধু View-এর layoutParams নয়,
+                     * WindowManager-এর actual overlay window-ও resize হবে।
                      */
                     windowManager.updateViewLayout(
                         zone,
@@ -584,14 +584,14 @@ private fun checkBubbleDeleteZoneHover(
         normalRadius * DELETE_ZONE_HOVER_SCALE
 
     /*
-     * à¦ªà§à¦°à¦¥à¦®à¦¬à¦¾à¦° hover à¦¶à§à¦°à§ à¦•à¦°à¦¾à¦° areaà¥¤
+     * প্রথমবার hover শুরু করার area।
      */
     val hoverTriggerDistance =
         normalRadius +
         bubbleRadius * 0.35f
 
     /*
-     * Hover à¦¹à¦“à§Ÿà¦¾à¦° à¦ªà¦° à¦¬à§œ actual detection areaà¥¤
+     * Hover হওয়ার পর বড় actual detection area।
      */
     val expandedDetectionDistance =
         expandedRadius +
@@ -769,8 +769,8 @@ setupBubbleTouchListener(params)
                             initialY + dy.toInt()
 
                         /*
-                         * à¦ªà§à¦°à¦•à§ƒà¦¤ Delete Zone circle
-                         * à¦…à¦¨à§à¦¯à¦¾à§Ÿà§€ hover detectionà¥¤
+                         * প্রকৃত Delete Zone circle
+                         * অনুযায়ী hover detection।
                          */
                         checkBubbleDeleteZoneHover(params)
 
@@ -800,9 +800,9 @@ setupBubbleTouchListener(params)
                         hideDeleteZone()
 
                         /*
-                         * Finger à¦¤à§‹à¦²à¦¾à¦° à¦®à§à¦¹à§‚à¦°à§à¦¤à§‡ à¦¯à¦¦à¦¿ Bubble
-                         * Delete Zone-à¦à¦° à¦­à¦¿à¦¤à¦°à§‡ à¦¥à¦¾à¦•à§‡,
-                         * à¦¤à¦–à¦¨à¦‡ delete à¦¹à¦¬à§‡à¥¤
+                         * Finger তোলার মুহূর্তে যদি Bubble
+                         * Delete Zone-এর ভিতরে থাকে,
+                         * তখনই delete হবে।
                          */
                         if (wasInDeleteZone) {
 
@@ -1215,9 +1215,9 @@ setupBubbleTouchListener(params)
 
     // ============================================================
     // Top Bar Icons - Canvas + Path + Drawable
-    // Unicode/Text glyph à¦¸à¦®à§à¦ªà§‚à¦°à§à¦£ à¦¬à¦¾à¦¦ à¦¦à§‡à¦“à§Ÿà¦¾ à¦¹à§Ÿà§‡à¦›à§‡à¥¤
-    // à¦¤à¦¿à¦¨à¦Ÿà¦¿ icon à¦à¦•à¦‡ 24dp x 24dp coordinate system à¦¬à§à¦¯à¦¬à¦¹à¦¾à¦° à¦•à¦°à§‡,
-    // à¦¤à¦¾à¦‡ visual size à¦“ vertical/horizontal alignment à¦à¦•à¦‡ à¦¥à¦¾à¦•à§‡à¥¤
+    // Unicode/Text glyph সম্পূর্ণ বাদ দেওয়া হয়েছে।
+    // তিনটি icon একই 24dp x 24dp coordinate system ব্যবহার করে,
+    // তাই visual size ও vertical/horizontal alignment একই থাকে।
     // ============================================================
 
     private fun createTopBarIconButton(
@@ -1735,8 +1735,8 @@ setupBubbleTouchListener(params)
                 }
 
                 /*
-                 * à¦¶à§à¦§à§ selected text update à¦•à¦°à¦¾ à¦¹à¦šà§à¦›à§‡à¥¤
-                 * FloatingActionBar à¦à¦–à¦¾à¦¨à§‡ recreate à¦•à¦°à¦¾ à¦¹à¦šà§à¦›à§‡ à¦¨à¦¾à¥¤
+                 * শুধু selected text update করা হচ্ছে।
+                 * FloatingActionBar এখানে recreate করা হচ্ছে না।
                  */
                 val start =
                     editText.selectionStart
@@ -2093,7 +2093,7 @@ setupBubbleTouchListener(params)
         }
         
         val chromeBtn = TextView(this).apply {
-            text = "ðŸŒ"
+            text = "🌐"
             textSize = 18f
             setTextColor(Color.WHITE)
             setPadding(16, 8, 16, 8)
@@ -2238,7 +2238,7 @@ val params = WindowManager.LayoutParams(
 params.gravity = Gravity.TOP or Gravity.START
 params.x = x.toInt() - 50
 
-// Action Bar-à¦à¦° actual height à¦®à¦¾à¦ªà¦¾
+// Action Bar-এর actual height মাপা
 actionBarView.measure(
     View.MeasureSpec.makeMeasureSpec(
         0,
@@ -2253,7 +2253,7 @@ actionBarView.measure(
 val actionBarHeight =
     actionBarView.measuredHeight
 
-// Selection-à¦à¦° à¦‰à¦ªà¦°à§‡ 15dp gap
+// Selection-এর উপরে 15dp gap
 val extraGap =
     (60f * resources.displayMetrics.density).toInt()
 
@@ -2399,7 +2399,7 @@ params.y =
         }
 
         val dragHandle = TextView(this).apply {
-            text = "â‹¯"
+            text = "⋯"
             textSize = 24f
             setTextColor(Color.parseColor("#333333"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -2417,7 +2417,7 @@ params.y =
         topBar.addView(titleText)
 
         val minimizeBtn = TextView(this).apply {
-            text = "âˆ’"
+            text = "−"
             textSize = 28f
             setTextColor(Color.parseColor("#C0392B"))
             setPadding(16, 0, 8, 0)
@@ -2483,7 +2483,7 @@ params.y =
         contentContainer.addView(addButton)
 
         val resizeHandleView = TextView(this).apply {
-            text = "â—¢"
+            text = "◢"
             textSize = 18f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
@@ -2537,7 +2537,7 @@ params.y =
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
-    // âœ… Character by character selection during drag
+    // ✅ Character by character selection during drag
     private fun handleDragSelection(editText: EditText, event: MotionEvent) {
         try {
             val currentLayout = editText.layout ?: return
@@ -2588,7 +2588,7 @@ params.y =
         }
     }
 
-    // âœ… Word selection for double tap / long press (no drag)
+    // ✅ Word selection for double tap / long press (no drag)
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -3295,7 +3295,7 @@ setOnTouchListener(object : View.OnTouchListener {
         container.addView(contentContainer)
 
         val resizeHandleView = TextView(this).apply {
-            text = "â—¢"
+            text = "◢"
             textSize = 18f
             setTextColor(Color.parseColor("#F28B82"))
             gravity = Gravity.END or Gravity.BOTTOM
@@ -3728,7 +3728,7 @@ setOnTouchListener(object : View.OnTouchListener {
 
                         // Maximum size is the full current display. This also lets the
                         // resize handle reach the complete screen area instead of the
-                        // previous fixed 650 Ã— 850 limit.
+                        // previous fixed 650 × 850 limit.
                         val screenWidth = resources.displayMetrics.widthPixels
                         val screenHeight = resources.displayMetrics.heightPixels
 
