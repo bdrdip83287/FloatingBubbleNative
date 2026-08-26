@@ -2757,6 +2757,8 @@ params.y =
             val number = notesList.indexOfFirst { it.id == note.id } + 1
             text = "$number."
             textSize = 12f
+            // Serial number + dot are bold.
+            setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
             setTextColor(Color.parseColor("#444444"))
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
             includeFontPadding = false
@@ -2777,6 +2779,8 @@ params.y =
         titleInput = EditText(this).apply {
             setText(initialTitle)
             textSize = 12f
+            // Title text is bold, including manually edited titles.
+            setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
             setTextColor(Color.parseColor("#444444"))
             setSingleLine(true)
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
@@ -2893,11 +2897,13 @@ params.y =
             setText(note.content)
             hint = "Write your note here..."
             textSize = 15f
+            // Normal body text: remove any default/bold typeface.
+            setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
             gravity = Gravity.TOP or Gravity.START
             setPadding(18, 18, 18, 18)
             background = null
             
-            setLineSpacing(0f, 1.15f)
+            setLineSpacing(0f, 1.05f)
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
