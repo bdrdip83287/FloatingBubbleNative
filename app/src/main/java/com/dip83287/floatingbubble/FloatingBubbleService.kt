@@ -1,4 +1,3 @@
-
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -48,16 +47,20 @@ class FloatingBubbleService : Service() {
 
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
-    private val BUBBLE_ICON = "📝"
+    private val BUBBLE_ICON = "ðŸ“"
     private val BUBBLE_SIZE = 110
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
     private val NOTEPAD_TITLE = "Floating Notes"
-    private val NOTEPAD_MIN_WIDTH = 380
-    private val NOTEPAD_MIN_HEIGHT = 500
-    private val NOTEPAD_MAX_WIDTH = 650
-    private val NOTEPAD_MAX_HEIGHT = 850
+    // Child notepad resize limits. Minimum is exactly 120px Ã— 120px.
+    // Maximum is the current device display size, allowing full-screen access.
+    private val NOTEPAD_MIN_WIDTH = 120
+    private val NOTEPAD_MIN_HEIGHT = 120
+    private val NOTEPAD_MAX_WIDTH: Int
+        get() = resources.displayMetrics.widthPixels
+    private val NOTEPAD_MAX_HEIGHT: Int
+        get() = resources.displayMetrics.heightPixels
 
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
@@ -83,6 +86,7 @@ class FloatingBubbleService : Service() {
     private val editorRedoStack = java.util.ArrayDeque<String>()
     private var suppressEditorHistory = false
     private var isEditorLocked = false
+    private var lastEditorText = ""
 
     // Child-note state that must survive minimize -> bubble -> expand.
     private var currentEditingNoteId: Long? = null
@@ -273,7 +277,9 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
 
     private fun loadSavedPositions() {
         currentNotepadWidth = prefs.getInt(KEY_NOTEPAD_WIDTH, NOTEPAD_MIN_WIDTH)
+            .coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
         currentNotepadHeight = prefs.getInt(KEY_NOTEPAD_HEIGHT, NOTEPAD_MIN_HEIGHT)
+            .coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
         notepadPosX = prefs.getInt(KEY_NOTEPAD_X, 0)
         notepadPosY = prefs.getInt(KEY_NOTEPAD_Y, 0)
     }
@@ -311,7 +317,7 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         }
 
         val cross = TextView(this).apply {
-            text = "✕"
+            text = "âœ•"
             textSize = 35f
             setTextColor(Color.WHITE)
             setTypeface(null, android.graphics.Typeface.BOLD)
@@ -444,9 +450,9 @@ private fun setDeleteZoneHovered(hovered: Boolean) {
                     lp.height = size
 
                     /*
-                     * গুরুত্বপূর্ণ:
-                     * শুধু View-এর layoutParams নয়,
-                     * WindowManager-এর actual overlay window-ও resize হবে।
+                     * à¦—à§à¦°à§à¦¤à§à¦¬à¦ªà§‚à¦°à§à¦£:
+                     * à¦¶à§à¦§à§ View-à¦à¦° layoutParams à¦¨à§Ÿ,
+                     * WindowManager-à¦à¦° actual overlay window-à¦“ resize à¦¹à¦¬à§‡à¥¤
                      */
                     windowManager.updateViewLayout(
                         zone,
@@ -578,14 +584,14 @@ private fun checkBubbleDeleteZoneHover(
         normalRadius * DELETE_ZONE_HOVER_SCALE
 
     /*
-     * প্রথমবার hover শুরু করার area।
+     * à¦ªà§à¦°à¦¥à¦®à¦¬à¦¾à¦° hover à¦¶à§à¦°à§ à¦•à¦°à¦¾à¦° areaà¥¤
      */
     val hoverTriggerDistance =
         normalRadius +
         bubbleRadius * 0.35f
 
     /*
-     * Hover হওয়ার পর বড় actual detection area।
+     * Hover à¦¹à¦“à§Ÿà¦¾à¦° à¦ªà¦° à¦¬à§œ actual detection areaà¥¤
      */
     val expandedDetectionDistance =
         expandedRadius +
@@ -763,8 +769,8 @@ setupBubbleTouchListener(params)
                             initialY + dy.toInt()
 
                         /*
-                         * প্রকৃত Delete Zone circle
-                         * অনুযায়ী hover detection।
+                         * à¦ªà§à¦°à¦•à§ƒà¦¤ Delete Zone circle
+                         * à¦…à¦¨à§à¦¯à¦¾à§Ÿà§€ hover detectionà¥¤
                          */
                         checkBubbleDeleteZoneHover(params)
 
@@ -794,9 +800,9 @@ setupBubbleTouchListener(params)
                         hideDeleteZone()
 
                         /*
-                         * Finger তোলার মুহূর্তে যদি Bubble
-                         * Delete Zone-এর ভিতরে থাকে,
-                         * তখনই delete হবে।
+                         * Finger à¦¤à§‹à¦²à¦¾à¦° à¦®à§à¦¹à§‚à¦°à§à¦¤à§‡ à¦¯à¦¦à¦¿ Bubble
+                         * Delete Zone-à¦à¦° à¦­à¦¿à¦¤à¦°à§‡ à¦¥à¦¾à¦•à§‡,
+                         * à¦¤à¦–à¦¨à¦‡ delete à¦¹à¦¬à§‡à¥¤
                          */
                         if (wasInDeleteZone) {
 
@@ -1127,9 +1133,15 @@ setupBubbleTouchListener(params)
             val activeId = currentEditingNoteId!!
             val index = notesList.indexOfFirst { it.id == activeId }
             if (index >= 0) {
+                val contentText = editText.text.toString()
+                val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+                val finalTitle = rawTitle.ifEmpty {
+                    getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+                }
+
                 notesList[index] = notesList[index].copy(
-                    content = editText.text.toString(),
-                    title = getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
+                    content = contentText,
+                    title = finalTitle,
                     lastEdited = System.currentTimeMillis()
                 )
                 saveNotesToPrefs()
@@ -1203,9 +1215,9 @@ setupBubbleTouchListener(params)
 
     // ============================================================
     // Top Bar Icons - Canvas + Path + Drawable
-    // Unicode/Text glyph সম্পূর্ণ বাদ দেওয়া হয়েছে।
-    // তিনটি icon একই 24dp x 24dp coordinate system ব্যবহার করে,
-    // তাই visual size ও vertical/horizontal alignment একই থাকে।
+    // Unicode/Text glyph à¦¸à¦®à§à¦ªà§‚à¦°à§à¦£ à¦¬à¦¾à¦¦ à¦¦à§‡à¦“à§Ÿà¦¾ à¦¹à§Ÿà§‡à¦›à§‡à¥¤
+    // à¦¤à¦¿à¦¨à¦Ÿà¦¿ icon à¦à¦•à¦‡ 24dp x 24dp coordinate system à¦¬à§à¦¯à¦¬à¦¹à¦¾à¦° à¦•à¦°à§‡,
+    // à¦¤à¦¾à¦‡ visual size à¦“ vertical/horizontal alignment à¦à¦•à¦‡ à¦¥à¦¾à¦•à§‡à¥¤
     // ============================================================
 
     private fun createTopBarIconButton(
@@ -1213,7 +1225,7 @@ setupBubbleTouchListener(params)
         buttonColor: Int,
         clickAction: () -> Unit
     ): ImageButton {
-        val size = dpToPx(22)
+        val size = dpToPx(24)
         return ImageButton(this).apply {
             layoutParams = LinearLayout.LayoutParams(size, size).apply {
                 marginStart = dpToPx(2)
@@ -1226,7 +1238,8 @@ setupBubbleTouchListener(params)
                 setStroke(dpToPx(1), Color.BLACK)
             }
             background = bg
-            setPadding(0, 0, 0, 0)
+            // Keep a uniform 2px gap between the custom icon and the black button border.
+            setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
             minimumWidth = 0
             minimumHeight = 0
             scaleType = ImageView.ScaleType.CENTER
@@ -1343,6 +1356,16 @@ setupBubbleTouchListener(params)
             override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
             override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
         }
+    }
+
+    private fun createTopBarCloseDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        // Bold red X for closing the currently visible child note.
+        paint.color = Color.rgb(220, 35, 35)
+        paint.strokeWidth = dpToPx(2).toFloat()
+        paint.strokeCap = Paint.Cap.ROUND
+        val inset = w * 0.24f
+        canvas.drawLine(inset, inset, w - inset, h - inset, paint)
+        canvas.drawLine(w - inset, inset, inset, h - inset, paint)
     }
 
     private fun createTopBarUndoDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
@@ -1712,8 +1735,8 @@ setupBubbleTouchListener(params)
                 }
 
                 /*
-                 * শুধু selected text update করা হচ্ছে।
-                 * FloatingActionBar এখানে recreate করা হচ্ছে না।
+                 * à¦¶à§à¦§à§ selected text update à¦•à¦°à¦¾ à¦¹à¦šà§à¦›à§‡à¥¤
+                 * FloatingActionBar à¦à¦–à¦¾à¦¨à§‡ recreate à¦•à¦°à¦¾ à¦¹à¦šà§à¦›à§‡ à¦¨à¦¾à¥¤
                  */
                 val start =
                     editText.selectionStart
@@ -2070,7 +2093,7 @@ setupBubbleTouchListener(params)
         }
         
         val chromeBtn = TextView(this).apply {
-            text = "🌐"
+            text = "ðŸŒ"
             textSize = 18f
             setTextColor(Color.WHITE)
             setPadding(16, 8, 16, 8)
@@ -2215,7 +2238,7 @@ val params = WindowManager.LayoutParams(
 params.gravity = Gravity.TOP or Gravity.START
 params.x = x.toInt() - 50
 
-// Action Bar-এর actual height মাপা
+// Action Bar-à¦à¦° actual height à¦®à¦¾à¦ªà¦¾
 actionBarView.measure(
     View.MeasureSpec.makeMeasureSpec(
         0,
@@ -2230,7 +2253,7 @@ actionBarView.measure(
 val actionBarHeight =
     actionBarView.measuredHeight
 
-// Selection-এর উপরে 15dp gap
+// Selection-à¦à¦° à¦‰à¦ªà¦°à§‡ 15dp gap
 val extraGap =
     (60f * resources.displayMetrics.density).toInt()
 
@@ -2376,7 +2399,7 @@ params.y =
         }
 
         val dragHandle = TextView(this).apply {
-            text = "⋯"
+            text = "â‹¯"
             textSize = 24f
             setTextColor(Color.parseColor("#333333"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -2394,7 +2417,7 @@ params.y =
         topBar.addView(titleText)
 
         val minimizeBtn = TextView(this).apply {
-            text = "−"
+            text = "âˆ’"
             textSize = 28f
             setTextColor(Color.parseColor("#C0392B"))
             setPadding(16, 0, 8, 0)
@@ -2460,7 +2483,7 @@ params.y =
         contentContainer.addView(addButton)
 
         val resizeHandleView = TextView(this).apply {
-            text = "◢"
+            text = "â—¢"
             textSize = 18f
             setTextColor(Color.parseColor("#999999"))
             gravity = Gravity.END or Gravity.BOTTOM
@@ -2514,7 +2537,7 @@ params.y =
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
     }
 
-    // ✅ Character by character selection during drag
+    // âœ… Character by character selection during drag
     private fun handleDragSelection(editText: EditText, event: MotionEvent) {
         try {
             val currentLayout = editText.layout ?: return
@@ -2565,7 +2588,7 @@ params.y =
         }
     }
 
-    // ✅ Word selection for double tap / long press (no drag)
+    // âœ… Word selection for double tap / long press (no drag)
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
         try {
             val currentLayout = editText.layout
@@ -2643,9 +2666,14 @@ params.y =
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            // No border. Elevation provides a soft downward-looking shadow.
+            // Rounded child-notepad surface: exactly 5px corner radius, no border.
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(Color.parseColor(NOTEPAD_BG_COLOR))
+                cornerRadius = 5f
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                clipToOutline = true
                 elevation = dpToPx(14).toFloat()
                 translationZ = dpToPx(2).toFloat()
             }
@@ -2669,9 +2697,9 @@ params.y =
         }
 
         val backBtn = createTopBarIconButton(createTopBarBackDrawable(), Color.rgb(255, 220, 80)) {
-            hideSelectionHandles()
-            hideFloatingActionBar()
-            showNoteList()
+            // Save the current child note first so an edited title/content is
+            // not lost when the Back button returns to the note list.
+            saveCurrentNote(note.id)
         }
         topBar.addView(backBtn)
 
@@ -2694,26 +2722,103 @@ params.y =
             collapseToBubble()
         }
 
+        val closeBtn = createTopBarIconButton(createTopBarCloseDrawable(), Color.rgb(255, 220, 80)) {
+            closeChildNotePad(note.id)
+        }
+
         topBar.addView(undoBtn)
         topBar.addView(redoBtn)
         topBar.addView(pasteBtnTop)
         topBar.addView(shareTopBtn)
         topBar.addView(minimizeBtn)
+        topBar.addView(closeBtn)
         contentContainer.addView(topBar)
 
-        val noteMetaBar = TextView(this).apply {
+        // ============================================================
+        // EDITABLE TITLE BAR
+        // ============================================================
+        // The number is kept in a small fixed TextView, while the title itself
+        // is a real EditText. Therefore the user can freely edit the title
+        // without accidentally changing the note's serial number.
+        var titleWasEditedManually = false
+
+        val titleBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(20)
+            )
+            setPadding(0, 0, 0, 0)
+            setBackgroundColor(Color.parseColor("#FFF0B8"))
+        }
+
+        val noteNumberText = TextView(this).apply {
             val number = notesList.indexOfFirst { it.id == note.id } + 1
-            val title = getEditorAutoTitle(note.content)
-            text = "$number. ${if (title.isEmpty()) "Untitled Note" else title}"
+            text = "$number."
             textSize = 12f
             setTextColor(Color.parseColor("#444444"))
-            setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            setPadding(dpToPx(8), 0, dpToPx(8), 0)
-            setBackgroundColor(Color.parseColor("#FFF0B8"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(20))
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            includeFontPadding = false
+            layoutParams = LinearLayout.LayoutParams(
+                dpToPx(24),
+                dpToPx(20)
+            )
         }
-        contentContainer.addView(noteMetaBar)
+        titleBar.addView(noteNumberText)
+
+        val initialAutoTitle = getEditorAutoTitle(note.content)
+        val initialTitle = if (note.title.isNotBlank() && note.title != "Untitled Note") {
+            note.title
+        } else {
+            initialAutoTitle
+        }
+
+        titleInput = EditText(this).apply {
+            setText(initialTitle)
+            textSize = 12f
+            setTextColor(Color.parseColor("#444444"))
+            setSingleLine(true)
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            setPadding(dpToPx(4), 0, dpToPx(8), 0)
+            background = null
+            includeFontPadding = false
+            isCursorVisible = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = true
+            isLongClickable = true
+            inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                    InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            hint = "Title"
+
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                dpToPx(20),
+                1f
+            )
+
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(
+                    s: CharSequence?, start: Int, count: Int, after: Int
+                ) { }
+
+                override fun onTextChanged(
+                    s: CharSequence?, start: Int, before: Int, count: Int
+                ) {
+                    if (hasFocus()) {
+                        titleWasEditedManually = true
+                    }
+                }
+
+                override fun afterTextChanged(s: Editable?) { }
+            })
+        }
+        titleBar.addView(titleInput)
+        contentContainer.addView(titleBar)
+
 
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -2782,6 +2887,7 @@ params.y =
         editorRedoStack.clear()
         suppressEditorHistory = false
         isEditorLocked = false
+        lastEditorText = note.content
 
         editText = EditText(this).apply {
             setText(note.content)
@@ -2828,6 +2934,72 @@ params.y =
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            })
+
+            // Keep the title automatically synchronized with the first line of
+            // the note until the user manually edits the title field.
+            addTextChangedListener(object : TextWatcher {
+                private var internalChange = false
+
+                override fun beforeTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    count: Int,
+                    after: Int
+                ) {
+                }
+
+                override fun onTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    before: Int,
+                    count: Int
+                ) {
+                    if (internalChange || titleWasEditedManually) return
+
+                    val autoTitle = getEditorAutoTitle(s?.toString().orEmpty())
+                    val number = notesList.indexOfFirst { it.id == note.id } + 1
+                    val newTitle = autoTitle
+
+                    if (titleInput.text.toString() != newTitle) {
+                        internalChange = true
+                        titleInput.setText(newTitle)
+                        titleInput.setSelection(titleInput.text.length)
+                        internalChange = false
+                    }
+                }
+
+                override fun afterTextChanged(s: Editable?) {
+                }
+            })
+
+            // Real editor history: every user text change stores the exact previous
+            // document state. Undo/Redo themselves set suppressEditorHistory so
+            // they do not create recursive history entries.
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(
+                    s: CharSequence?, start: Int, count: Int, after: Int
+                ) {
+                    if (!suppressEditorHistory) {
+                        editorUndoStack.addLast(s?.toString() ?: "")
+                        // Keep history bounded so long editing sessions do not grow
+                        // memory without limit.
+                        while (editorUndoStack.size > 100) {
+                            editorUndoStack.removeFirst()
+                        }
+                        editorRedoStack.clear()
+                    }
+                }
+
+                override fun onTextChanged(
+                    s: CharSequence?, start: Int, before: Int, count: Int
+                ) {
+                    if (!suppressEditorHistory) {
+                        lastEditorText = s?.toString() ?: ""
+                    }
+                }
+
+                override fun afterTextChanged(s: Editable?) { }
             })
             
 setOnTouchListener(object : View.OnTouchListener {
@@ -3123,7 +3295,7 @@ setOnTouchListener(object : View.OnTouchListener {
         container.addView(contentContainer)
 
         val resizeHandleView = TextView(this).apply {
-            text = "◢"
+            text = "â—¢"
             textSize = 18f
             setTextColor(Color.parseColor("#F28B82"))
             gravity = Gravity.END or Gravity.BOTTOM
@@ -3266,25 +3438,39 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun undoEditorChange() {
-        if (!::editText.isInitialized || editorUndoStack.isEmpty()) return
+        if (!::editText.isInitialized || editorUndoStack.isEmpty() || isEditorLocked) return
+
         val current = editText.text.toString()
         val previous = editorUndoStack.removeLast()
         editorRedoStack.addLast(current)
+
         suppressEditorHistory = true
         editText.setText(previous)
-        editText.setSelection(previous.length.coerceAtMost(previous.length))
+        editText.setSelection(previous.length.coerceIn(0, editText.length()))
         suppressEditorHistory = false
+        lastEditorText = previous
+
+        editText.requestFocus()
+        editText.invalidate()
+        updateHandlePositionsSafe()
     }
 
     private fun redoEditorChange() {
-        if (!::editText.isInitialized || editorRedoStack.isEmpty()) return
+        if (!::editText.isInitialized || editorRedoStack.isEmpty() || isEditorLocked) return
+
         val current = editText.text.toString()
         val next = editorRedoStack.removeLast()
         editorUndoStack.addLast(current)
+
         suppressEditorHistory = true
         editText.setText(next)
-        editText.setSelection(next.length.coerceAtMost(next.length))
+        editText.setSelection(next.length.coerceIn(0, editText.length()))
         suppressEditorHistory = false
+        lastEditorText = next
+
+        editText.requestFocus()
+        editText.invalidate()
+        updateHandlePositionsSafe()
     }
 
     private fun pasteIntoEditor() {
@@ -3317,6 +3503,55 @@ setOnTouchListener(object : View.OnTouchListener {
         }
     }
 
+    private fun closeChildNotePad(noteId: Long) {
+        if (currentEditingNoteId != noteId || noteView == null) return
+
+        try {
+            // Save edits before removing the child editor from the screen.
+            val index = notesList.indexOfFirst { it.id == noteId }
+            if (index >= 0 && ::editText.isInitialized) {
+                val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+                val contentText = editText.text.toString()
+                val finalTitle = rawTitle.ifEmpty {
+                    getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+                }
+                notesList[index] = notesList[index].copy(
+                    title = finalTitle,
+                    content = contentText,
+                    lastEdited = System.currentTimeMillis()
+                )
+                saveNotesToPrefs()
+                notesAdapter.updateList(notesList)
+                updateBubbleCount()
+            }
+
+            hideSelectionHandles()
+            hideFloatingActionBar()
+            saveNotepadSizeAndPosition(
+                currentNotepadWidth,
+                currentNotepadHeight,
+                (noteView?.layoutParams as? WindowManager.LayoutParams)?.x ?: notepadPosX,
+                (noteView?.layoutParams as? WindowManager.LayoutParams)?.y ?: notepadPosY
+            )
+
+            noteView?.let {
+                try { windowManager.removeView(it) } catch (_: Exception) { }
+            }
+            noteView = null
+            isExpanded = false
+            currentEditingNoteId = null
+            restoreEditorStatePending = false
+            resetHandleReferences()
+
+            // Close means the child note AND its floating bubble both disappear.
+            // Do not recreate the bubble here. Stopping the service also removes
+            // any remaining overlay immediately through onDestroy().
+            deleteBubble()
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "closeChildNotePad")
+        }
+    }
+
     private fun deleteCurrentEditorNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index < 0) return
@@ -3333,9 +3568,20 @@ setOnTouchListener(object : View.OnTouchListener {
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index != -1) {
+            val rawTitle = if (::titleInput.isInitialized) {
+                titleInput.text.toString().trim()
+            } else {
+                ""
+            }
+
+            val contentText = editText.text.toString()
+            val finalTitle = rawTitle.ifEmpty {
+                getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+            }
+
             val updatedNote = notesList[index].copy(
-                title = getEditorAutoTitle(editText.text.toString()).ifEmpty { "Untitled Note" },
-                content = editText.text.toString(),
+                title = finalTitle,
+                content = contentText,
                 lastEdited = System.currentTimeMillis()
             )
             notesList[index] = updatedNote
@@ -3473,32 +3719,57 @@ setOnTouchListener(object : View.OnTouchListener {
                     resizeTouchTime = System.currentTimeMillis()
                     return true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
                     if (isResizing) {
                         val dx = event.rawX.toInt() - resizeStartX
                         val dy = event.rawY.toInt() - resizeStartY
-                        val newWidth = (resizeStartWidth + dx).coerceIn(NOTEPAD_MIN_WIDTH, NOTEPAD_MAX_WIDTH)
-                        val newHeight = (resizeStartHeight + dy).coerceIn(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT)
-                        
+                        val params = noteView?.layoutParams as? WindowManager.LayoutParams
+
+                        // Maximum size is the full current display. This also lets the
+                        // resize handle reach the complete screen area instead of the
+                        // previous fixed 650 Ã— 850 limit.
+                        val screenWidth = resources.displayMetrics.widthPixels
+                        val screenHeight = resources.displayMetrics.heightPixels
+
+                        val availableWidth = (screenWidth - (params?.x ?: 0)).coerceAtLeast(NOTEPAD_MIN_WIDTH)
+                        val availableHeight = (screenHeight - (params?.y ?: 0)).coerceAtLeast(NOTEPAD_MIN_HEIGHT)
+
+                        val newWidth = (resizeStartWidth + dx)
+                            .coerceIn(NOTEPAD_MIN_WIDTH, availableWidth.coerceAtMost(NOTEPAD_MAX_WIDTH))
+                        val newHeight = (resizeStartHeight + dy)
+                            .coerceIn(NOTEPAD_MIN_HEIGHT, availableHeight.coerceAtMost(NOTEPAD_MAX_HEIGHT))
+
                         if (newWidth != currentNotepadWidth || newHeight != currentNotepadHeight) {
                             currentNotepadWidth = newWidth
                             currentNotepadHeight = newHeight
-                            noteView?.layoutParams?.width = currentNotepadWidth
-                            noteView?.layoutParams?.height = currentNotepadHeight
-                            windowManager.updateViewLayout(noteView, noteView?.layoutParams)
+
+                            params?.let {
+                                it.width = currentNotepadWidth
+                                it.height = currentNotepadHeight
+                                windowManager.updateViewLayout(noteView, it)
+                            }
                         }
                         return true
                     }
                 }
+
                 MotionEvent.ACTION_UP -> {
                     isResizing = false
-                    val params = noteView?.layoutParams as WindowManager.LayoutParams
+                    val params = noteView?.layoutParams as? WindowManager.LayoutParams
                     if (params != null && System.currentTimeMillis() - resizeTouchTime > 100) {
                         saveNotepadSizeAndPosition(
-                            currentNotepadWidth, currentNotepadHeight,
-                            params.x, params.y
+                            currentNotepadWidth,
+                            currentNotepadHeight,
+                            params.x,
+                            params.y
                         )
                     }
+                    return true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    isResizing = false
                     return true
                 }
             }
