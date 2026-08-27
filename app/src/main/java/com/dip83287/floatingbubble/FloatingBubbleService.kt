@@ -3528,6 +3528,33 @@ setOnTouchListener(object : View.OnTouchListener {
         val safeStart = selectionStart.coerceIn(0, newText.length)
         val safeEnd = selectionEnd.coerceIn(0, newText.length)
 
+        // Undo/Redo-এর সময় Android যেন cursor reveal করে ScrollView-কে
+        // নতুন text-এর একদম bottom-এ নিয়ে যেতে না পারে।
+        val wasFocused = editText.hasFocus()
+        val wasCursorVisible = editText.isCursorVisible
+        val savedScrollY = scrollY.coerceAtLeast(0)
+        val savedScrollX = scrollX.coerceAtLeast(0)
+        val savedEditScrollY = editTextScrollY.coerceAtLeast(0)
+        val savedEditScrollX = editTextScrollX.coerceAtLeast(0)
+
+        fun restoreViewport() {
+            try {
+                // প্রথমে text-এর selection restore করি।
+                editText.setSelection(safeStart, safeEnd)
+
+                // setSelection() cursor reveal করতে পারে; তাই সঙ্গে সঙ্গে
+                // EditText এবং parent ScrollView—দুটির viewport-ই ফিরিয়ে দিই।
+                editText.scrollTo(savedEditScrollX, savedEditScrollY)
+                scrollView.scrollTo(savedScrollX, savedScrollY)
+            } catch (_: Exception) {
+            }
+        }
+
+        // Focus সাময়িকভাবে সরিয়ে এবং cursor visibility বন্ধ রেখে setText()
+        // করা হচ্ছে—এতে Android-এর automatic cursor-reveal বন্ধ থাকে।
+        editText.clearFocus()
+        editText.isCursorVisible = false
+
         suppressEditorHistory = true
         try {
             editText.setText(newText)
@@ -3535,33 +3562,33 @@ setOnTouchListener(object : View.OnTouchListener {
             suppressEditorHistory = false
         }
 
-        fun restoreExactViewport() {
-            try {
-                // Selection আগে restore করলে Android cursor visibility-এর জন্য
-                // auto-scroll করতে পারে; তাই scroll position শেষে restore করছি।
-                editText.setSelection(safeStart, safeEnd)
-                editText.scrollTo(
-                    editTextScrollX.coerceAtLeast(0),
-                    editTextScrollY.coerceAtLeast(0)
-                )
-                scrollView.scrollTo(
-                    scrollX.coerceAtLeast(0),
-                    scrollY.coerceAtLeast(0)
-                )
-            } catch (_: Exception) {
-                // Editor may already be detached while the note is closing.
-            }
-        }
+        // Focus ছাড়াই selection + viewport restore।
+        restoreViewport()
 
-        // Immediate restore + post/layout restores prevent the visible jump
-        // caused by EditText's internal cursor-reveal behaviour.
-        restoreExactViewport()
+        // Layout সম্পূর্ণ হওয়ার পর আবার exact viewport restore।
         editText.post {
-            restoreExactViewport()
+            restoreViewport()
             scrollView.post {
-                restoreExactViewport()
+                restoreViewport()
                 editText.postOnAnimation {
-                    restoreExactViewport()
+                    restoreViewport()
+
+                    // আগের অবস্থায় focus থাকলে focus ফিরিয়ে দিই।
+                    if (wasFocused) {
+                        editText.isFocusable = true
+                        editText.isFocusableInTouchMode = true
+                        editText.requestFocus()
+                    }
+                    editText.isCursorVisible = wasCursorVisible
+
+                    // requestFocus() নিজে থেকে আবার scroll করলেও সেটি যেন
+                    // দৃশ্যমান না হয়—আরও একবার saved viewport বসিয়ে দিই।
+                    editText.post {
+                        restoreViewport()
+                        scrollView.post {
+                            restoreViewport()
+                        }
+                    }
                 }
             }
         }
