@@ -3319,7 +3319,7 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     // ✅ Resize icon আরও 5px নিচে নামবে
-    translationY = dpToPx(5).toFloat()
+    translationY = dpToPx(4).toFloat()
 
     setOnTouchListener(ResizeTouchListener())
     bringToFront()
@@ -3453,22 +3453,116 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun undoEditorChange() {
-        if (!::editText.isInitialized || editorUndoStack.isEmpty() || isEditorLocked) return
+    if (!::editText.isInitialized || editorUndoStack.isEmpty() || isEditorLocked) return
 
-        val current = editText.text.toString()
-        val previous = editorUndoStack.removeLast()
-        editorRedoStack.addLast(current)
+    // ============================================================
+    // ✅ Undo করার আগের exact viewport + cursor/selection সংরক্ষণ
+    // ============================================================
+    val oldSelectionStart = editText.selectionStart.coerceAtLeast(0)
+    val oldSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
 
-        suppressEditorHistory = true
-        editText.setText(previous)
-        editText.setSelection(previous.length.coerceIn(0, editText.length()))
-        suppressEditorHistory = false
-        lastEditorText = previous
-
-        editText.requestFocus()
-        editText.invalidate()
-        updateHandlePositionsSafe()
+    val oldScrollY = if (::scrollView.isInitialized) {
+        scrollView.scrollY.coerceAtLeast(0)
+    } else {
+        0
     }
+
+    val oldScrollX = if (::scrollView.isInitialized) {
+        scrollView.scrollX.coerceAtLeast(0)
+    } else {
+        0
+    }
+
+    val oldEditTextScrollY = editText.scrollY.coerceAtLeast(0)
+    val oldEditTextScrollX = editText.scrollX.coerceAtLeast(0)
+
+    // ============================================================
+    // ✅ Undo history
+    // ============================================================
+    val current = editText.text.toString()
+    val previous = editorUndoStack.removeLast()
+
+    editorRedoStack.addLast(current)
+
+    suppressEditorHistory = true
+
+    // Text পরিবর্তন
+    editText.setText(previous)
+
+    // ============================================================
+    // ✅ Cursor/selection যতটা সম্ভব আগের অবস্থানেই রাখা
+    // ============================================================
+    val newLength = editText.length()
+
+    val restoredStart = oldSelectionStart.coerceIn(0, newLength)
+    val restoredEnd = oldSelectionEnd.coerceIn(0, newLength)
+
+    editText.setSelection(
+        restoredStart,
+        restoredEnd
+    )
+
+    suppressEditorHistory = false
+    lastEditorText = previous
+
+    // ============================================================
+    // ❗ requestFocus() এখানে ব্যবহার করা হচ্ছে না
+    //
+    // কারণ requestFocus() + setSelection() Android-কে cursor
+    // visible করার জন্য ScrollView-এর নিচে নিয়ে যেতে পারে।
+    // ============================================================
+
+    editText.invalidate()
+
+    // ============================================================
+    // ✅ Undo-এর পরে আগের viewport ফিরিয়ে আনা
+    // ============================================================
+    editText.post {
+
+        try {
+
+            // EditText-এর নিজের scroll position
+            editText.scrollTo(
+                oldEditTextScrollX,
+                oldEditTextScrollY
+            )
+
+            // Outer ScrollView-এর scroll position
+            if (::scrollView.isInitialized) {
+                scrollView.scrollTo(
+                    oldScrollX,
+                    oldScrollY
+                )
+            }
+
+            // দ্বিতীয় layout pass-এর পরেও viewport ধরে রাখা
+            editText.post {
+
+                try {
+
+                    editText.scrollTo(
+                        oldEditTextScrollX,
+                        oldEditTextScrollY
+                    )
+
+                    if (::scrollView.isInitialized) {
+                        scrollView.scrollTo(
+                            oldScrollX,
+                            oldScrollY
+                        )
+                    }
+
+                    // Selection handles-এর অবস্থান আপডেট
+                    updateHandlePositionsSafe()
+
+                } catch (_: Exception) {
+                }
+            }
+
+        } catch (_: Exception) {
+        }
+    }
+}
 
     private fun redoEditorChange() {
         if (!::editText.isInitialized || editorRedoStack.isEmpty() || isEditorLocked) return
