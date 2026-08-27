@@ -81,12 +81,25 @@ class FloatingBubbleService : Service() {
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
 
-    // Child-note editor undo/redo state
-    private val editorUndoStack = java.util.ArrayDeque<String>()
-    private val editorRedoStack = java.util.ArrayDeque<String>()
+    // Child-note editor undo/redo state.
+    // Each snapshot keeps text + cursor/selection + viewport, so Undo/Redo
+    // changes the document without moving the visible editor to the bottom.
+    private data class EditorHistoryState(
+        val text: String,
+        val selectionStart: Int,
+        val selectionEnd: Int,
+        val scrollY: Int,
+        val scrollX: Int,
+        val editTextScrollY: Int,
+        val editTextScrollX: Int
+    )
+
+    private val editorUndoStack = java.util.ArrayDeque<EditorHistoryState>()
+    private val editorRedoStack = java.util.ArrayDeque<EditorHistoryState>()
     private var suppressEditorHistory = false
     private var isEditorLocked = false
     private var lastEditorText = ""
+    private var historyInitializedForCurrentEditor = false
 
     // Child-note state that must survive minimize -> bubble -> expand.
     private var currentEditingNoteId: Long? = null
@@ -1851,183 +1864,109 @@ setupBubbleTouchListener(params)
     return (dp.toFloat() * resources.displayMetrics.density).toInt()
 }
     
-    
-private fun updateHandlePositions() {
-    if (isScrolling) return
+    private fun updateHandlePositions() {
+        if (isScrolling) return
 
-    try {
-        val currentLayout = editText.layout ?: return
+        try {
+            val currentLayout = editText.layout ?: return
+            if (leftHandleView == null || rightHandleView == null) {
+                recreateHandlesIfNeeded()
+                return
+            }
 
-        if (leftHandleView == null || rightHandleView == null) {
-            recreateHandlesIfNeeded()
-            return
-        }
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
 
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
+            if (start == end || start < 0 || end < 0 ||
+                start > editText.text.length || end > editText.text.length) {
+                return
+            }
 
-        if (
-            start == end ||
-            start < 0 ||
-            end < 0 ||
-            start > editText.text.length ||
-            end > editText.text.length
-        ) {
-            return
-        }
+            val editLocation = IntArray(2)
+            editText.getLocationOnScreen(editLocation)
 
-        val editLocation = IntArray(2)
-        editText.getLocationOnScreen(editLocation)
+            val containerLocation = IntArray(2)
+            handleContainer?.getLocationOnScreen(containerLocation) ?: return
 
-        val containerLocation = IntArray(2)
-        handleContainer?.getLocationOnScreen(containerLocation) ?: return
+            val relativeX = editLocation[0] - containerLocation[0]
+            val relativeY = editLocation[1] - containerLocation[1]
 
+            val startLine = currentLayout.getLineForOffset(start)
+            val endLine = currentLayout.getLineForOffset(end)
 
+            val startX = currentLayout.getPrimaryHorizontal(start) + relativeX
+            val endX = currentLayout.getPrimaryHorizontal(end) + relativeX
 
-        val editorLocation = IntArray(2)
-        scrollView.getLocationOnScreen(editorLocation)
+            val startY = currentLayout.getLineBottom(startLine) + relativeY
+            val endY = currentLayout.getLineBottom(endLine) + relativeY
 
-        val editorTop = editorLocation[1]
-        val editorBottom = editorTop + scrollView.height
+            val halfHandle = HANDLE_SIZE / 2
 
-        val relativeX =
-            editLocation[0] - containerLocation[0]
+            // Selection handles are allowed only inside the actual editor
+            // viewport. Once a handle reaches the title bar, it disappears.
+            val editorLocation = IntArray(2)
+            scrollView.getLocationOnScreen(editorLocation)
+            val editorTop = editorLocation[1]
+            val editorBottom = editorTop + scrollView.height
 
-        val relativeY =
-            editLocation[1] - containerLocation[1]
+            val leftScreenTop =
+                editLocation[1] + currentLayout.getLineBottom(startLine) -
+                    halfHandle - editText.scrollY
+            val rightScreenTop =
+                editLocation[1] + currentLayout.getLineBottom(endLine) -
+                    halfHandle - editText.scrollY
 
-        val startLine =
-            currentLayout.getLineForOffset(start)
+            val leftScreenBottom = leftScreenTop + HANDLE_SIZE
+            val rightScreenBottom = rightScreenTop + HANDLE_SIZE
 
-        val endLine =
-            currentLayout.getLineForOffset(end)
+            val leftInsideEditor =
+                leftScreenTop >= editorTop && leftScreenBottom <= editorBottom
+            val rightInsideEditor =
+                rightScreenTop >= editorTop && rightScreenBottom <= editorBottom
 
-        val startX =
-            currentLayout.getPrimaryHorizontal(start) + relativeX
+            leftHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    params.leftMargin = (startX - halfHandle).toInt()
+                    params.topMargin = (startY - halfHandle).toInt()
+                    handle.layoutParams = params
 
-        val endX =
-            currentLayout.getPrimaryHorizontal(end) + relativeX
-
-        val startY =
-            currentLayout.getLineBottom(startLine) + relativeY
-
-        val endY =
-            currentLayout.getLineBottom(endLine) + relativeY
-
-        val halfHandle = HANDLE_SIZE / 2
-
-
-        val leftHandleScreenTop =
-            editLocation[1] +
-                currentLayout.getLineBottom(startLine) -
-                halfHandle -
-                editText.scrollY
-
-        val rightHandleScreenTop =
-            editLocation[1] +
-                currentLayout.getLineBottom(endLine) -
-                halfHandle -
-                editText.scrollY
-
-        val leftHandleScreenBottom =
-            leftHandleScreenTop + HANDLE_SIZE
-
-        val rightHandleScreenBottom =
-            rightHandleScreenTop + HANDLE_SIZE
-
-
-
-        val leftInsideEditor =
-            leftHandleScreenTop >= editorTop &&
-            leftHandleScreenBottom <= editorBottom
-
-        val rightInsideEditor =
-            rightHandleScreenTop >= editorTop &&
-            rightHandleScreenBottom <= editorBottom
-
-
-        leftHandleView?.let { handle ->
-
-            val params =
-                handle.layoutParams as? FrameLayout.LayoutParams
-
-            if (params != null) {
-
-                params.leftMargin =
-                    (startX - halfHandle).toInt()
-
-                params.topMargin =
-                    (startY - halfHandle).toInt()
-
-                handle.layoutParams = params
-
-                if (leftInsideEditor) {
-
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-
-                } else {
-
-                    /*
-                     * Title bar / Top bar-এর মধ্যে চলে গেলে
-                     * সম্পূর্ণ hide।
-                     */
-                    handle.animate().cancel()
-                    handle.alpha = 0f
-                    handle.visibility = View.GONE
+                    if (leftInsideEditor) {
+                        handle.animate().cancel()
+                        handle.visibility = View.VISIBLE
+                        handle.alpha = 1f
+                    } else {
+                        handle.animate().cancel()
+                        handle.alpha = 0f
+                        handle.visibility = View.GONE
+                    }
                 }
             }
-        }
 
-        /*
-         * RIGHT HANDLE
-         */
-        rightHandleView?.let { handle ->
+            rightHandleView?.let { handle ->
+                val params = handle.layoutParams as? FrameLayout.LayoutParams
+                if (params != null) {
+                    val gap = 14
+                    params.leftMargin = (endX + gap).toInt()
+                    params.topMargin = (endY - halfHandle).toInt()
+                    handle.layoutParams = params
 
-            val params =
-                handle.layoutParams as? FrameLayout.LayoutParams
-
-            if (params != null) {
-
-                val gap = 14
-
-                params.leftMargin =
-                    (endX + gap).toInt()
-
-                params.topMargin =
-                    (endY - halfHandle).toInt()
-
-                handle.layoutParams = params
-
-                if (rightInsideEditor) {
-
-                    handle.visibility = View.VISIBLE
-                    handle.alpha = 1f
-
-                } else {
-
-                    /*
-                     * Title bar / Top bar-এর মধ্যে চলে গেলে
-                     * সম্পূর্ণ hide।
-                     */
-                    handle.animate().cancel()
-                    handle.alpha = 0f
-                    handle.visibility = View.GONE
+                    if (rightInsideEditor) {
+                        handle.animate().cancel()
+                        handle.visibility = View.VISIBLE
+                        handle.alpha = 1f
+                    } else {
+                        handle.animate().cancel()
+                        handle.alpha = 0f
+                        handle.visibility = View.GONE
+                    }
                 }
             }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "updateHandlePositions")
         }
-
-    } catch (e: Exception) {
-
-        EmergencyLog.logException(
-            e,
-            "updateHandlePositions"
-        )
     }
-}
 
-
-    
     private fun recreateHandlesIfNeeded() {
         if (leftHandleView == null || rightHandleView == null) {
             val handles = createSelectionHandles()
@@ -2093,12 +2032,10 @@ private fun updateHandlePositions() {
                 EmergencyLog.log("Handles created and added to container")
             }
             
+            // updateHandlePositions() itself decides whether each handle is
+            // inside the editor viewport. Do not force VISIBLE here, otherwise
+            // a handle near the title bar would reappear.
             updateHandlePositionsImmediate()
-            
-            leftHandleView?.visibility = View.VISIBLE
-            leftHandleView?.alpha = 1f
-            rightHandleView?.visibility = View.VISIBLE
-            rightHandleView?.alpha = 1f
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "showSelectionHandles")
@@ -3004,6 +2941,7 @@ params.y =
         suppressEditorHistory = false
         isEditorLocked = false
         lastEditorText = note.content
+        historyInitializedForCurrentEditor = true
 
         editText = EditText(this).apply {
             setText(note.content)
@@ -3091,22 +3029,34 @@ params.y =
                 }
             })
 
-            // Real editor history: every user text change stores the exact previous
-            // document state. Undo/Redo themselves set suppressEditorHistory so
-            // they do not create recursive history entries.
+            // ============================================================
+            // ROBUST EDITOR HISTORY
+            // ============================================================
+            // Every real user edit stores the COMPLETE state that existed
+            // immediately before that edit. Undo/Redo themselves use
+            // suppressEditorHistory, so they never create recursive entries.
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(
                     s: CharSequence?, start: Int, count: Int, after: Int
                 ) {
-                    if (!suppressEditorHistory) {
-                        editorUndoStack.addLast(s?.toString() ?: "")
-                        // Keep history bounded so long editing sessions do not grow
-                        // memory without limit.
-                        while (editorUndoStack.size > 100) {
-                            editorUndoStack.removeFirst()
-                        }
-                        editorRedoStack.clear()
+                    if (suppressEditorHistory) return
+
+                    val snapshot = captureEditorHistoryState(
+                        textOverride = s?.toString() ?: ""
+                    )
+
+                    // Do not add duplicate consecutive snapshots.
+                    if (editorUndoStack.isEmpty() || editorUndoStack.peekLast() != snapshot) {
+                        editorUndoStack.addLast(snapshot)
                     }
+
+                    while (editorUndoStack.size > 100) {
+                        editorUndoStack.removeFirst()
+                    }
+
+                    // Any new user edit after an Undo starts a new branch.
+                    editorRedoStack.clear()
+                    historyInitializedForCurrentEditor = true
                 }
 
                 override fun onTextChanged(
@@ -3564,209 +3514,117 @@ setOnTouchListener(object : View.OnTouchListener {
             ?: ""
     }
 
-    private fun undoEditorChange() {
-    if (!::editText.isInitialized || editorUndoStack.isEmpty() || isEditorLocked) return
+    private fun captureEditorHistoryState(
+        textOverride: String? = null
+    ): EditorHistoryState {
+        val text = textOverride ?: if (::editText.isInitialized) editText.text.toString() else ""
+        val selectionStart = if (::editText.isInitialized) editText.selectionStart.coerceAtLeast(0) else 0
+        val selectionEnd = if (::editText.isInitialized) editText.selectionEnd.coerceAtLeast(0) else 0
+        val outerY = if (::scrollView.isInitialized) scrollView.scrollY.coerceAtLeast(0) else 0
+        val outerX = if (::scrollView.isInitialized) scrollView.scrollX.coerceAtLeast(0) else 0
+        val innerY = if (::editText.isInitialized) editText.scrollY.coerceAtLeast(0) else 0
+        val innerX = if (::editText.isInitialized) editText.scrollX.coerceAtLeast(0) else 0
 
-    // ============================================================
-    // ✅ Undo করার আগের exact viewport + cursor/selection সংরক্ষণ
-    // ============================================================
-    val oldSelectionStart = editText.selectionStart.coerceAtLeast(0)
-    val oldSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
-
-    val oldScrollY = if (::scrollView.isInitialized) {
-        scrollView.scrollY.coerceAtLeast(0)
-    } else {
-        0
+        return EditorHistoryState(
+            text = text,
+            selectionStart = selectionStart,
+            selectionEnd = selectionEnd,
+            scrollY = outerY,
+            scrollX = outerX,
+            editTextScrollY = innerY,
+            editTextScrollX = innerX
+        )
     }
 
-    val oldScrollX = if (::scrollView.isInitialized) {
-        scrollView.scrollX.coerceAtLeast(0)
-    } else {
-        0
-    }
+    private fun restoreEditorHistoryState(state: EditorHistoryState) {
+        if (!::editText.isInitialized) return
 
-    val oldEditTextScrollY = editText.scrollY.coerceAtLeast(0)
-    val oldEditTextScrollX = editText.scrollX.coerceAtLeast(0)
+        val safeStart = state.selectionStart.coerceIn(0, state.text.length)
+        val safeEnd = state.selectionEnd.coerceIn(0, state.text.length)
 
-    // ============================================================
-    // ✅ Undo history
-    // ============================================================
-    val current = editText.text.toString()
-    val previous = editorUndoStack.removeLast()
-
-    editorRedoStack.addLast(current)
-
-    suppressEditorHistory = true
-
-    // Text পরিবর্তন
-    editText.setText(previous)
-
-    // ============================================================
-    // ✅ Cursor/selection যতটা সম্ভব আগের অবস্থানেই রাখা
-    // ============================================================
-    val newLength = editText.length()
-
-    val restoredStart = oldSelectionStart.coerceIn(0, newLength)
-    val restoredEnd = oldSelectionEnd.coerceIn(0, newLength)
-
-    editText.setSelection(
-        restoredStart,
-        restoredEnd
-    )
-
-    suppressEditorHistory = false
-    lastEditorText = previous
-
-
-
-    editText.invalidate()
-
-
-    editText.post {
-
+        suppressEditorHistory = true
         try {
+            editText.setText(state.text)
+            editText.setSelection(safeStart, safeEnd)
+            lastEditorText = state.text
+        } finally {
+            suppressEditorHistory = false
+        }
 
-            // EditText-এর নিজের scroll position
-            editText.scrollTo(
-                oldEditTextScrollX,
-                oldEditTextScrollY
-            )
-
-            // Outer ScrollView-এর scroll position
-            if (::scrollView.isInitialized) {
-                scrollView.scrollTo(
-                    oldScrollX,
-                    oldScrollY
+        fun restoreViewport() {
+            try {
+                editText.scrollTo(
+                    state.editTextScrollX.coerceAtLeast(0),
+                    state.editTextScrollY.coerceAtLeast(0)
                 )
-            }
-
-            // দ্বিতীয় layout pass-এর পরেও viewport ধরে রাখা
-            editText.post {
-
-                try {
-
-                    editText.scrollTo(
-                        oldEditTextScrollX,
-                        oldEditTextScrollY
+                if (::scrollView.isInitialized) {
+                    scrollView.scrollTo(
+                        state.scrollX.coerceAtLeast(0),
+                        state.scrollY.coerceAtLeast(0)
                     )
+                }
+            } catch (_: Exception) { }
+        }
 
-                    if (::scrollView.isInitialized) {
-                        scrollView.scrollTo(
-                            oldScrollX,
-                            oldScrollY
-                        )
+        // setText()/setSelection() may cause Android to reveal the cursor.
+        // Re-apply the saved viewport over several layout passes so Undo/Redo
+        // never jumps to the bottom or to the cursor.
+        restoreViewport()
+        editText.post {
+            restoreViewport()
+            scrollView.post {
+                restoreViewport()
+                editText.postOnAnimation {
+                    restoreViewport()
+                    if (editText.hasSelection() && !isScrolling) {
+                        updateHandlePositionsSafe()
                     }
-
-                    // Selection handles-এর অবস্থান আপডেট
-                    updateHandlePositionsSafe()
-
-                } catch (_: Exception) {
                 }
             }
-
-        } catch (_: Exception) {
         }
     }
-}
+
+    private fun undoEditorChange() {
+        if (!::editText.isInitialized || editorUndoStack.isEmpty() || isEditorLocked) return
+
+        try {
+            // Current state becomes the Redo target.
+            val current = captureEditorHistoryState()
+            val previous = editorUndoStack.removeLast()
+            editorRedoStack.addLast(current)
+
+            while (editorRedoStack.size > 100) {
+                editorRedoStack.removeFirst()
+            }
+
+            restoreEditorHistoryState(previous)
+
+            if (previous.text.isEmpty()) {
+                titleInput.setText("")
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "undoEditorChange")
+        }
+    }
 
     private fun redoEditorChange() {
-    if (!::editText.isInitialized || editorRedoStack.isEmpty() || isEditorLocked) return
-
-    // ============================================================
-    // ✅ Redo করার আগের viewport + cursor/selection সংরক্ষণ
-    // ============================================================
-    val oldSelectionStart = editText.selectionStart.coerceAtLeast(0)
-    val oldSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
-
-    val oldScrollY = if (::scrollView.isInitialized) {
-        scrollView.scrollY.coerceAtLeast(0)
-    } else {
-        0
-    }
-
-    val oldScrollX = if (::scrollView.isInitialized) {
-        scrollView.scrollX.coerceAtLeast(0)
-    } else {
-        0
-    }
-
-    val oldEditTextScrollY = editText.scrollY.coerceAtLeast(0)
-    val oldEditTextScrollX = editText.scrollX.coerceAtLeast(0)
-
-    // ============================================================
-    // ✅ Redo history
-    // ============================================================
-    val current = editText.text.toString()
-    val next = editorRedoStack.removeLast()
-
-    editorUndoStack.addLast(current)
-
-    suppressEditorHistory = true
-
-    editText.setText(next)
-
-    val newLength = editText.length()
-
-    val restoredStart = oldSelectionStart.coerceIn(0, newLength)
-    val restoredEnd = oldSelectionEnd.coerceIn(0, newLength)
-
-    editText.setSelection(
-        restoredStart,
-        restoredEnd
-    )
-
-    suppressEditorHistory = false
-    lastEditorText = next
-
-    // ❗ requestFocus() ইচ্ছাকৃতভাবে বাদ
-
-    editText.invalidate()
-
-    // ============================================================
-    // ✅ আগের viewport পুনরুদ্ধার
-    // ============================================================
-    editText.post {
+        if (!::editText.isInitialized || editorRedoStack.isEmpty() || isEditorLocked) return
 
         try {
+            // Current state becomes the Undo target.
+            val current = captureEditorHistoryState()
+            val next = editorRedoStack.removeLast()
+            editorUndoStack.addLast(current)
 
-            editText.scrollTo(
-                oldEditTextScrollX,
-                oldEditTextScrollY
-            )
-
-            if (::scrollView.isInitialized) {
-                scrollView.scrollTo(
-                    oldScrollX,
-                    oldScrollY
-                )
+            while (editorUndoStack.size > 100) {
+                editorUndoStack.removeFirst()
             }
 
-            editText.post {
-
-                try {
-
-                    editText.scrollTo(
-                        oldEditTextScrollX,
-                        oldEditTextScrollY
-                    )
-
-                    if (::scrollView.isInitialized) {
-                        scrollView.scrollTo(
-                            oldScrollX,
-                            oldScrollY
-                        )
-                    }
-
-                    updateHandlePositionsSafe()
-
-                } catch (_: Exception) {
-                }
-            }
-
-        } catch (_: Exception) {
+            restoreEditorHistoryState(next)
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "redoEditorChange")
         }
     }
-}
 
     private fun pasteIntoEditor() {
         if (!::editText.isInitialized || isEditorLocked) return
