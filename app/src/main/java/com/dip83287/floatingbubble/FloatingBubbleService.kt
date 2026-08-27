@@ -3505,18 +3505,11 @@ setOnTouchListener(object : View.OnTouchListener {
     suppressEditorHistory = false
     lastEditorText = previous
 
-    // ============================================================
-    // ❗ requestFocus() এখানে ব্যবহার করা হচ্ছে না
-    //
-    // কারণ requestFocus() + setSelection() Android-কে cursor
-    // visible করার জন্য ScrollView-এর নিচে নিয়ে যেতে পারে।
-    // ============================================================
+
 
     editText.invalidate()
 
-    // ============================================================
-    // ✅ Undo-এর পরে আগের viewport ফিরিয়ে আনা
-    // ============================================================
+
     editText.post {
 
         try {
@@ -3565,22 +3558,103 @@ setOnTouchListener(object : View.OnTouchListener {
 }
 
     private fun redoEditorChange() {
-        if (!::editText.isInitialized || editorRedoStack.isEmpty() || isEditorLocked) return
+    if (!::editText.isInitialized || editorRedoStack.isEmpty() || isEditorLocked) return
 
-        val current = editText.text.toString()
-        val next = editorRedoStack.removeLast()
-        editorUndoStack.addLast(current)
+    // ============================================================
+    // ✅ Redo করার আগের viewport + cursor/selection সংরক্ষণ
+    // ============================================================
+    val oldSelectionStart = editText.selectionStart.coerceAtLeast(0)
+    val oldSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
 
-        suppressEditorHistory = true
-        editText.setText(next)
-        editText.setSelection(next.length.coerceIn(0, editText.length()))
-        suppressEditorHistory = false
-        lastEditorText = next
-
-        editText.requestFocus()
-        editText.invalidate()
-        updateHandlePositionsSafe()
+    val oldScrollY = if (::scrollView.isInitialized) {
+        scrollView.scrollY.coerceAtLeast(0)
+    } else {
+        0
     }
+
+    val oldScrollX = if (::scrollView.isInitialized) {
+        scrollView.scrollX.coerceAtLeast(0)
+    } else {
+        0
+    }
+
+    val oldEditTextScrollY = editText.scrollY.coerceAtLeast(0)
+    val oldEditTextScrollX = editText.scrollX.coerceAtLeast(0)
+
+    // ============================================================
+    // ✅ Redo history
+    // ============================================================
+    val current = editText.text.toString()
+    val next = editorRedoStack.removeLast()
+
+    editorUndoStack.addLast(current)
+
+    suppressEditorHistory = true
+
+    editText.setText(next)
+
+    val newLength = editText.length()
+
+    val restoredStart = oldSelectionStart.coerceIn(0, newLength)
+    val restoredEnd = oldSelectionEnd.coerceIn(0, newLength)
+
+    editText.setSelection(
+        restoredStart,
+        restoredEnd
+    )
+
+    suppressEditorHistory = false
+    lastEditorText = next
+
+    // ❗ requestFocus() ইচ্ছাকৃতভাবে বাদ
+
+    editText.invalidate()
+
+    // ============================================================
+    // ✅ আগের viewport পুনরুদ্ধার
+    // ============================================================
+    editText.post {
+
+        try {
+
+            editText.scrollTo(
+                oldEditTextScrollX,
+                oldEditTextScrollY
+            )
+
+            if (::scrollView.isInitialized) {
+                scrollView.scrollTo(
+                    oldScrollX,
+                    oldScrollY
+                )
+            }
+
+            editText.post {
+
+                try {
+
+                    editText.scrollTo(
+                        oldEditTextScrollX,
+                        oldEditTextScrollY
+                    )
+
+                    if (::scrollView.isInitialized) {
+                        scrollView.scrollTo(
+                            oldScrollX,
+                            oldScrollY
+                        )
+                    }
+
+                    updateHandlePositionsSafe()
+
+                } catch (_: Exception) {
+                }
+            }
+
+        } catch (_: Exception) {
+        }
+    }
+}
 
     private fun pasteIntoEditor() {
         if (!::editText.isInitialized || isEditorLocked) return
