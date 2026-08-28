@@ -2435,13 +2435,25 @@ params.y =
     }
 
     private fun createFullNotePad(): View {
+        // ============================================================
+        // MAIN NOTE LIST PAGE
+        // Same top-bar/button sizing logic as the child note editor.
+        // ============================================================
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            setBackgroundColor(Color.parseColor(NOTEPAD_BG_COLOR))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = 16f
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(Color.parseColor(NOTEPAD_BG_COLOR))
+                cornerRadius = dpToPx(5).toFloat()
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                clipToOutline = true
+                elevation = dpToPx(14).toFloat()
+                translationZ = dpToPx(2).toFloat()
+            }
         }
 
         val contentContainer = LinearLayout(this).apply {
@@ -2449,55 +2461,89 @@ params.y =
             setPadding(0, 0, 0, 0)
         }
 
+        // ------------------------------------------------------------
+        // Top Bar: Settings | Floating Notes | + | Minimize | Close
+        // Height is exactly the same as the child note top bar.
+        // ------------------------------------------------------------
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                dpToPx(35)
             )
-            setOnTouchListener(TitleBarDragListener())
-            setPadding(8, 12, 8, 12)
+            setPadding(dpToPx(3), 0, dpToPx(3), 0)
             setBackgroundColor(Color.parseColor("#F9E79F"))
+            setOnTouchListener(TitleBarDragListener())
         }
 
-        val dragHandle = TextView(this).apply {
-            text = "⋯"
-            textSize = 24f
-            setTextColor(Color.parseColor("#333333"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        val settingsBtn = createTopBarIconButton(
+            createTopBarSettingsDrawable(),
+            Color.rgb(255, 220, 80)
+        ) {
+            // Settings screen is not part of the current service yet.
+            // The button is kept ready without changing existing behavior.
         }
-        topBar.addView(dragHandle)
+
+        val newNoteBtn = createTopBarIconButton(
+            createTopBarPlusDrawable(),
+            Color.rgb(255, 220, 80)
+        ) {
+            createNewNote()
+        }
+        val minimizeBtn = createTopBarIconButton(
+            createTopBarMinimizeDrawable(),
+            Color.rgb(255, 220, 80)
+        ) {
+            collapseToBubble()
+        }
+        val closeBtn = createTopBarIconButton(
+            createTopBarCloseDrawable(),
+            Color.rgb(255, 220, 80)
+        ) {
+            // Close the complete floating-notes UI, including its docked bubble.
+            stopSelf()
+        }
+
+        // Left and right control groups have identical widths so the title is
+        // mathematically centered on the complete top bar.
+        val leftControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            layoutParams = LinearLayout.LayoutParams(dpToPx(84), dpToPx(35))
+        }
+        leftControls.addView(settingsBtn)
+        topBar.addView(leftControls)
 
         val titleText = TextView(this).apply {
             text = NOTEPAD_TITLE
-            textSize = 16f
+            textSize = 15f
             setTextColor(Color.parseColor("#333333"))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
+            includeFontPadding = false
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                1f
+            )
         }
         topBar.addView(titleText)
 
-        val minimizeBtn = TextView(this).apply {
-            text = "−"
-            textSize = 28f
-            setTextColor(Color.parseColor("#C0392B"))
-            setPadding(16, 0, 8, 0)
-            setOnClickListener {
-                collapseToBubble()
-            }
+        val rightControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            layoutParams = LinearLayout.LayoutParams(dpToPx(84), dpToPx(35))
         }
-        topBar.addView(minimizeBtn)
+        rightControls.addView(newNoteBtn)
+        rightControls.addView(minimizeBtn)
+        rightControls.addView(closeBtn)
+        topBar.addView(rightControls)
         contentContainer.addView(topBar)
 
-        val noteCountText = TextView(this).apply {
-            text = "Note List (${notesList.size})"
-            textSize = 14f
-            setTextColor(Color.parseColor("#666666"))
-            setPadding(12, 16, 12, 8)
-        }
-        contentContainer.addView(noteCountText)
-
+        // ------------------------------------------------------------
+        // Note list: no separate "Note List" bar and no "New Note" bar.
+        // ------------------------------------------------------------
         recyclerView = RecyclerView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -2505,13 +2551,28 @@ params.y =
                 1f
             )
             layoutManager = LinearLayoutManager(this@FloatingBubbleService)
-            setPadding(8, 8, 8, 8)
+            setPadding(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6))
+            clipToPadding = false
             setHasFixedSize(true)
             itemAnimator = null
             setItemViewCacheSize(20)
+            addItemDecoration(object : RecyclerView.ItemDecoration() {
+                override fun getItemOffsets(
+                    outRect: Rect,
+                    view: View,
+                    parent: RecyclerView,
+                    state: RecyclerView.State
+                ) {
+                    val position = parent.getChildAdapterPosition(view)
+                    if (position > 0) {
+                        outRect.top = dpToPx(6)
+                    }
+                }
+            })
         }
 
-        notesAdapter = NoteAdapter(notesList,
+        notesAdapter = NoteAdapter(
+            notesList,
             onItemClick = { note ->
                 openEditorForNote(note)
             },
@@ -2520,43 +2581,43 @@ params.y =
                 saveNotesToPrefs()
                 notesAdapter.updateList(notesList)
                 updateBubbleCount()
-                Toast.makeText(this@FloatingBubbleService, "Note deleted", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@FloatingBubbleService,
+                    "Note deleted",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         )
         recyclerView.adapter = notesAdapter
         contentContainer.addView(recyclerView)
 
-        val addButton = Button(this).apply {
-            text = "+ New Note"
-            setBackgroundColor(Color.parseColor("#F9E79F"))
-            setTextColor(Color.parseColor("#333333"))
-            setAllCaps(false)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 8
-                bottomMargin = 8
-            }
-            setOnClickListener {
-                createNewNote()
-            }
-        }
-        contentContainer.addView(addButton)
+        container.addView(contentContainer)
 
+        // Same resize-handle style, size and zero-corner positioning as the
+        // child note editor.
         val resizeHandleView = TextView(this).apply {
             text = "◢"
             textSize = 18f
-            setTextColor(Color.parseColor("#999999"))
+            setTextColor(Color.parseColor("#F28B82"))
             gravity = Gravity.END or Gravity.BOTTOM
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 32)
-            lp.topMargin = 4
-            layoutParams = lp
-            setOnTouchListener(ResizeTouchListener())
-        }
-        contentContainer.addView(resizeHandleView)
+            includeFontPadding = false
+            setPadding(0, 0, 0, 0)
+            background = null
 
-        container.addView(contentContainer)
+            layoutParams = FrameLayout.LayoutParams(
+                dpToPx(18),
+                dpToPx(18),
+                Gravity.END or Gravity.BOTTOM
+            ).apply {
+                rightMargin = 0
+                bottomMargin = 0
+            }
+
+            translationY = dpToPx(4).toFloat()
+            setOnTouchListener(ResizeTouchListener())
+            bringToFront()
+        }
+        container.addView(resizeHandleView)
 
         handleContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -2571,6 +2632,40 @@ params.y =
 
         return container
     }
+
+    private fun createTopBarSettingsDrawable(): Drawable =
+        createStrokePathDrawable { canvas, w, h, paint ->
+            val cx = w * 0.50f
+            val cy = h * 0.50f
+            val outerR = w * 0.29f
+            val innerR = w * 0.11f
+
+            canvas.drawCircle(cx, cy, outerR, paint)
+            canvas.drawCircle(cx, cy, innerR, paint)
+
+            // Six short gear teeth.
+            for (i in 0 until 6) {
+                canvas.save()
+                canvas.rotate(i * 60f, cx, cy)
+                canvas.drawLine(
+                    cx,
+                    cy - outerR,
+                    cx,
+                    cy - w * 0.39f,
+                    paint
+                )
+                canvas.restore()
+            }
+        }
+
+    private fun createTopBarPlusDrawable(): Drawable =
+        createStrokePathDrawable { canvas, w, h, paint ->
+            val cx = w * 0.50f
+            val cy = h * 0.50f
+            val half = w * 0.27f
+            canvas.drawLine(cx - half, cy, cx + half, cy, paint)
+            canvas.drawLine(cx, cy - half, cx, cy + half, paint)
+        }
 
     private fun createNewNote() {
         val newNote = NoteItem(
@@ -3946,9 +4041,64 @@ setOnTouchListener(object : View.OnTouchListener {
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val view = LayoutInflater.from(parent.context)
-                .inflate(android.R.layout.simple_list_item_2, parent, false)
-            return ViewHolder(view)
+            val card = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dpToPx(120)
+                )
+                setPadding(
+                    dpToPx(12),
+                    dpToPx(8),
+                    dpToPx(12),
+                    dpToPx(8)
+                )
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setColor(Color.parseColor("#FFFDF0"))
+                    setStroke(dpToPx(1), Color.parseColor("#555555"))
+                    cornerRadius = dpToPx(5).toFloat()
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    elevation = dpToPx(3).toFloat()
+                }
+                isClickable = true
+                isFocusable = true
+            }
+
+            val titleView = TextView(parent.context).apply {
+                textSize = 14f
+                setTextColor(Color.parseColor("#333333"))
+                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                includeFontPadding = false
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dpToPx(28)
+                )
+            }
+
+            val contentView = TextView(parent.context).apply {
+                textSize = 12f
+                setTextColor(Color.parseColor("#666666"))
+                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+                includeFontPadding = false
+                maxLines = 3
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.TOP
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
+                )
+            }
+
+            card.addView(titleView)
+            card.addView(contentView)
+            return ViewHolder(card, titleView, contentView)
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
@@ -3957,13 +4107,22 @@ setOnTouchListener(object : View.OnTouchListener {
 
         override fun getItemCount(): Int = notes.size
 
-        inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            private val titleView = itemView.findViewById<TextView>(android.R.id.text1)
-            private val contentView = itemView.findViewById<TextView>(android.R.id.text2)
+        inner class ViewHolder(
+            itemView: View,
+            private val titleView: TextView,
+            private val contentView: TextView
+        ) : RecyclerView.ViewHolder(itemView) {
 
             fun bind(note: NoteItem) {
-                titleView.text = "${position + 1}. ${if (note.title.isBlank()) "Untitled Note" else note.title}"
-                val preview = if (note.content.length > 50) note.content.take(50) + "..." else note.content
+                titleView.text = "${bindingAdapterPosition + 1}. ${
+                    if (note.title.isBlank()) "Untitled Note" else note.title
+                }"
+
+                val preview = if (note.content.length > 160) {
+                    note.content.take(160) + "..."
+                } else {
+                    note.content
+                }
                 contentView.text = preview.ifEmpty { "No content" }
 
                 itemView.setOnClickListener { onItemClick(note) }
