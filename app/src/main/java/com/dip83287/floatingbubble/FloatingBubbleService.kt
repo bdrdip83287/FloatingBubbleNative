@@ -223,7 +223,9 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         val id: Long,
         var title: String,
         var content: String,
-        val lastEdited: Long = System.currentTimeMillis()
+        val lastEdited: Long = System.currentTimeMillis(),
+        val createdAt: Long = System.currentTimeMillis(),
+        var isLocked: Boolean = false
     )
 
     override fun onCreate() {
@@ -2576,17 +2578,10 @@ params.y =
             onItemClick = { note ->
                 openEditorForNote(note)
             },
-            onDeleteClick = { note ->
-                notesList.remove(note)
-                saveNotesToPrefs()
-                notesAdapter.updateList(notesList)
-                updateBubbleCount()
-                Toast.makeText(
-                    this@FloatingBubbleService,
-                    "Note deleted",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
+            onMoveUp = { note -> moveNote(note.id, -1) },
+            onMoveDown = { note -> moveNote(note.id, 1) },
+            onLockClick = { note -> toggleNoteLock(note.id) },
+            onDeleteClick = { note -> deleteNoteFromList(note.id) }
         )
         recyclerView.adapter = notesAdapter
         contentContainer.addView(recyclerView)
@@ -2667,11 +2662,107 @@ params.y =
             canvas.drawLine(cx, cy - half, cx, cy + half, paint)
         }
 
+    private fun createTopBarArrowDrawable(up: Boolean): Drawable =
+        createStrokePathDrawable { canvas, w, h, paint ->
+            val cx = w * 0.50f
+            val cy = h * 0.50f
+            val half = w * 0.22f
+            val tipY = if (up) h * 0.24f else h * 0.76f
+            val baseY = if (up) h * 0.66f else h * 0.34f
+            val path = android.graphics.Path().apply {
+                moveTo(cx, tipY)
+                lineTo(cx - half, baseY)
+                moveTo(cx, tipY)
+                lineTo(cx + half, baseY)
+                moveTo(cx, tipY)
+                lineTo(cx, if (up) h * 0.84f else h * 0.16f)
+            }
+            canvas.drawPath(path, paint)
+        }
+
+    private fun createTopBarListLockDrawable(locked: Boolean): Drawable =
+        createStrokePathDrawable { canvas, w, h, paint ->
+            val body = RectF(w * 0.25f, h * 0.42f, w * 0.75f, h * 0.82f)
+            canvas.drawRoundRect(body, w * 0.06f, w * 0.06f, paint)
+            val arc = RectF(w * 0.34f, h * 0.16f, w * 0.66f, h * 0.58f)
+            if (locked) {
+                canvas.drawArc(arc, 180f, 180f, false, paint)
+            } else {
+                canvas.drawArc(arc, 205f, 145f, false, paint)
+                canvas.drawLine(w * 0.66f, h * 0.38f, w * 0.72f, h * 0.28f, paint)
+            }
+            canvas.drawCircle(w * 0.50f, h * 0.61f, w * 0.045f, paint)
+        }
+
+    private fun formatNoteCreatedDate(note: NoteItem): String {
+        val timestamp = if (note.createdAt > 0L) note.createdAt else note.lastEdited
+        return try {
+            java.text.SimpleDateFormat(
+                "dd MMM yyyy, hh:mm a",
+                java.util.Locale.getDefault()
+            ).format(java.util.Date(timestamp))
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun moveNote(noteId: Long, direction: Int) {
+        val from = notesList.indexOfFirst { it.id == noteId }
+        if (from < 0) return
+        val to = (from + direction).coerceIn(0, notesList.lastIndex)
+        if (from == to) return
+
+        val moved = notesList.removeAt(from)
+        notesList.add(to, moved)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+        recyclerView.post {
+            recyclerView.smoothScrollToPosition(to)
+        }
+    }
+
+    private fun toggleNoteLock(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index < 0) return
+
+        val note = notesList[index]
+        notesList[index] = note.copy(isLocked = !note.isLocked)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+
+        val message = if (notesList[index].isLocked) "Note locked" else "Note unlocked"
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun deleteNoteFromList(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index < 0) return
+
+        if (currentEditingNoteId == noteId) {
+            currentEditingNoteId = null
+            restoreEditorStatePending = false
+            hideSelectionHandles()
+            hideFloatingActionBar()
+        }
+
+        notesList.removeAt(index)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+
+        Toast.makeText(this, "Note deleted", Toast.LENGTH_SHORT).show()
+    }
+
     private fun createNewNote() {
+        val now = System.currentTimeMillis()
         val newNote = NoteItem(
-            id = System.currentTimeMillis(),
+            id = now,
             title = "Untitled Note",
-            content = ""
+            content = "",
+            lastEdited = now,
+            createdAt = now,
+            isLocked = false
         )
         notesList.add(0, newNote)
         saveNotesToPrefs()
@@ -3423,6 +3514,9 @@ setOnTouchListener(object : View.OnTouchListener {
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (isEditorLocked) {
+                    return true
+                }
                 cancelPendingLongPress()
 
                 touchStartX = event.x
@@ -3614,6 +3708,23 @@ setOnTouchListener(object : View.OnTouchListener {
 
         scrollView.addView(editText)
         contentContainer.addView(scrollView)
+
+        // A note locked from the main list opens read-only. Unlocking it from
+        // the list restores normal editing on the next open.
+        isEditorLocked = note.isLocked
+        if (note.isLocked) {
+            editText.isFocusable = false
+            editText.isFocusableInTouchMode = false
+            editText.isCursorVisible = false
+            editText.isLongClickable = false
+            titleInput.isEnabled = false
+        } else {
+            editText.isFocusable = true
+            editText.isFocusableInTouchMode = true
+            editText.isCursorVisible = true
+            editText.isLongClickable = false
+            titleInput.isEnabled = true
+        }
 
         container.addView(contentContainer)
 
@@ -4032,6 +4143,9 @@ setOnTouchListener(object : View.OnTouchListener {
     inner class NoteAdapter(
         private var notes: List<NoteItem>,
         private val onItemClick: (NoteItem) -> Unit,
+        private val onMoveUp: (NoteItem) -> Unit,
+        private val onMoveDown: (NoteItem) -> Unit,
+        private val onLockClick: (NoteItem) -> Unit,
         private val onDeleteClick: (NoteItem) -> Unit
     ) : RecyclerView.Adapter<NoteAdapter.ViewHolder>() {
 
@@ -4042,18 +4156,13 @@ setOnTouchListener(object : View.OnTouchListener {
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
             val card = LinearLayout(parent.context).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    dpToPx(120)
+                    dpToPx(40)
                 )
-                setPadding(
-                    dpToPx(12),
-                    dpToPx(8),
-                    dpToPx(12),
-                    dpToPx(8)
-                )
+                setPadding(dpToPx(8), 0, dpToPx(3), 0)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     setColor(Color.parseColor("#FFFDF0"))
@@ -4067,69 +4176,108 @@ setOnTouchListener(object : View.OnTouchListener {
                 isFocusable = true
             }
 
-            val titleView = TextView(parent.context).apply {
-                textSize = 14f
-                setTextColor(Color.parseColor("#333333"))
+            val dateView = TextView(parent.context).apply {
+                textSize = 11f
+                setTextColor(Color.parseColor("#444444"))
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 includeFontPadding = false
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, dpToPx(40), 1f)
+            }
+
+            val controls = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL or Gravity.END
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    dpToPx(28)
+                    dpToPx(96),
+                    dpToPx(40)
                 )
             }
 
-            val contentView = TextView(parent.context).apply {
-                textSize = 12f
-                setTextColor(Color.parseColor("#666666"))
-                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
-                includeFontPadding = false
-                maxLines = 3
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                gravity = Gravity.TOP
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    0,
-                    1f
-                )
-            }
+            fun smallListButton(icon: Drawable, action: () -> Unit): ImageButton =
+                ImageButton(parent.context).apply {
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(20), dpToPx(20)).apply {
+                        marginStart = dpToPx(2)
+                        marginEnd = dpToPx(2)
+                    }
+                    setImageDrawable(icon)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        setColor(Color.rgb(255, 220, 80))
+                        setStroke(dpToPx(1), Color.BLACK)
+                    }
+                    setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
+                    minimumWidth = 0
+                    minimumHeight = 0
+                    scaleType = ImageView.ScaleType.CENTER
+                    elevation = dpToPx(1).toFloat()
+                    isFocusable = true
+                    isClickable = true
+                    setOnClickListener { action() }
+                }
 
-            card.addView(titleView)
-            card.addView(contentView)
-            return ViewHolder(card, titleView, contentView)
+            val lockBtn = smallListButton(
+                createTopBarListLockDrawable(false)
+            ) { }
+            val deleteBtn = smallListButton(
+                createTopBarDeleteDrawable()
+            ) { }
+            val upBtn = smallListButton(
+                createTopBarArrowDrawable(true)
+            ) { }
+            val downBtn = smallListButton(
+                createTopBarArrowDrawable(false)
+            ) { }
+
+            controls.addView(lockBtn)
+            controls.addView(deleteBtn)
+            controls.addView(upBtn)
+            controls.addView(downBtn)
+
+            card.addView(dateView)
+            card.addView(controls)
+
+            return ViewHolder(card, dateView, lockBtn, deleteBtn, upBtn, downBtn)
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            holder.bind(notes[position])
+            holder.bind(notes[position], position)
         }
 
         override fun getItemCount(): Int = notes.size
 
         inner class ViewHolder(
             itemView: View,
-            private val titleView: TextView,
-            private val contentView: TextView
+            private val dateView: TextView,
+            private val lockBtn: ImageButton,
+            private val deleteBtn: ImageButton,
+            private val upBtn: ImageButton,
+            private val downBtn: ImageButton
         ) : RecyclerView.ViewHolder(itemView) {
 
-            fun bind(note: NoteItem) {
-                titleView.text = "${bindingAdapterPosition + 1}. ${
-                    if (note.title.isBlank()) "Untitled Note" else note.title
-                }"
+            fun bind(note: NoteItem, position: Int) {
+                dateView.text = formatNoteCreatedDate(note)
 
-                val preview = if (note.content.length > 160) {
-                    note.content.take(160) + "..."
-                } else {
-                    note.content
-                }
-                contentView.text = preview.ifEmpty { "No content" }
+                lockBtn.setImageDrawable(createTopBarListLockDrawable(note.isLocked))
 
                 itemView.setOnClickListener { onItemClick(note) }
-                itemView.setOnLongClickListener {
-                    onDeleteClick(note)
-                    true
-                }
+                lockBtn.setOnClickListener { onLockClick(note) }
+                deleteBtn.setOnClickListener { onDeleteClick(note) }
+                upBtn.setOnClickListener { onMoveUp(note) }
+                downBtn.setOnClickListener { onMoveDown(note) }
+
+                upBtn.isEnabled = position > 0
+                downBtn.isEnabled = position < notes.lastIndex
+                upBtn.alpha = if (upBtn.isEnabled) 1f else 0.35f
+                downBtn.alpha = if (downBtn.isEnabled) 1f else 0.35f
+
+                // Button touches must not also open the note.
+                lockBtn.setOnTouchListener { _, _ -> false }
+                deleteBtn.setOnTouchListener { _, _ -> false }
+                upBtn.setOnTouchListener { _, _ -> false }
+                downBtn.setOnTouchListener { _, _ -> false }
             }
         }
     }
