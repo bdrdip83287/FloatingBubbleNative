@@ -160,6 +160,44 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     private var lastNonEmptySelectionStart = -1
     private var lastNonEmptySelectionEnd = -1
 
+    // Prevent delayed selection/scroll callbacks from recreating the custom
+    // selection UI immediately after the keyboard deletes a selected range.
+    private var suppressSelectionUiUntil = 0L
+
+    private fun isSelectionUiSuppressed(): Boolean =
+        android.os.SystemClock.uptimeMillis() < suppressSelectionUiUntil
+
+    private fun hideSelectionUiAfterImeDeletion() {
+        suppressSelectionUiUntil = android.os.SystemClock.uptimeMillis() + 600L
+        currentSelectedText = ""
+        lastNonEmptySelectionStart = -1
+        lastNonEmptySelectionEnd = -1
+        isActionBarTemporarilyHidden = false
+        hideSelectionHandles()
+        hideFloatingActionBar()
+
+        // A few IMEs dispatch selection changes after the text deletion.
+        // Run once more after that dispatch has completed.
+        editText.post {
+            currentSelectedText = ""
+            hideSelectionHandles()
+            hideFloatingActionBar()
+        }
+    }
+
+    private fun handleImeSelectionDeletionIfNeeded() {
+        val start = editText.selectionStart
+        val end = editText.selectionEnd
+        val hasLiveSelection = start >= 0 && end >= 0 && start != end
+        val hasRememberedSelection =
+            lastNonEmptySelectionStart >= 0 &&
+            lastNonEmptySelectionEnd > lastNonEmptySelectionStart
+
+        if (hasLiveSelection || hasRememberedSelection) {
+            hideSelectionUiAfterImeDeletion()
+        }
+    }
+
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
     private var handleUpdatePending = false
     
@@ -2019,6 +2057,7 @@ setupBubbleTouchListener(params)
     }
     
     private fun showSelectionHandles() {
+        if (isSelectionUiSuppressed()) return
         try {
             val (start, end) = getSelection()
             if (start == end || start < 0 || end < 0) {
@@ -2128,6 +2167,7 @@ setupBubbleTouchListener(params)
     }
 
     private fun showFloatingActionBar(selectedText: String) {
+        if (isSelectionUiSuppressed()) return
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
         
@@ -2395,6 +2435,11 @@ params.y =
         scrollHideRunnable?.let { scrollHideHandler?.removeCallbacks(it) }
         
         val runnable = Runnable {
+            if (isSelectionUiSuppressed()) {
+                hideSelectionHandles()
+                hideFloatingActionBar()
+                return@Runnable
+            }
             if (isActionBarTemporarilyHidden && editText.hasSelection()) {
                 val (start, end) = getSelection()
                 if (start != end) {
@@ -2949,7 +2994,33 @@ params.y =
         lastEditorText = note.content
         historyInitializedForCurrentEditor = true
 
-        editText = EditText(this).apply {
+        editText = object : EditText(this) {
+            override fun onCreateInputConnection(
+                outAttrs: android.view.inputmethod.EditorInfo?
+            ): android.view.inputmethod.InputConnection? {
+                val base = super.onCreateInputConnection(outAttrs) ?: return null
+                return object : android.view.inputmethod.InputConnectionWrapper(base, true) {
+                    override fun deleteSurroundingText(
+                        beforeLength: Int,
+                        afterLength: Int
+                    ): Boolean {
+                        handleImeSelectionDeletionIfNeeded()
+                        return super.deleteSurroundingText(beforeLength, afterLength)
+                    }
+
+                    override fun deleteSurroundingTextInCodePoints(
+                        beforeLength: Int,
+                        afterLength: Int
+                    ): Boolean {
+                        handleImeSelectionDeletionIfNeeded()
+                        return super.deleteSurroundingTextInCodePoints(
+                            beforeLength,
+                            afterLength
+                        )
+                    }
+                }
+            }
+        }.apply {
             setText(note.content)
             hint = "Write your note here..."
             textSize = 15f
@@ -2983,6 +3054,13 @@ params.y =
             isFocusableInTouchMode = true
             
             setOnSelectionChangedListener { selStart, selEnd ->
+                if (isSelectionUiSuppressed()) {
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                    currentSelectedText = ""
+                    return@setOnSelectionChangedListener
+                }
+
                 // Android IME keyboards can collapse a selection immediately
                 // before deleting it. Preserve the last real selection so the
                 // deletion can still be recognized by the TextWatcher.
@@ -3113,17 +3191,10 @@ params.y =
 
                 override fun afterTextChanged(s: Editable?) {
                     if (deletingActiveSelection) {
-                        // The IME has already deleted the selected text. Run
-                        // after the current TextWatcher dispatch so every
-                        // selection-related callback has finished first.
-                        post {
-                            currentSelectedText = ""
-                            lastNonEmptySelectionStart = -1
-                            lastNonEmptySelectionEnd = -1
-                            hideSelectionHandles()
-                            hideFloatingActionBar()
-                            isActionBarTemporarilyHidden = false
-                        }
+                        // The IME has already deleted the selected text.
+                        // Suppress all delayed callbacks that could recreate
+                        // the custom handles/action bar.
+                        hideSelectionUiAfterImeDeletion()
                     }
                     deletingActiveSelection = false
                 }
@@ -3191,6 +3262,12 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun updateCustomSelectionUi() {
+        if (isSelectionUiSuppressed()) {
+            hideSelectionHandles()
+            hideFloatingActionBar()
+            currentSelectedText = ""
+            return
+        }
         if (!this@apply.hasSelection()) {
             currentSelectedText = ""
             hideSelectionHandles()
