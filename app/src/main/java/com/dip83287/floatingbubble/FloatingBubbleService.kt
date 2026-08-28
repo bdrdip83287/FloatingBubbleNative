@@ -2364,6 +2364,22 @@ params.y =
         }
     }
     
+    /**
+     * Child note editor-এর keyboard/IME hide করে।
+     * Focus সরানো হচ্ছে না, যাতে minimize করার সময় cursor/selection state
+     * পরবর্তীতে bubble থেকে note খুললে আগের অবস্থায় restore করা যায়।
+     */
+    private fun hideEditorKeyboard() {
+        try {
+            if (::editText.isInitialized) {
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.hideSoftInputFromWindow(editText.windowToken, 0)
+            }
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "hideEditorKeyboard")
+        }
+    }
+
     private fun shareLargeText(text: String) {
         try {
             if (text.length > 500000) {
@@ -2815,8 +2831,24 @@ params.y =
             pasteIntoEditor()
         }
         val shareTopBtn = createTopBarIconButton(createTopBarShareDrawable(), Color.rgb(255, 220, 80)) {
+            // Top-bar Share: একই সাথে Action Bar-এর Share-এর মতো
+            // keyboard hide + selection UI hide + note minimize করবে।
+            hideFloatingActionBar()
+            hideSelectionHandles()
+            hideEditorKeyboard()
+
             val title = getEditorAutoTitle(editText.text.toString())
-            shareLargeText(if (title.isEmpty()) editText.text.toString() else "$title\n\n${editText.text}")
+            shareLargeText(
+                if (title.isEmpty()) editText.text.toString()
+                else "$title\n\n${editText.text}"
+            )
+
+            // Share chooser খোলার পর child note-কে bubble-এ minimize করা হবে।
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (isExpanded) {
+                    collapseToBubble()
+                }
+            }, 500)
         }
         val minimizeBtn = createTopBarIconButton(createTopBarMinimizeDrawable(), Color.rgb(255, 220, 80)) {
             collapseToBubble()
