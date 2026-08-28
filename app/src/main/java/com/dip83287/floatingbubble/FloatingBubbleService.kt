@@ -154,6 +154,12 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
+    // Keeps the last real non-empty selection long enough to detect deletion
+    // performed by the Android keyboard/IME. Some keyboards collapse the
+    // selection before TextWatcher.beforeTextChanged() is dispatched.
+    private var lastNonEmptySelectionStart = -1
+    private var lastNonEmptySelectionEnd = -1
+
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
     private var handleUpdatePending = false
     
@@ -2976,7 +2982,15 @@ params.y =
             isFocusable = true
             isFocusableInTouchMode = true
             
-            setOnSelectionChangedListener { _, _ ->
+            setOnSelectionChangedListener { selStart, selEnd ->
+                // Android IME keyboards can collapse a selection immediately
+                // before deleting it. Preserve the last real selection so the
+                // deletion can still be recognized by the TextWatcher.
+                if (selStart >= 0 && selEnd >= 0 && selStart != selEnd) {
+                    lastNonEmptySelectionStart = minOf(selStart, selEnd)
+                    lastNonEmptySelectionEnd = maxOf(selStart, selEnd)
+                }
+
                 if (!isScrolling) {
                     updateHandlePositionsSafe()
                 }
@@ -3046,13 +3060,28 @@ params.y =
                 override fun beforeTextChanged(
                     s: CharSequence?, start: Int, count: Int, after: Int
                 ) {
+                    val liveStart = this@FloatingBubbleService.editText.selectionStart
+                    val liveEnd = this@FloatingBubbleService.editText.selectionEnd
+
+                    val liveSelectionIsNonEmpty =
+                        liveStart >= 0 &&
+                        liveEnd >= 0 &&
+                        liveStart != liveEnd
+
+                    val rememberedSelectionIsNonEmpty =
+                        lastNonEmptySelectionStart >= 0 &&
+                        lastNonEmptySelectionEnd > lastNonEmptySelectionStart &&
+                        lastNonEmptySelectionEnd <=
+                            (s?.length ?: this@FloatingBubbleService.editText.length())
+
+                    // Detect deletion from the keyboard in both situations:
+                    // the selection is still present, or the IME has already
+                    // collapsed it before TextWatcher.beforeTextChanged().
                     deletingActiveSelection =
-                        !suppressEditorHistory &&
                         count > 0 &&
                         after == 0 &&
-                        this@FloatingBubbleService.editText.hasSelection() &&
-                        this@FloatingBubbleService.editText.selectionStart !=
-                            this@FloatingBubbleService.editText.selectionEnd
+                        (liveSelectionIsNonEmpty || rememberedSelectionIsNonEmpty) &&
+                        (isActionBarVisible || areHandlesVisible || liveSelectionIsNonEmpty)
 
                     if (suppressEditorHistory) return
 
@@ -3089,8 +3118,11 @@ params.y =
                         // selection-related callback has finished first.
                         post {
                             currentSelectedText = ""
+                            lastNonEmptySelectionStart = -1
+                            lastNonEmptySelectionEnd = -1
                             hideSelectionHandles()
                             hideFloatingActionBar()
+                            isActionBarTemporarilyHidden = false
                         }
                     }
                     deletingActiveSelection = false
