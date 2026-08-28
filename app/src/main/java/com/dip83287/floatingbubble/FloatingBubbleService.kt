@@ -168,7 +168,7 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         android.os.SystemClock.uptimeMillis() < suppressSelectionUiUntil
 
     private fun hideSelectionUiAfterImeDeletion() {
-        suppressSelectionUiUntil = android.os.SystemClock.uptimeMillis() + 600L
+        suppressSelectionUiUntil = android.os.SystemClock.uptimeMillis() + 1200L
         currentSelectedText = ""
         lastNonEmptySelectionStart = -1
         lastNonEmptySelectionEnd = -1
@@ -2995,16 +2995,37 @@ params.y =
         historyInitializedForCurrentEditor = true
 
         editText = object : EditText(this) {
+            override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+                super.onSelectionChanged(selStart, selEnd)
+
+                // Real EditText selection callback. A TextWatcher does not
+                // reliably report selection-only changes.
+                if (selStart >= 0 && selEnd >= 0 && selStart != selEnd) {
+                    lastNonEmptySelectionStart = minOf(selStart, selEnd)
+                    lastNonEmptySelectionEnd = maxOf(selStart, selEnd)
+                }
+
+                if (isSelectionUiSuppressed()) {
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                    currentSelectedText = ""
+                }
+            }
+
             override fun onCreateInputConnection(
                 outAttrs: android.view.inputmethod.EditorInfo?
             ): android.view.inputmethod.InputConnection? {
                 val base = super.onCreateInputConnection(outAttrs) ?: return null
                 return object : android.view.inputmethod.InputConnectionWrapper(base, true) {
+                    private fun hideIfDeletingSelection() {
+                        handleImeSelectionDeletionIfNeeded()
+                    }
+
                     override fun deleteSurroundingText(
                         beforeLength: Int,
                         afterLength: Int
                     ): Boolean {
-                        handleImeSelectionDeletionIfNeeded()
+                        hideIfDeletingSelection()
                         return super.deleteSurroundingText(beforeLength, afterLength)
                     }
 
@@ -3012,11 +3033,43 @@ params.y =
                         beforeLength: Int,
                         afterLength: Int
                     ): Boolean {
-                        handleImeSelectionDeletionIfNeeded()
+                        hideIfDeletingSelection()
                         return super.deleteSurroundingTextInCodePoints(
                             beforeLength,
                             afterLength
                         )
+                    }
+
+                    override fun commitText(
+                        text: CharSequence?,
+                        newCursorPosition: Int
+                    ): Boolean {
+                        // Some keyboards delete a selected range by committing
+                        // an empty string rather than calling deleteSurroundingText().
+                        if (text.isNullOrEmpty()) {
+                            hideIfDeletingSelection()
+                        }
+                        return super.commitText(text, newCursorPosition)
+                    }
+
+                    override fun setComposingText(
+                        text: CharSequence?,
+                        newCursorPosition: Int
+                    ): Boolean {
+                        if (text.isNullOrEmpty()) {
+                            hideIfDeletingSelection()
+                        }
+                        return super.setComposingText(text, newCursorPosition)
+                    }
+
+                    override fun sendKeyEvent(event: android.view.KeyEvent): Boolean {
+                        if (event.action == android.view.KeyEvent.ACTION_DOWN &&
+                            (event.keyCode == android.view.KeyEvent.KEYCODE_DEL ||
+                             event.keyCode == android.view.KeyEvent.KEYCODE_FORWARD_DEL)
+                        ) {
+                            hideIfDeletingSelection()
+                        }
+                        return super.sendKeyEvent(event)
                     }
                 }
             }
