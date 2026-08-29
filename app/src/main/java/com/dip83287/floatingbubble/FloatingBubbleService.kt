@@ -4155,18 +4155,21 @@ setOnTouchListener(object : View.OnTouchListener {
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            // Main note-list item: 55px high, with the text area protected
+            // from being squeezed by the four right-side control buttons.
             val card = LinearLayout(parent.context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    dpToPx(40)
+                    dpToPx(55)
                 )
-                setPadding(dpToPx(8), 0, dpToPx(3), 0)
+                setPadding(dpToPx(7), dpToPx(3), dpToPx(3), dpToPx(3))
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     setColor(Color.parseColor("#FFFDF0"))
-                    setStroke(dpToPx(1), Color.parseColor("#555555"))
+                    // Lighter black border as requested.
+                    setStroke(dpToPx(1), Color.parseColor("#AAAAAA"))
                     cornerRadius = dpToPx(5).toFloat()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -4176,31 +4179,77 @@ setOnTouchListener(object : View.OnTouchListener {
                 isFocusable = true
             }
 
-            val dateView = TextView(parent.context).apply {
-                textSize = 11f
-                setTextColor(Color.parseColor("#444444"))
+            // Left side: title on top, created date below.
+            val textContainer = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                setPadding(0, 0, dpToPx(5), 0)
+            }
+
+            val titleView = TextView(parent.context).apply {
+                textSize = 12f
+                setTextColor(Color.parseColor("#222222"))
                 setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 includeFontPadding = false
                 gravity = Gravity.CENTER_VERTICAL or Gravity.START
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                layoutParams = LinearLayout.LayoutParams(0, dpToPx(40), 1f)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
+                )
             }
 
+            val dateView = TextView(parent.context).apply {
+                textSize = 9.5f
+                setTextColor(Color.parseColor("#8A8A8A"))
+                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+                includeFontPadding = false
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
+                )
+            }
+
+            textContainer.addView(titleView)
+            textContainer.addView(dateView)
+
+            // Right side: two vertical columns.
+            // Left column = Delete / Lock.
+            // Right column = Up / Down.
+            // Keeping these controls in a fixed-width container prevents them
+            // from disappearing when the list window is resized smaller.
             val controls = LinearLayout(parent.context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL or Gravity.END
                 layoutParams = LinearLayout.LayoutParams(
-                    dpToPx(96),
-                    dpToPx(40)
+                    dpToPx(48),
+                    ViewGroup.LayoutParams.MATCH_PARENT
                 )
+            }
+
+            val deleteLockColumn = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(dpToPx(22), ViewGroup.LayoutParams.MATCH_PARENT)
+            }
+
+            val sortColumn = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(dpToPx(22), ViewGroup.LayoutParams.MATCH_PARENT)
             }
 
             fun smallListButton(icon: Drawable, action: () -> Unit): ImageButton =
                 ImageButton(parent.context).apply {
                     layoutParams = LinearLayout.LayoutParams(dpToPx(20), dpToPx(20)).apply {
-                        marginStart = dpToPx(2)
-                        marginEnd = dpToPx(2)
+                        gravity = Gravity.CENTER
                     }
                     setImageDrawable(icon)
                     background = GradientDrawable().apply {
@@ -4218,28 +4267,45 @@ setOnTouchListener(object : View.OnTouchListener {
                     setOnClickListener { action() }
                 }
 
-            val lockBtn = smallListButton(
-                createTopBarListLockDrawable(false)
-            ) { }
             val deleteBtn = smallListButton(
                 createTopBarDeleteDrawable()
             ) { }
+
+            val lockBtn = smallListButton(
+                createTopBarListLockDrawable(false)
+            ) { }
+
             val upBtn = smallListButton(
                 createTopBarArrowDrawable(true)
             ) { }
+
             val downBtn = smallListButton(
                 createTopBarArrowDrawable(false)
             ) { }
 
-            controls.addView(lockBtn)
-            controls.addView(deleteBtn)
-            controls.addView(upBtn)
-            controls.addView(downBtn)
+            // Exact requested arrangement:
+            // Delete   | Up
+            // Lock     | Down
+            deleteLockColumn.addView(deleteBtn)
+            deleteLockColumn.addView(lockBtn)
+            sortColumn.addView(upBtn)
+            sortColumn.addView(downBtn)
 
-            card.addView(dateView)
+            controls.addView(deleteLockColumn)
+            controls.addView(sortColumn)
+
+            card.addView(textContainer)
             card.addView(controls)
 
-            return ViewHolder(card, dateView, lockBtn, deleteBtn, upBtn, downBtn)
+            return ViewHolder(
+                card,
+                titleView,
+                dateView,
+                lockBtn,
+                deleteBtn,
+                upBtn,
+                downBtn
+            )
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
@@ -4250,6 +4316,7 @@ setOnTouchListener(object : View.OnTouchListener {
 
         inner class ViewHolder(
             itemView: View,
+            private val titleView: TextView,
             private val dateView: TextView,
             private val lockBtn: ImageButton,
             private val deleteBtn: ImageButton,
@@ -4258,13 +4325,14 @@ setOnTouchListener(object : View.OnTouchListener {
         ) : RecyclerView.ViewHolder(itemView) {
 
             fun bind(note: NoteItem, position: Int) {
+                titleView.text = note.title.ifEmpty { "Untitled Note" }
                 dateView.text = formatNoteCreatedDate(note)
 
                 lockBtn.setImageDrawable(createTopBarListLockDrawable(note.isLocked))
 
                 itemView.setOnClickListener { onItemClick(note) }
-                lockBtn.setOnClickListener { onLockClick(note) }
                 deleteBtn.setOnClickListener { onDeleteClick(note) }
+                lockBtn.setOnClickListener { onLockClick(note) }
                 upBtn.setOnClickListener { onMoveUp(note) }
                 downBtn.setOnClickListener { onMoveDown(note) }
 
@@ -4274,8 +4342,8 @@ setOnTouchListener(object : View.OnTouchListener {
                 downBtn.alpha = if (downBtn.isEnabled) 1f else 0.35f
 
                 // Button touches must not also open the note.
-                lockBtn.setOnTouchListener { _, _ -> false }
                 deleteBtn.setOnTouchListener { _, _ -> false }
+                lockBtn.setOnTouchListener { _, _ -> false }
                 upBtn.setOnTouchListener { _, _ -> false }
                 downBtn.setOnTouchListener { _, _ -> false }
             }
