@@ -2751,19 +2751,32 @@ params.y =
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index < 0) return
 
-        if (currentEditingNoteId == noteId) {
-            currentEditingNoteId = null
-            restoreEditorStatePending = false
-            hideSelectionHandles()
-            hideFloatingActionBar()
-        }
+        // A Toast cannot contain interactive OK/Cancel buttons, so use a small
+        // confirmation dialog for the requested confirmation step. Nothing is
+        // deleted until the user explicitly presses OK.
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Delete note?")
+            .setMessage("Do you really want to delete this note?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("OK") { _, _ ->
+                val currentIndex = notesList.indexOfFirst { it.id == noteId }
+                if (currentIndex < 0) return@setPositiveButton
 
-        notesList.removeAt(index)
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        updateBubbleCount()
+                if (currentEditingNoteId == noteId) {
+                    currentEditingNoteId = null
+                    restoreEditorStatePending = false
+                    hideSelectionHandles()
+                    hideFloatingActionBar()
+                }
 
-        Toast.makeText(this, "Note deleted", Toast.LENGTH_SHORT).show()
+                notesList.removeAt(currentIndex)
+                saveNotesToPrefs()
+                notesAdapter.updateList(notesList)
+                updateBubbleCount()
+
+                Toast.makeText(this, "Note deleted", Toast.LENGTH_SHORT).show()
+            }
+            .show()
     }
 
     private fun createNewNote() {
@@ -4236,8 +4249,8 @@ setOnTouchListener(object : View.OnTouchListener {
             // Left column = Delete / Lock.
             // Right column = Up / Down.
             // The controls have no background, border, padding or elevation:
-            // only the custom icon is visible. Each column is 25px wide so the
-            // icon remains visually separated from the text area.
+            // only the custom icon is visible. Each column is 25px wide.
+            // The two icons in each column are separated by an exact 18px gap.
             val controls = LinearLayout(parent.context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL or Gravity.END
@@ -4261,10 +4274,9 @@ setOnTouchListener(object : View.OnTouchListener {
 
             fun smallListButton(icon: Drawable, action: () -> Unit): ImageButton =
                 ImageButton(parent.context).apply {
-                    // 15px icon area: the remaining vertical space naturally
-                    // gives approximately 15px breathing room above/below the
-                    // two icons inside the 55px item.
-                    layoutParams = LinearLayout.LayoutParams(dpToPx(15), dpToPx(15)).apply {
+                    // 19px icon area: 4px larger than the previous 15px size.
+                    // The vertical gap between the two controls is kept at 18px.
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(19), dpToPx(19)).apply {
                         gravity = Gravity.CENTER
                     }
                     setImageDrawable(icon)
@@ -4285,7 +4297,7 @@ setOnTouchListener(object : View.OnTouchListener {
             ) { }
 
             val lockBtn = smallListButton(
-                createTopBarListLockDrawable(false, Color.rgb(35, 155, 70))
+                createTopBarListLockDrawable(false, Color.rgb(255, 193, 7))
             ) { }
 
             val upBtn = smallListButton(
@@ -4300,8 +4312,15 @@ setOnTouchListener(object : View.OnTouchListener {
             // Delete   | Up
             // Lock     | Down
             deleteLockColumn.addView(deleteBtn)
+            deleteLockColumn.addView(View(parent.context).apply {
+                layoutParams = LinearLayout.LayoutParams(1, dpToPx(18))
+            })
             deleteLockColumn.addView(lockBtn)
+
             sortColumn.addView(upBtn)
+            sortColumn.addView(View(parent.context).apply {
+                layoutParams = LinearLayout.LayoutParams(1, dpToPx(18))
+            })
             sortColumn.addView(downBtn)
 
             controls.addView(deleteLockColumn)
@@ -4355,7 +4374,14 @@ setOnTouchListener(object : View.OnTouchListener {
                 titleView.text = note.title.ifEmpty { "Untitled Note" }
                 dateView.text = formatNoteCreatedDate(note)
 
-                lockBtn.setImageDrawable(createTopBarListLockDrawable(note.isLocked))
+                val lockColor = if (note.isLocked) {
+                    Color.rgb(35, 155, 70)   // locked = green
+                } else {
+                    Color.rgb(255, 193, 7)   // unlocked = yellow
+                }
+                lockBtn.setImageDrawable(
+                    createTopBarListLockDrawable(note.isLocked, lockColor)
+                )
 
                 itemView.setOnClickListener { onItemClick(note) }
                 deleteBtn.setOnClickListener { onDeleteClick(note) }
