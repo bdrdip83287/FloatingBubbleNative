@@ -4286,22 +4286,31 @@ setOnTouchListener(object : View.OnTouchListener {
             }
 
             fun smallListButton(icon: Drawable): ImageButton =
-                ImageButton(parent.context).apply {
-                    // Icon remains 17px; the 25px button provides invisible touch padding around it.
-                    layoutParams = LinearLayout.LayoutParams(dpToPx(25), dpToPx(25)).apply {
-                        gravity = Gravity.CENTER
-                    }
-                    setImageDrawable(icon)
-                    background = null
-                    setPadding(0, 0, 0, 0)
-                    minimumWidth = 0
-                    minimumHeight = 0
-                    scaleType = ImageView.ScaleType.CENTER_INSIDE
-                    elevation = 0f
-                    stateListAnimator = null
-                    isFocusable = true
-                    isClickable = true
-                }
+    ImageButton(parent.context).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            dpToPx(25),
+            dpToPx(25)
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
+        setImageDrawable(icon)
+        scaleX = 0.75f
+        scaleY = 0.75f
+        background = null
+        setPadding(0, 0, 0, 0)
+
+        minimumWidth = 0
+        minimumHeight = 0
+
+        scaleType = ImageView.ScaleType.CENTER_INSIDE
+
+        elevation = 0f
+        stateListAnimator = null
+
+        isFocusable = true
+        isClickable = true
+    }    
 
             val deleteBtn = smallListButton(
                 createTopBarDeleteDrawable(Color.rgb(220, 40, 40))
@@ -4550,3 +4559,4 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
+    
