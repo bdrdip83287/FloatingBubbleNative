@@ -4154,14 +4154,28 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     private fun showDeleteNoteConfirmation(note: NoteItem) {
-        AlertDialog.Builder(this)
+        // This service is displayed through an overlay window. Give the
+        // confirmation dialog the same overlay window type before showing it
+        // so it does not crash with a BadTokenException.
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Delete Note")
             .setMessage("Are you sure you want to delete this note?")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("OK") { _, _ ->
                 deleteNoteFromList(note.id)
             }
-            .show()
+            .create()
+
+        dialog.window?.let { window ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            } else {
+                @Suppress("DEPRECATION")
+                window.setType(WindowManager.LayoutParams.TYPE_PHONE)
+            }
+        }
+
+        dialog.show()
     }
 
     inner class NoteAdapter(
@@ -4273,8 +4287,8 @@ setOnTouchListener(object : View.OnTouchListener {
 
             fun smallListButton(icon: Drawable): ImageButton =
                 ImageButton(parent.context).apply {
-                    // Icon size increased by 2px: 15px -> 17px.
-                    layoutParams = LinearLayout.LayoutParams(dpToPx(17), dpToPx(17)).apply {
+                    // Icon remains 17px; the 25px button provides invisible touch padding around it.
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(25), dpToPx(25)).apply {
                         gravity = Gravity.CENTER
                     }
                     setImageDrawable(icon)
@@ -4306,22 +4320,27 @@ setOnTouchListener(object : View.OnTouchListener {
                 createTopBarArrowDrawable(false, Color.rgb(125, 125, 125))
             )
 
-            // Exact requested arrangement:
+            // Exact requested visual arrangement:
+            // The visible 17px icons have a 15px gap. Each icon sits inside
+            // a transparent 25px touch target, so the surrounding area also
+            // responds to touch. A 7px spacer produces the requested 15px
+            // visual gap: 4px + 7px + 4px = 15px.
+            //
             // Delete
-            //   16px vertical gap
+            //   15px visual icon gap
             // Lock
             //
             // Up
-            //   16px vertical gap
+            //   15px visual icon gap
             // Down
             deleteLockColumn.addView(deleteBtn)
             deleteLockColumn.addView(View(parent.context).apply {
-                layoutParams = LinearLayout.LayoutParams(1, dpToPx(16))
+                layoutParams = LinearLayout.LayoutParams(1, dpToPx(7))
             })
             deleteLockColumn.addView(lockBtn)
             sortColumn.addView(upBtn)
             sortColumn.addView(View(parent.context).apply {
-                layoutParams = LinearLayout.LayoutParams(1, dpToPx(16))
+                layoutParams = LinearLayout.LayoutParams(1, dpToPx(7))
             })
             sortColumn.addView(downBtn)
 
