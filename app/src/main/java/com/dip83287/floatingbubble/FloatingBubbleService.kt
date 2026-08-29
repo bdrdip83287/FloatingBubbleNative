@@ -4344,12 +4344,12 @@ setOnTouchListener(object : View.OnTouchListener {
             // Down
             deleteLockColumn.addView(deleteBtn)
             deleteLockColumn.addView(View(parent.context).apply {
-                layoutParams = LinearLayout.LayoutParams(1, dpToPx(7))
+                layoutParams = LinearLayout.LayoutParams(1, dpToPx(5))
             })
             deleteLockColumn.addView(lockBtn)
             sortColumn.addView(upBtn)
             sortColumn.addView(View(parent.context).apply {
-                layoutParams = LinearLayout.LayoutParams(1, dpToPx(7))
+                layoutParams = LinearLayout.LayoutParams(1, dpToPx(5))
             })
             sortColumn.addView(downBtn)
 
