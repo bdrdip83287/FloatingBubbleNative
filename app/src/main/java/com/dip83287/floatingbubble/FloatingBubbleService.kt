@@ -4208,7 +4208,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     setColor(Color.parseColor("#FFFDF0"))
                     // Lighter black border as requested.
                     setStroke(dpToPx(1), Color.parseColor("#AAAAAA"))
-                    cornerRadius = dpToPx(5).toFloat()
+                    cornerRadius = dpToPx(2).toFloat()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     elevation = dpToPx(3).toFloat()
@@ -4222,7 +4222,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
-                setPadding(0, 0, dpToPx(5), 0)
+                setPadding(0, 0, dpToPx(2), 0)
             }
 
             val titleView = TextView(parent.context).apply {
