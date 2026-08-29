@@ -1430,7 +1430,9 @@ setupBubbleTouchListener(params)
         canvas.drawCircle(w * 0.50f, h * 0.60f, w * 0.045f, paint)
     }
 
-    private fun createTopBarDeleteDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+    private fun createTopBarDeleteDrawable(
+        iconColor: Int = Color.BLACK
+    ): Drawable = createStrokePathDrawable(iconColor) { canvas, w, h, paint ->
         canvas.drawRoundRect(RectF(w * 0.28f, h * 0.30f, w * 0.72f, h * 0.82f), w * 0.05f, w * 0.05f, paint)
         canvas.drawLine(w * 0.22f, h * 0.25f, w * 0.78f, h * 0.25f, paint)
         canvas.drawLine(w * 0.40f, h * 0.18f, w * 0.60f, h * 0.18f, paint)
@@ -1438,12 +1440,16 @@ setupBubbleTouchListener(params)
         canvas.drawLine(w * 0.58f, h * 0.40f, w * 0.58f, h * 0.70f, paint)
     }
 
-    private fun createStrokePathDrawable(drawer: (Canvas, Float, Float, Paint) -> Unit): Drawable {
+    private fun createStrokePathDrawable(
+        iconColor: Int = Color.BLACK,
+        strokeWidthPx: Float = dpToPx(2).toFloat(),
+        drawer: (Canvas, Float, Float, Paint) -> Unit
+    ): Drawable {
         return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.BLACK
+                color = iconColor
                 style = Paint.Style.STROKE
-                strokeWidth = dpToPx(2).toFloat()
+                strokeWidth = strokeWidthPx
                 strokeCap = Paint.Cap.ROUND
                 strokeJoin = Paint.Join.ROUND
             }
@@ -2662,8 +2668,11 @@ params.y =
             canvas.drawLine(cx, cy - half, cx, cy + half, paint)
         }
 
-    private fun createTopBarArrowDrawable(up: Boolean): Drawable =
-        createStrokePathDrawable { canvas, w, h, paint ->
+    private fun createTopBarArrowDrawable(
+        up: Boolean,
+        iconColor: Int = Color.BLACK
+    ): Drawable =
+        createStrokePathDrawable(iconColor) { canvas, w, h, paint ->
             val cx = w * 0.50f
             val cy = h * 0.50f
             val half = w * 0.22f
@@ -2680,8 +2689,11 @@ params.y =
             canvas.drawPath(path, paint)
         }
 
-    private fun createTopBarListLockDrawable(locked: Boolean): Drawable =
-        createStrokePathDrawable { canvas, w, h, paint ->
+    private fun createTopBarListLockDrawable(
+        locked: Boolean,
+        iconColor: Int = Color.BLACK
+    ): Drawable =
+        createStrokePathDrawable(iconColor) { canvas, w, h, paint ->
             val body = RectF(w * 0.25f, h * 0.42f, w * 0.75f, h * 0.82f)
             canvas.drawRoundRect(body, w * 0.06f, w * 0.06f, paint)
             val arc = RectF(w * 0.34f, h * 0.16f, w * 0.66f, h * 0.58f)
@@ -4223,13 +4235,14 @@ setOnTouchListener(object : View.OnTouchListener {
             // Right side: two vertical columns.
             // Left column = Delete / Lock.
             // Right column = Up / Down.
-            // Keeping these controls in a fixed-width container prevents them
-            // from disappearing when the list window is resized smaller.
+            // The controls have no background, border, padding or elevation:
+            // only the custom icon is visible. Each column is 25px wide so the
+            // icon remains visually separated from the text area.
             val controls = LinearLayout(parent.context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL or Gravity.END
                 layoutParams = LinearLayout.LayoutParams(
-                    dpToPx(48),
+                    dpToPx(50),
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             }
@@ -4237,50 +4250,50 @@ setOnTouchListener(object : View.OnTouchListener {
             val deleteLockColumn = LinearLayout(parent.context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(dpToPx(22), ViewGroup.LayoutParams.MATCH_PARENT)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(25), ViewGroup.LayoutParams.MATCH_PARENT)
             }
 
             val sortColumn = LinearLayout(parent.context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(dpToPx(22), ViewGroup.LayoutParams.MATCH_PARENT)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(25), ViewGroup.LayoutParams.MATCH_PARENT)
             }
 
             fun smallListButton(icon: Drawable, action: () -> Unit): ImageButton =
                 ImageButton(parent.context).apply {
-                    layoutParams = LinearLayout.LayoutParams(dpToPx(20), dpToPx(20)).apply {
+                    // 15px icon area: the remaining vertical space naturally
+                    // gives approximately 15px breathing room above/below the
+                    // two icons inside the 55px item.
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(15), dpToPx(15)).apply {
                         gravity = Gravity.CENTER
                     }
                     setImageDrawable(icon)
-                    background = GradientDrawable().apply {
-                        shape = GradientDrawable.OVAL
-                        setColor(Color.rgb(255, 220, 80))
-                        setStroke(dpToPx(1), Color.BLACK)
-                    }
-                    setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
+                    background = null
+                    setPadding(0, 0, 0, 0)
                     minimumWidth = 0
                     minimumHeight = 0
-                    scaleType = ImageView.ScaleType.CENTER
-                    elevation = dpToPx(1).toFloat()
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    elevation = 0f
+                    stateListAnimator = null
                     isFocusable = true
                     isClickable = true
                     setOnClickListener { action() }
                 }
 
             val deleteBtn = smallListButton(
-                createTopBarDeleteDrawable()
+                createTopBarDeleteDrawable(Color.rgb(220, 40, 40))
             ) { }
 
             val lockBtn = smallListButton(
-                createTopBarListLockDrawable(false)
+                createTopBarListLockDrawable(false, Color.rgb(35, 155, 70))
             ) { }
 
             val upBtn = smallListButton(
-                createTopBarArrowDrawable(true)
+                createTopBarArrowDrawable(true, Color.rgb(125, 125, 125))
             ) { }
 
             val downBtn = smallListButton(
-                createTopBarArrowDrawable(false)
+                createTopBarArrowDrawable(false, Color.rgb(125, 125, 125))
             ) { }
 
             // Exact requested arrangement:
@@ -4296,6 +4309,20 @@ setOnTouchListener(object : View.OnTouchListener {
 
             card.addView(textContainer)
             card.addView(controls)
+
+            // When the main note-list window becomes too narrow, hide ONLY the
+            // right-side controls. The title/date area keeps the remaining
+            // width and therefore stays visible instead of being squeezed away.
+            card.addOnLayoutChangeListener { view, left, top, right, bottom, _, _, _, _ ->
+                val availableWidth = right - left
+                val hideControlsBelow = dpToPx(150)
+                val shouldHide = availableWidth < hideControlsBelow
+                val newVisibility = if (shouldHide) View.GONE else View.VISIBLE
+                if (controls.visibility != newVisibility) {
+                    controls.visibility = newVisibility
+                    textContainer.requestLayout()
+                }
+            }
 
             return ViewHolder(
                 card,
