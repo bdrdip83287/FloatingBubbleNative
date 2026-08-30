@@ -313,8 +313,26 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         val notesJson = Gson().toJson(notesList)
         prefs.edit()
             .putString(STORAGE_NOTES_LIST, notesJson)
-            .putStringSet(KEY_MANUAL_TITLE_NOTE_IDS, manualTitleNoteIds.map { it.toString() }.toSet())
+            .putStringSet(
+                KEY_MANUAL_TITLE_NOTE_IDS,
+                manualTitleNoteIds.map { it.toString() }.toSet()
+            )
             .apply()
+    }
+
+    // Used only at lifecycle/critical persistence points. This makes sure the
+    // latest note data has reached the SharedPreferences XML file before the
+    // Android backup system gets a chance to copy app data.
+    private fun flushNotesToPrefs() {
+        if (!::prefs.isInitialized) return
+        val notesJson = Gson().toJson(notesList)
+        prefs.edit()
+            .putString(STORAGE_NOTES_LIST, notesJson)
+            .putStringSet(
+                KEY_MANUAL_TITLE_NOTE_IDS,
+                manualTitleNoteIds.map { it.toString() }.toSet()
+            )
+            .commit()
     }
 
     private fun createNotificationChannel() {
@@ -3289,7 +3307,23 @@ params.y =
             setPadding(18, 18, 18, 18)
             background = null
 
-            setLineSpacing(0f, 1.05f)
+            // Keep mixed-script lines (English + Bangla) on one consistent
+            // line height. Android's default font padding can make Bangla
+            // glyphs increase the apparent gap between lines.
+            includeFontPadding = false
+            setElegantTextHeight(false)
+
+            // Fixed line height keeps the visual baseline/row spacing stable
+            // when Android switches between Latin and Bangla fallback fonts.
+            // Change this single value if a slightly tighter/looser line height
+            // is preferred.
+            val EDITOR_LINE_HEIGHT_DP = 18
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                setLineHeight(dpToPx(EDITOR_LINE_HEIGHT_DP))
+            } else {
+                setLineSpacing(0f, 1.0f)
+            }
+
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
             minHeight = 400
@@ -4635,6 +4669,13 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     override fun onDestroy() {
+        // Flush the latest note database before the service is destroyed.
+        // The SharedPreferences file is included in Android Auto Backup.
+        try {
+            flushNotesToPrefs()
+        } catch (_: Exception) {
+        }
+
         super.onDestroy()
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
