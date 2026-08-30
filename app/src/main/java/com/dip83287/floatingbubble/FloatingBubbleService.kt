@@ -73,6 +73,7 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_HEIGHT = "notepad_height"
     private val KEY_NOTEPAD_X = "notepad_x"
     private val KEY_NOTEPAD_Y = "notepad_y"
+    private val KEY_MANUAL_TITLE_NOTE_IDS = "manual_title_note_ids"
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
@@ -80,6 +81,8 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
+    private val manualTitleNoteIds = mutableSetOf<Long>()
+    private var suppressTitleWatcher = false
 
     // Child-note editor undo/redo state.
     // Each snapshot keeps text + cursor/selection + viewport, so Undo/Redo
@@ -235,6 +238,8 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            manualTitleNoteIds.clear()
+            manualTitleNoteIds.addAll(prefs.getStringSet(KEY_MANUAL_TITLE_NOTE_IDS, emptySet())!!.mapNotNull { it.toLongOrNull() })
             loadSavedPositions()
             loadNotes()
             createNotificationChannel()
@@ -306,7 +311,10 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
 
     private fun saveNotesToPrefs() {
         val notesJson = Gson().toJson(notesList)
-        prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+        prefs.edit()
+            .putString(STORAGE_NOTES_LIST, notesJson)
+            .putStringSet(KEY_MANUAL_TITLE_NOTE_IDS, manualTitleNoteIds.map { it.toString() }.toSet())
+            .apply()
     }
 
     private fun createNotificationChannel() {
@@ -3032,7 +3040,7 @@ params.y =
         // The number is kept in a small fixed TextView, while the title itself
         // is a real EditText. Therefore the user can freely edit the title
         // without accidentally changing the note's serial number.
-        var titleWasEditedManually = false
+        var titleWasEditedManually = manualTitleNoteIds.contains(note.id)
 
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -3104,11 +3112,16 @@ params.y =
                 override fun onTextChanged(
                     s: CharSequence?, start: Int, before: Int, count: Int
                 ) {
-                    if (hasFocus()) {
-                        // Non-empty text means the user has explicitly supplied a
-                        // title. If the user clears the field completely, automatic
-                        // first-line titling becomes active again.
+                    if (!suppressTitleWatcher && hasFocus()) {
+                        // A real user edit makes the title manual. Clearing it
+                        // switches automatic first-line titling back on.
                         titleWasEditedManually = !s.isNullOrBlank()
+                        if (titleWasEditedManually) {
+                            manualTitleNoteIds.add(note.id)
+                        } else {
+                            manualTitleNoteIds.remove(note.id)
+                        }
+                        saveNotesToPrefs()
                     }
                 }
 
@@ -3357,8 +3370,10 @@ params.y =
 
                     if (titleInput.text.toString() != newTitle) {
                         internalChange = true
+                        suppressTitleWatcher = true
                         titleInput.setText(newTitle)
                         titleInput.setSelection(titleInput.text.length)
+                        suppressTitleWatcher = false
                         internalChange = false
                     }
                 }
@@ -3380,10 +3395,19 @@ params.y =
                     count: Int,
                     after: Int
                 ) {
+                    val liveStart = editText.selectionStart
+                    val liveEnd = editText.selectionEnd
+                    val liveNonEmpty = liveStart >= 0 && liveEnd >= 0 && liveStart != liveEnd
+                    val rememberedNonEmpty =
+                        lastNonEmptySelectionStart >= 0 &&
+                        lastNonEmptySelectionEnd > lastNonEmptySelectionStart &&
+                        lastNonEmptySelectionEnd <= (s?.length ?: editText.length())
+
                     selectionWasBeingReplaced =
                         !suppressEditorHistory &&
-                        editText.selectionStart != editText.selectionEnd &&
-                        count > 0
+                        count > 0 &&
+                        (liveNonEmpty || rememberedNonEmpty) &&
+                        (isActionBarVisible || areHandlesVisible || liveNonEmpty)
                 }
 
                 override fun onTextChanged(
@@ -4071,8 +4095,16 @@ setOnTouchListener(object : View.OnTouchListener {
         val end = editText.selectionEnd.coerceAtLeast(0)
         val a = minOf(start, end)
         val b = maxOf(start, end)
+        val hadSelection = a != b
         editText.text.replace(a, b, pasted)
         editText.setSelection((a + pasted.length).coerceAtMost(editText.length()))
+        if (hadSelection) {
+            currentSelectedText = ""
+            lastNonEmptySelectionStart = -1
+            lastNonEmptySelectionEnd = -1
+            hideSelectionHandles()
+            hideFloatingActionBar()
+        }
     }
 
     private fun toggleEditorLock() {
@@ -4102,6 +4134,11 @@ setOnTouchListener(object : View.OnTouchListener {
                 val contentText = editText.text.toString()
                 val finalTitle = rawTitle.ifEmpty {
                     getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+                }
+                if (rawTitle.isBlank()) {
+                    manualTitleNoteIds.remove(noteId)
+                } else {
+                    manualTitleNoteIds.add(noteId)
                 }
                 notesList[index] = notesList[index].copy(
                     title = finalTitle,
@@ -4164,6 +4201,12 @@ setOnTouchListener(object : View.OnTouchListener {
             val contentText = editText.text.toString()
             val finalTitle = rawTitle.ifEmpty {
                 getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+            }
+
+            if (rawTitle.isBlank()) {
+                manualTitleNoteIds.remove(noteId)
+            } else {
+                manualTitleNoteIds.add(noteId)
             }
 
             val updatedNote = notesList[index].copy(
