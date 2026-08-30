@@ -2550,6 +2550,24 @@ params.y =
         topBar.addView(rightControls)
         contentContainer.addView(topBar)
 
+        // Subtle bottom shadow under the main note-list top bar.
+        val topBarBottomShadow = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(2)
+            )
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(
+                    Color.argb(55, 0, 0, 0),
+                    Color.argb(0, 0, 0, 0)
+                )
+            )
+            isClickable = false
+            isFocusable = false
+        }
+        contentContainer.addView(topBarBottomShadow)
+
         // ------------------------------------------------------------
         // Note list: no separate "Note List" bar and no "New Note" bar.
         // ------------------------------------------------------------
@@ -4208,7 +4226,7 @@ setOnTouchListener(object : View.OnTouchListener {
                     setColor(Color.parseColor("#FFFDF0"))
                     // Lighter black border as requested.
                     setStroke(dpToPx(1), Color.parseColor("#AAAAAA"))
-                    cornerRadius = dpToPx(2).toFloat()
+                    cornerRadius = dpToPx(5).toFloat()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     elevation = dpToPx(3).toFloat()
@@ -4222,7 +4240,7 @@ setOnTouchListener(object : View.OnTouchListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
-                setPadding(0, 0, dpToPx(2), 0)
+                setPadding(0, 0, dpToPx(5), 0)
             }
 
             val titleView = TextView(parent.context).apply {
@@ -4286,31 +4304,27 @@ setOnTouchListener(object : View.OnTouchListener {
             }
 
             fun smallListButton(icon: Drawable): ImageButton =
-    ImageButton(parent.context).apply {
-        layoutParams = LinearLayout.LayoutParams(
-            dpToPx(24),
-            dpToPx(24)
-        ).apply {
-            gravity = Gravity.CENTER
-        }
-
-        setImageDrawable(icon)
-        scaleX = 0.75f
-        scaleY = 0.75f
-        background = null
-        setPadding(0, 0, 0, 0)
-
-        minimumWidth = 0
-        minimumHeight = 0
-
-        scaleType = ImageView.ScaleType.CENTER_INSIDE
-
-        elevation = 0f
-        stateListAnimator = null
-
-        isFocusable = true
-        isClickable = true
-    }    
+                ImageButton(parent.context).apply {
+                    // 25px transparent touch target; the icon itself is visually reduced
+                    // to 0.80f so the four controls remain compact without losing touch area.
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(25), dpToPx(25)).apply {
+                        gravity = Gravity.CENTER
+                    }
+                    setImageDrawable(icon)
+                    background = null
+                    setPadding(0, 0, 0, 0)
+                    minimumWidth = 0
+                    minimumHeight = 0
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    elevation = 0f
+                    stateListAnimator = null
+                    isFocusable = true
+                    isClickable = true
+                    // Scale only the visual icon/button content; the original 25px
+                    // layout/touch bounds remain available for easier tapping.
+                    scaleX = 0.80f
+                    scaleY = 0.80f
+                }
 
             val deleteBtn = smallListButton(
                 createTopBarDeleteDrawable(Color.rgb(220, 40, 40))
@@ -4329,28 +4343,19 @@ setOnTouchListener(object : View.OnTouchListener {
                 createTopBarArrowDrawable(false, Color.rgb(125, 125, 125))
             )
 
-            // Exact requested visual arrangement:
-            // The visible 17px icons have a 15px gap. Each icon sits inside
-            // a transparent 25px touch target, so the surrounding area also
-            // responds to touch. A 7px spacer produces the requested 15px
-            // visual gap: 4px + 7px + 4px = 15px.
+            // No explicit vertical spacer is used. Each control occupies a
+            // 25px transparent touch target, while its icon is scaled to 0.80f.
+            // This keeps the icons slightly smaller and leaves a natural, compact
+            // vertical separation between the controls without reducing touch area.
             //
             // Delete
-            //   15px visual icon gap
             // Lock
             //
             // Up
-            //   15px visual icon gap
             // Down
             deleteLockColumn.addView(deleteBtn)
-            deleteLockColumn.addView(View(parent.context).apply {
-                layoutParams = LinearLayout.LayoutParams(1, dpToPx(5))
-            })
             deleteLockColumn.addView(lockBtn)
             sortColumn.addView(upBtn)
-            sortColumn.addView(View(parent.context).apply {
-                layoutParams = LinearLayout.LayoutParams(1, dpToPx(5))
-            })
             sortColumn.addView(downBtn)
 
             controls.addView(deleteLockColumn)
@@ -4401,7 +4406,10 @@ setOnTouchListener(object : View.OnTouchListener {
         ) : RecyclerView.ViewHolder(itemView) {
 
             fun bind(note: NoteItem, position: Int) {
-                titleView.text = note.title.ifEmpty { "Untitled Note" }
+                val displayTitle = note.title.ifEmpty { "Untitled Note" }
+                // Main note-list item title: serial number + dot + title, all bold.
+                titleView.text = "${position + 1}. $displayTitle"
+                titleView.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                 dateView.text = formatNoteCreatedDate(note)
 
                 lockBtn.setImageDrawable(
@@ -4559,4 +4567,3 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
-    
