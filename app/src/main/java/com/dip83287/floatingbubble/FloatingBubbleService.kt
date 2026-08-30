@@ -4288,8 +4288,8 @@ setOnTouchListener(object : View.OnTouchListener {
             fun smallListButton(icon: Drawable): ImageButton =
     ImageButton(parent.context).apply {
         layoutParams = LinearLayout.LayoutParams(
-            dpToPx(28),
-            dpToPx(24)
+            dpToPx(25),
+            dpToPx(28)
         ).apply {
             gravity = Gravity.CENTER
         }
