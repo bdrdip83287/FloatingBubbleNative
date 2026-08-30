@@ -3105,7 +3105,10 @@ params.y =
                     s: CharSequence?, start: Int, before: Int, count: Int
                 ) {
                     if (hasFocus()) {
-                        titleWasEditedManually = true
+                        // Non-empty text means the user has explicitly supplied a
+                        // title. If the user clears the field completely, automatic
+                        // first-line titling becomes active again.
+                        titleWasEditedManually = !s.isNullOrBlank()
                     }
                 }
 
@@ -3361,6 +3364,44 @@ params.y =
                 }
 
                 override fun afterTextChanged(s: Editable?) {
+                }
+            })
+
+            // If text is replaced while a selection exists (typing over the
+            // selection or pasting into it), the custom Action Bar and both
+            // selection handles must disappear immediately.
+            // This deliberately ignores undo/redo restores.
+            addTextChangedListener(object : TextWatcher {
+                private var selectionWasBeingReplaced = false
+
+                override fun beforeTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    count: Int,
+                    after: Int
+                ) {
+                    selectionWasBeingReplaced =
+                        !suppressEditorHistory &&
+                        editText.selectionStart != editText.selectionEnd &&
+                        count > 0
+                }
+
+                override fun onTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    before: Int,
+                    count: Int
+                ) {
+                }
+
+                override fun afterTextChanged(s: Editable?) {
+                    if (selectionWasBeingReplaced) {
+                        currentSelectedText = ""
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
+                        isActionBarTemporarilyHidden = false
+                        selectionWasBeingReplaced = false
+                    }
                 }
             })
 
