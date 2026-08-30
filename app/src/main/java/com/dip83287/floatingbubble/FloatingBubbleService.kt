@@ -4295,8 +4295,8 @@ setOnTouchListener(object : View.OnTouchListener {
         }
 
         setImageDrawable(icon)
-        scaleX = 0.85f
-        scaleY = 0.85f
+        scaleX = 0.95f
+        scaleY = 0.95f
         background = null
         setPadding(0, 0, 0, 0)
 
