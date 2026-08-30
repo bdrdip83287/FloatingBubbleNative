@@ -23,8 +23,6 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
-import android.provider.MediaStore
-import android.os.Environment
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
@@ -69,7 +67,6 @@ class FloatingBubbleService : Service() {
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
-    private val PUBLIC_BACKUP_FILE_NAME = "FloatingNotes_Backup.json"
     private val KEY_BUBBLE_X = "bubble_x"
     private val KEY_BUBBLE_Y = "bubble_y"
     private val KEY_NOTEPAD_WIDTH = "notepad_width"
@@ -241,8 +238,6 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            // Restore from a public Downloads backup when Android did not restore app-private data.
-            restoreNotesFromPublicBackupIfNeeded()
             manualTitleNoteIds.clear()
             manualTitleNoteIds.addAll(prefs.getStringSet(KEY_MANUAL_TITLE_NOTE_IDS, emptySet())!!.mapNotNull { it.toLongOrNull() })
             loadSavedPositions()
@@ -323,10 +318,6 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
                 manualTitleNoteIds.map { it.toString() }.toSet()
             )
             .apply()
-
-        // Keep a second copy outside app-private storage. This survives uninstall
-        // and can be imported automatically after reinstall.
-        backupNotesToPublicStorage()
     }
 
     // Used only at lifecycle/critical persistence points. This makes sure the
@@ -342,128 +333,6 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
                 manualTitleNoteIds.map { it.toString() }.toSet()
             )
             .commit()
-        backupNotesToPublicStorage()
-    }
-
-    private data class NotesBackupPayload(
-        val notes: List<NoteItem>,
-        val manualTitleNoteIds: List<Long>
-    )
-
-    private fun backupNotesToPublicStorage() {
-        try {
-            val payload = NotesBackupPayload(
-                notes = notesList.toList(),
-                manualTitleNoteIds = manualTitleNoteIds.toList()
-            )
-            val json = Gson().toJson(payload)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = contentResolver
-                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(MediaStore.Downloads._ID)
-                val selection = "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?"
-                val args = arrayOf(
-                    PUBLIC_BACKUP_FILE_NAME,
-                    Environment.DIRECTORY_DOWNLOADS + "/FloatingNotes/"
-                )
-
-                var uri: Uri? = null
-                resolver.query(collection, projection, selection, args, null)?.use { c ->
-                    if (c.moveToFirst()) {
-                        uri = Uri.withAppendedPath(collection, c.getLong(0).toString())
-                    }
-                }
-
-                if (uri == null) {
-                    val values = android.content.ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, PUBLIC_BACKUP_FILE_NAME)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FloatingNotes/")
-                    }
-                    uri = resolver.insert(collection, values)
-                }
-
-                uri?.let { target ->
-                    resolver.openOutputStream(target, "wt")?.use { out ->
-                        out.write(json.toByteArray(Charsets.UTF_8))
-                        out.flush()
-                    }
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                val dir = java.io.File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "FloatingNotes"
-                )
-                if (!dir.exists()) dir.mkdirs()
-                java.io.File(dir, PUBLIC_BACKUP_FILE_NAME).writeText(json, Charsets.UTF_8)
-            }
-        } catch (_: Exception) {
-            // Public backup is supplementary; normal SharedPreferences saving continues.
-        }
-    }
-
-    private fun restoreNotesFromPublicBackupIfNeeded() {
-        try {
-            // If app-private data already exists, Android restored it or this is a normal launch.
-            if (!prefs.getString(STORAGE_NOTES_LIST, null).isNullOrEmpty()) return
-
-            var json: String? = null
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = contentResolver
-                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(MediaStore.Downloads._ID)
-                val selection = "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?"
-                val args = arrayOf(
-                    PUBLIC_BACKUP_FILE_NAME,
-                    Environment.DIRECTORY_DOWNLOADS + "/FloatingNotes/"
-                )
-                resolver.query(collection, projection, selection, args, null)?.use { c ->
-                    if (c.moveToFirst()) {
-                        val uri = Uri.withAppendedPath(collection, c.getLong(0).toString())
-                        resolver.openInputStream(uri)?.use { input ->
-                            json = input.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                        }
-                    }
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                val file = java.io.File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "FloatingNotes/$PUBLIC_BACKUP_FILE_NAME"
-                )
-                if (file.exists()) json = file.readText(Charsets.UTF_8)
-            }
-
-            if (json.isNullOrBlank()) return
-
-            val payload = Gson().fromJson(json, NotesBackupPayload::class.java) ?: return
-            if (payload.notes.isEmpty()) return
-
-            prefs.edit()
-                .putString(STORAGE_NOTES_LIST, Gson().toJson(payload.notes))
-                .putStringSet(
-                    KEY_MANUAL_TITLE_NOTE_IDS,
-                    payload.manualTitleNoteIds.map { it.toString() }.toSet()
-                )
-                .commit()
-        } catch (_: Exception) {
-            // Ignore a missing/corrupt backup and let the normal note initialization run.
-        }
-    }
-
-    private fun applyUniformEditorLineHeight(editor: TextView, lineHeightDp: Int = 17) {
-        editor.includeFontPadding = false
-        editor.setElegantTextHeight(false)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            // A fixed line height prevents Latin/Bangla fallback fonts from
-            // changing the row height of individual lines.
-            editor.setLineHeight(dpToPx(lineHeightDp))
-        } else {
-            editor.setLineSpacing(0f, 1.0f)
-        }
     }
 
     private fun createNotificationChannel() {
@@ -3441,10 +3310,19 @@ params.y =
             // Keep mixed-script lines (English + Bangla) on one consistent
             // line height. Android's default font padding can make Bangla
             // glyphs increase the apparent gap between lines.
-            // One fixed row height for every script (English, Bangla, etc.).
-            // This is intentionally applied here instead of relying on the
-            // current font's metrics, which can make mixed-script lines grow.
-            applyUniformEditorLineHeight(this, 17)
+            includeFontPadding = false
+            setElegantTextHeight(false)
+
+            // Fixed line height keeps the visual baseline/row spacing stable
+            // when Android switches between Latin and Bangla fallback fonts.
+            // Change this single value if a slightly tighter/looser line height
+            // is preferred.
+            val EDITOR_LINE_HEIGHT_DP = 18
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                setLineHeight(dpToPx(EDITOR_LINE_HEIGHT_DP))
+            } else {
+                setLineSpacing(0f, 1.0f)
+            }
 
             setHorizontallyScrolling(false)
             maxLines = Int.MAX_VALUE
