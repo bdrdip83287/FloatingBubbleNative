@@ -4,6 +4,9 @@ import android.animation.Animator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.app.Notification
+import java.io.File
+import android.app.backup.BackupManager
+import android.os.Environment
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -64,6 +67,8 @@ class FloatingBubbleService : Service() {
 
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
+    private val BACKUP_DIR = "FloatingBubbleBackup"
+private val PRIVATE_BACKUP_FILE = "notes_backup.json"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
