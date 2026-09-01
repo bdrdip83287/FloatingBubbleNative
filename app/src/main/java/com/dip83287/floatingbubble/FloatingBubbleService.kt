@@ -370,13 +370,13 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     }
 
     private fun requestAndroidBackup() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                BackupManager.dataChanged(this)
-            }
-        } catch (_: Exception) {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            BackupManager(this).dataChanged(packageName)
         }
+    } catch (_: Exception) {
     }
+}
 
     private fun getPersistentBackupFile(): File {
         val downloads = Environment.getExternalStoragePublicDirectory(
