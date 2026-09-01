@@ -3,12 +3,10 @@ package com.dip83287.floatingbubble
 import android.animation.Animator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
-import android.app.backup.BackupManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -24,9 +22,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.Uri
 import android.os.*
-import android.os.Environment
 import android.provider.Settings
-import android.provider.MediaStore
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
@@ -44,10 +40,9 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.sqrt
-import java.io.File
-import java.io.IOException
 
 class FloatingBubbleService : Service() {
 
@@ -73,6 +68,10 @@ class FloatingBubbleService : Service() {
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
+
+    // Temporary restore-source diagnostic. This marker is stored in the no-backup
+    // directory, so it is removed on uninstall and is NOT restored by Android backup.
+    private val DIAGNOSTIC_INSTALL_MARKER = "floating_notes_install_marker.txt"
     private val KEY_BUBBLE_X = "bubble_x"
     private val KEY_BUBBLE_Y = "bubble_y"
     private val KEY_NOTEPAD_WIDTH = "notepad_width"
@@ -80,18 +79,6 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_X = "notepad_x"
     private val KEY_NOTEPAD_Y = "notepad_y"
     private val KEY_MANUAL_TITLE_NOTE_IDS = "manual_title_note_ids"
-
-    // Persistent uninstall/reinstall fallback backup. This is stored in the
-    // user-visible Downloads/Floating Notes folder instead of app-private storage.
-    private val PERSISTENT_BACKUP_FILE_NAME = "floating_notes_backup.json"
-    private val PERSISTENT_BACKUP_FOLDER = "Floating Notes"
-    private val BACKUP_VERSION = 1
-
-    private data class PersistentNotesBackup(
-        val version: Int,
-        val notes: List<NoteItem>,
-        val manualTitleNoteIds: Set<String>
-    )
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
@@ -259,7 +246,16 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             manualTitleNoteIds.clear()
             manualTitleNoteIds.addAll(prefs.getStringSet(KEY_MANUAL_TITLE_NOTE_IDS, emptySet())!!.mapNotNull { it.toLongOrNull() })
             loadSavedPositions()
+
+            // IMPORTANT: the marker is intentionally outside SharedPreferences and
+            // inside getNoBackupFilesDir(). Therefore a missing marker means this is
+            // a genuinely fresh installation, not merely a fresh app process.
+            val isFreshInstall = !hasDiagnosticInstallMarker()
+            val notesKeyWasPresent = prefs.contains(STORAGE_NOTES_LIST)
+
             loadNotes()
+            showRestoreSourceDiagnostic(isFreshInstall, notesKeyWasPresent)
+
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
@@ -273,6 +269,63 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             startConfigurationCheck()
 
         } catch (e: Exception) {
+        }
+    }
+
+    /**
+     * Returns true if this installation has already started at least once.
+     * The marker is deliberately stored in getNoBackupFilesDir() so Android
+     * Auto Backup does not restore it after uninstall/reinstall.
+     */
+    private fun hasDiagnosticInstallMarker(): Boolean {
+        return try {
+            val marker = File(getNoBackupFilesDir(), DIAGNOSTIC_INSTALL_MARKER)
+            if (marker.exists()) {
+                true
+            } else {
+                marker.parentFile?.mkdirs()
+                marker.writeText(System.currentTimeMillis().toString())
+                false
+            }
+        } catch (_: Exception) {
+            // If the marker cannot be written, do not change note behavior.
+            false
+        }
+    }
+
+    /**
+     * Temporary diagnostic only. It does not modify the note database.
+     *
+     * Fresh install + notesKeyWasPresent + notes > 0 means the notes were already
+     * present in SharedPreferences when this new installation started. Because the
+     * current source stores notes under bubble_prefs/notes_list, this strongly
+     * indicates Android backup/device restore rather than a hard-coded note list.
+     */
+    private fun showRestoreSourceDiagnostic(
+        isFreshInstall: Boolean,
+        notesKeyWasPresent: Boolean
+    ) {
+        try {
+            val message = when {
+                isFreshInstall && notesKeyWasPresent && notesList.isNotEmpty() ->
+                    "RESTORE DIAGNOSTIC\nFresh install detected\nSource: SharedPreferences (bubble_prefs / notes_list)\nNotes restored: ${notesList.size}\nLikely: Android Backup/Restore"
+
+                isFreshInstall && !notesKeyWasPresent && notesList.size == 1 &&
+                    notesList[0].title == "Untitled Note" && notesList[0].content.isEmpty() ->
+                    "RESTORE DIAGNOSTIC\nFresh install detected\nSource: No previous notes\nCreated default note: 1"
+
+                isFreshInstall ->
+                    "RESTORE DIAGNOSTIC\nFresh install detected\nSource: SharedPreferences state was not available\nNotes loaded: ${notesList.size}"
+
+                else ->
+                    "RESTORE DIAGNOSTIC\nExisting installation\nSource: SharedPreferences\nNotes loaded: ${notesList.size}"
+            }
+
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
+        } catch (_: Exception) {
+            // Diagnostic must never affect the app.
         }
     }
 
@@ -307,196 +360,42 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     }
 
     private fun loadNotes() {
-        var restoredFromPrefs = false
         val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
-
         if (!notesJson.isNullOrEmpty()) {
             try {
                 val type = object : TypeToken<List<NoteItem>>() {}.type
                 val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
-                if (loaded != null && loaded.isNotEmpty()) {
-                    notesList.clear()
-                    notesList.addAll(loaded)
-                    restoredFromPrefs = true
+                notesList.clear()
+                notesList.addAll(loaded)
+            } catch (e: Exception) {
+                if (notesList.isEmpty()) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
                 }
-            } catch (_: Exception) {
-                restoredFromPrefs = false
+            }
+        } else {
+            if (notesList.isEmpty()) {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             }
         }
-
-        // If Android Auto Backup did not restore bubble_prefs.xml, recover from
-        // the user-visible persistent JSON backup before creating a new note.
-        if (!restoredFromPrefs) {
-            val restored = restoreNotesFromPersistentBackup()
-            if (restored) {
-                restoredFromPrefs = true
-            }
-        }
-
-        if (!restoredFromPrefs && notesList.isEmpty()) {
-            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-        }
-
-        // Re-save restored data into SharedPreferences so Android Auto Backup
-        // can take over again from the current installation.
-        saveNotesToPrefs(writePersistentBackup = true)
+        saveNotesToPrefs()
     }
 
     /**
      * Saves the complete note database synchronously.
      *
-     * The synchronous commit makes sure the latest notes are written to
-     * bubble_prefs.xml before Android's backup transport runs. A second copy is
-     * written to the user-visible Downloads/Floating Notes folder so that a
-     * reinstall can recover notes even when Android did not restore the app's
-     * SharedPreferences.
+     * The synchronous commit is intentional: Android Auto Backup backs up the
+     * SharedPreferences file. Using commit() here makes sure the latest notes
+     * are already written to bubble_prefs.xml before the OS takes a backup.
      */
-    private fun saveNotesToPrefs(writePersistentBackup: Boolean = true) {
+    private fun saveNotesToPrefs() {
         val notesJson = Gson().toJson(notesList)
-        val committed = prefs.edit()
+        prefs.edit()
             .putString(STORAGE_NOTES_LIST, notesJson)
             .putStringSet(
                 KEY_MANUAL_TITLE_NOTE_IDS,
                 manualTitleNoteIds.map { it.toString() }.toSet()
             )
             .commit()
-
-        if (committed) {
-            requestAndroidBackup()
-            if (writePersistentBackup) {
-                writePersistentBackupFile()
-            }
-        }
-    }
-
-    private fun requestAndroidBackup() {
-    try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            BackupManager(this).dataChanged()  // ✅ Correct
-        }
-    } catch (_: Exception) {
-    }
-}
-
-    private fun getPersistentBackupFile(): File {
-        val downloads = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS
-        )
-        return File(File(downloads, PERSISTENT_BACKUP_FOLDER), PERSISTENT_BACKUP_FILE_NAME)
-    }
-
-    /**
-     * Writes the fallback backup. On Android 10+ this uses MediaStore so the
-     * file belongs to shared Downloads storage. On older Android versions it
-     * writes directly to Downloads.
-     */
-    private fun writePersistentBackupFile() {
-        try {
-            val backup = PersistentNotesBackup(
-                version = BACKUP_VERSION,
-                notes = notesList.toList(),
-                manualTitleNoteIds = manualTitleNoteIds.map { it.toString() }.toSet()
-            )
-            val json = Gson().toJson(backup)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                writeBackupWithMediaStore(json)
-            } else {
-                val file = getPersistentBackupFile()
-                file.parentFile?.mkdirs()
-                val temp = File(file.parentFile, file.name + ".tmp")
-                temp.writeText(json, Charsets.UTF_8)
-                if (!temp.renameTo(file)) {
-                    file.writeText(json, Charsets.UTF_8)
-                    temp.delete()
-                }
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun writeBackupWithMediaStore(json: String) {
-        val resolver = contentResolver
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + PERSISTENT_BACKUP_FOLDER + "/"
-
-        var uri: Uri? = null
-        val projection = arrayOf(MediaStore.MediaColumns._ID)
-        val selection =
-            MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
-                MediaStore.MediaColumns.RELATIVE_PATH + "=?"
-        val args = arrayOf(PERSISTENT_BACKUP_FILE_NAME, relativePath)
-
-        resolver.query(collection, projection, selection, args, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(0)
-                uri = Uri.withAppendedPath(collection, id.toString())
-            }
-        }
-
-        if (uri == null) {
-            val values = android.content.ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, PERSISTENT_BACKUP_FILE_NAME)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-            }
-            uri = resolver.insert(collection, values)
-        }
-
-        uri?.let { target ->
-            resolver.openOutputStream(target, "wt")?.use { output ->
-                output.write(json.toByteArray(Charsets.UTF_8))
-                output.flush()
-            }
-        }
-    }
-
-    /**
-     * Restores notes from the persistent Downloads backup. Returns true only
-     * when a valid non-empty note database was recovered.
-     */
-    private fun restoreNotesFromPersistentBackup(): Boolean {
-        return try {
-            val json = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                readBackupWithMediaStore()
-            } else {
-                val file = getPersistentBackupFile()
-                if (file.exists()) file.readText(Charsets.UTF_8) else null
-            } ?: return false
-
-            val backup = Gson().fromJson(json, PersistentNotesBackup::class.java)
-            if (backup == null || backup.notes.isEmpty()) return false
-
-            notesList.clear()
-            notesList.addAll(backup.notes)
-            manualTitleNoteIds.clear()
-            manualTitleNoteIds.addAll(backup.manualTitleNoteIds.mapNotNull { it.toLongOrNull() })
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    private fun readBackupWithMediaStore(): String? {
-        val resolver = contentResolver
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + PERSISTENT_BACKUP_FOLDER + "/"
-        val projection = arrayOf(MediaStore.MediaColumns._ID)
-        val selection =
-            MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
-                MediaStore.MediaColumns.RELATIVE_PATH + "=?"
-        val args = arrayOf(PERSISTENT_BACKUP_FILE_NAME, relativePath)
-
-        resolver.query(collection, projection, selection, args, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(0)
-                val uri = Uri.withAppendedPath(collection, id.toString())
-                resolver.openInputStream(uri)?.use { input ->
-                    return input.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                }
-            }
-        }
-        return null
     }
 
     private fun createNotificationChannel() {
@@ -4842,3 +4741,4 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
+    
