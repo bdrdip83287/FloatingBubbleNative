@@ -3,10 +3,12 @@ package com.dip83287.floatingbubble
 import android.animation.Animator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
+import android.app.backup.BackupManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -22,7 +24,9 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.Uri
 import android.os.*
+import android.os.Environment
 import android.provider.Settings
+import android.provider.MediaStore
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
@@ -43,6 +47,7 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
 import java.io.File
+import java.io.IOException
 
 class FloatingBubbleService : Service() {
 
@@ -66,11 +71,6 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
-    // ✅ External storage file for persistent notes (survives app uninstall)
-    private val NOTES_BACKUP_FILE = "floating_notes_backup.json"
-    private val EXTERNAL_NOTES_FILE: File
-        get() = File(getExternalFilesDir(null), NOTES_BACKUP_FILE)
-
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
     private val KEY_BUBBLE_X = "bubble_x"
@@ -79,6 +79,19 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_HEIGHT = "notepad_height"
     private val KEY_NOTEPAD_X = "notepad_x"
     private val KEY_NOTEPAD_Y = "notepad_y"
+    private val KEY_MANUAL_TITLE_NOTE_IDS = "manual_title_note_ids"
+
+    // Persistent uninstall/reinstall fallback backup. This is stored in the
+    // user-visible Downloads/Floating Notes folder instead of app-private storage.
+    private val PERSISTENT_BACKUP_FILE_NAME = "floating_notes_backup.json"
+    private val PERSISTENT_BACKUP_FOLDER = "Floating Notes"
+    private val BACKUP_VERSION = 1
+
+    private data class PersistentNotesBackup(
+        val version: Int,
+        val notes: List<NoteItem>,
+        val manualTitleNoteIds: Set<String>
+    )
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
@@ -86,6 +99,8 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
+    private val manualTitleNoteIds = mutableSetOf<Long>()
+    private var suppressTitleWatcher = false
 
     // Child-note editor undo/redo state.
     // Each snapshot keeps text + cursor/selection + viewport, so Undo/Redo
@@ -241,19 +256,10 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            manualTitleNoteIds.clear()
+            manualTitleNoteIds.addAll(prefs.getStringSet(KEY_MANUAL_TITLE_NOTE_IDS, emptySet())!!.mapNotNull { it.toLongOrNull() })
             loadSavedPositions()
-            
-            // ✅ First try to load from external storage (survives uninstall)
-            // If external file exists, load from there and sync to SharedPreferences
-            // Otherwise load from SharedPreferences (for backward compatibility)
-            if (EXTERNAL_NOTES_FILE.exists()) {
-                loadNotesFromExternalStorage()
-            } else {
-                loadNotes()
-                // Save to external storage for future
-                saveNotesToExternalStorage()
-            }
-            
+            loadNotes()
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
@@ -300,63 +306,197 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         configCheckHandler.postDelayed(runnable, 500)
     }
 
-    // ============================================================
-    // ✅ EXTERNAL STORAGE PERSISTENCE
-    // Notes survive app uninstall and restore automatically
-    // ============================================================
-    
-    private fun loadNotesFromExternalStorage() {
-        try {
-            val json = EXTERNAL_NOTES_FILE.readText()
-            val type = object : TypeToken<List<NoteItem>>() {}.type
-            val loaded: List<NoteItem> = Gson().fromJson(json, type)
-            notesList.clear()
-            notesList.addAll(loaded)
-            
-            // Also sync to SharedPreferences for backward compatibility
-            saveNotesToPrefs()
-            
-        } catch (e: Exception) {
-            // If external file is corrupted, fallback to SharedPreferences
-            loadNotes()
-        }
-    }
-    
-    private fun saveNotesToExternalStorage() {
-        try {
-            val json = Gson().toJson(notesList)
-            EXTERNAL_NOTES_FILE.writeText(json)
-        } catch (e: Exception) {
-            // Silently fail - SharedPreferences will still have the data
-        }
-    }
-
     private fun loadNotes() {
+        var restoredFromPrefs = false
         val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
+
         if (!notesJson.isNullOrEmpty()) {
             try {
                 val type = object : TypeToken<List<NoteItem>>() {}.type
                 val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
-                notesList.clear()
-                notesList.addAll(loaded)
-            } catch (e: Exception) {
-                if (notesList.isEmpty()) {
-                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                if (loaded != null && loaded.isNotEmpty()) {
+                    notesList.clear()
+                    notesList.addAll(loaded)
+                    restoredFromPrefs = true
                 }
-            }
-        } else {
-            if (notesList.isEmpty()) {
-                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            } catch (_: Exception) {
+                restoredFromPrefs = false
             }
         }
-        saveNotesToPrefs()
+
+        // If Android Auto Backup did not restore bubble_prefs.xml, recover from
+        // the user-visible persistent JSON backup before creating a new note.
+        if (!restoredFromPrefs) {
+            val restored = restoreNotesFromPersistentBackup()
+            if (restored) {
+                restoredFromPrefs = true
+            }
+        }
+
+        if (!restoredFromPrefs && notesList.isEmpty()) {
+            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+        }
+
+        // Re-save restored data into SharedPreferences so Android Auto Backup
+        // can take over again from the current installation.
+        saveNotesToPrefs(writePersistentBackup = true)
     }
 
-    private fun saveNotesToPrefs() {
+    /**
+     * Saves the complete note database synchronously.
+     *
+     * The synchronous commit makes sure the latest notes are written to
+     * bubble_prefs.xml before Android's backup transport runs. A second copy is
+     * written to the user-visible Downloads/Floating Notes folder so that a
+     * reinstall can recover notes even when Android did not restore the app's
+     * SharedPreferences.
+     */
+    private fun saveNotesToPrefs(writePersistentBackup: Boolean = true) {
         val notesJson = Gson().toJson(notesList)
-        prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-        // ✅ Also save to external storage so notes survive uninstall
-        saveNotesToExternalStorage()
+        val committed = prefs.edit()
+            .putString(STORAGE_NOTES_LIST, notesJson)
+            .putStringSet(
+                KEY_MANUAL_TITLE_NOTE_IDS,
+                manualTitleNoteIds.map { it.toString() }.toSet()
+            )
+            .commit()
+
+        if (committed) {
+            requestAndroidBackup()
+            if (writePersistentBackup) {
+                writePersistentBackupFile()
+            }
+        }
+    }
+
+    private fun requestAndroidBackup() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                BackupManager.dataChanged(this)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun getPersistentBackupFile(): File {
+        val downloads = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS
+        )
+        return File(File(downloads, PERSISTENT_BACKUP_FOLDER), PERSISTENT_BACKUP_FILE_NAME)
+    }
+
+    /**
+     * Writes the fallback backup. On Android 10+ this uses MediaStore so the
+     * file belongs to shared Downloads storage. On older Android versions it
+     * writes directly to Downloads.
+     */
+    private fun writePersistentBackupFile() {
+        try {
+            val backup = PersistentNotesBackup(
+                version = BACKUP_VERSION,
+                notes = notesList.toList(),
+                manualTitleNoteIds = manualTitleNoteIds.map { it.toString() }.toSet()
+            )
+            val json = Gson().toJson(backup)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                writeBackupWithMediaStore(json)
+            } else {
+                val file = getPersistentBackupFile()
+                file.parentFile?.mkdirs()
+                val temp = File(file.parentFile, file.name + ".tmp")
+                temp.writeText(json, Charsets.UTF_8)
+                if (!temp.renameTo(file)) {
+                    file.writeText(json, Charsets.UTF_8)
+                    temp.delete()
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun writeBackupWithMediaStore(json: String) {
+        val resolver = contentResolver
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + PERSISTENT_BACKUP_FOLDER + "/"
+
+        var uri: Uri? = null
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection =
+            MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
+                MediaStore.MediaColumns.RELATIVE_PATH + "=?"
+        val args = arrayOf(PERSISTENT_BACKUP_FILE_NAME, relativePath)
+
+        resolver.query(collection, projection, selection, args, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(0)
+                uri = Uri.withAppendedPath(collection, id.toString())
+            }
+        }
+
+        if (uri == null) {
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, PERSISTENT_BACKUP_FILE_NAME)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            }
+            uri = resolver.insert(collection, values)
+        }
+
+        uri?.let { target ->
+            resolver.openOutputStream(target, "wt")?.use { output ->
+                output.write(json.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+        }
+    }
+
+    /**
+     * Restores notes from the persistent Downloads backup. Returns true only
+     * when a valid non-empty note database was recovered.
+     */
+    private fun restoreNotesFromPersistentBackup(): Boolean {
+        return try {
+            val json = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                readBackupWithMediaStore()
+            } else {
+                val file = getPersistentBackupFile()
+                if (file.exists()) file.readText(Charsets.UTF_8) else null
+            } ?: return false
+
+            val backup = Gson().fromJson(json, PersistentNotesBackup::class.java)
+            if (backup == null || backup.notes.isEmpty()) return false
+
+            notesList.clear()
+            notesList.addAll(backup.notes)
+            manualTitleNoteIds.clear()
+            manualTitleNoteIds.addAll(backup.manualTitleNoteIds.mapNotNull { it.toLongOrNull() })
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun readBackupWithMediaStore(): String? {
+        val resolver = contentResolver
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + PERSISTENT_BACKUP_FOLDER + "/"
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection =
+            MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
+                MediaStore.MediaColumns.RELATIVE_PATH + "=?"
+        val args = arrayOf(PERSISTENT_BACKUP_FILE_NAME, relativePath)
+
+        resolver.query(collection, projection, selection, args, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(0)
+                val uri = Uri.withAppendedPath(collection, id.toString())
+                resolver.openInputStream(uri)?.use { input ->
+                    return input.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                }
+            }
+        }
+        return null
     }
 
     private fun createNotificationChannel() {
@@ -3082,7 +3222,7 @@ params.y =
         // The number is kept in a small fixed TextView, while the title itself
         // is a real EditText. Therefore the user can freely edit the title
         // without accidentally changing the note's serial number.
-        var titleWasEditedManually = false
+        var titleWasEditedManually = manualTitleNoteIds.contains(note.id)
 
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -3154,8 +3294,16 @@ params.y =
                 override fun onTextChanged(
                     s: CharSequence?, start: Int, before: Int, count: Int
                 ) {
-                    if (hasFocus()) {
-                        titleWasEditedManually = true
+                    if (!suppressTitleWatcher && hasFocus()) {
+                        // A real user edit makes the title manual. Clearing it
+                        // switches automatic first-line titling back on.
+                        titleWasEditedManually = !s.isNullOrBlank()
+                        if (titleWasEditedManually) {
+                            manualTitleNoteIds.add(note.id)
+                        } else {
+                            manualTitleNoteIds.remove(note.id)
+                        }
+                        saveNotesToPrefs()
                     }
                 }
 
@@ -3404,13 +3552,62 @@ params.y =
 
                     if (titleInput.text.toString() != newTitle) {
                         internalChange = true
+                        suppressTitleWatcher = true
                         titleInput.setText(newTitle)
                         titleInput.setSelection(titleInput.text.length)
+                        suppressTitleWatcher = false
                         internalChange = false
                     }
                 }
 
                 override fun afterTextChanged(s: Editable?) {
+                }
+            })
+
+            // If text is replaced while a selection exists (typing over the
+            // selection or pasting into it), the custom Action Bar and both
+            // selection handles must disappear immediately.
+            // This deliberately ignores undo/redo restores.
+            addTextChangedListener(object : TextWatcher {
+                private var selectionWasBeingReplaced = false
+
+                override fun beforeTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    count: Int,
+                    after: Int
+                ) {
+                    val liveStart = editText.selectionStart
+                    val liveEnd = editText.selectionEnd
+                    val liveNonEmpty = liveStart >= 0 && liveEnd >= 0 && liveStart != liveEnd
+                    val rememberedNonEmpty =
+                        lastNonEmptySelectionStart >= 0 &&
+                        lastNonEmptySelectionEnd > lastNonEmptySelectionStart &&
+                        lastNonEmptySelectionEnd <= (s?.length ?: editText.length())
+
+                    selectionWasBeingReplaced =
+                        !suppressEditorHistory &&
+                        count > 0 &&
+                        (liveNonEmpty || rememberedNonEmpty) &&
+                        (isActionBarVisible || areHandlesVisible || liveNonEmpty)
+                }
+
+                override fun onTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    before: Int,
+                    count: Int
+                ) {
+                }
+
+                override fun afterTextChanged(s: Editable?) {
+                    if (selectionWasBeingReplaced) {
+                        currentSelectedText = ""
+                        hideSelectionHandles()
+                        hideFloatingActionBar()
+                        isActionBarTemporarilyHidden = false
+                        selectionWasBeingReplaced = false
+                    }
                 }
             })
 
@@ -4080,8 +4277,16 @@ setOnTouchListener(object : View.OnTouchListener {
         val end = editText.selectionEnd.coerceAtLeast(0)
         val a = minOf(start, end)
         val b = maxOf(start, end)
+        val hadSelection = a != b
         editText.text.replace(a, b, pasted)
         editText.setSelection((a + pasted.length).coerceAtMost(editText.length()))
+        if (hadSelection) {
+            currentSelectedText = ""
+            lastNonEmptySelectionStart = -1
+            lastNonEmptySelectionEnd = -1
+            hideSelectionHandles()
+            hideFloatingActionBar()
+        }
     }
 
     private fun toggleEditorLock() {
@@ -4111,6 +4316,11 @@ setOnTouchListener(object : View.OnTouchListener {
                 val contentText = editText.text.toString()
                 val finalTitle = rawTitle.ifEmpty {
                     getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+                }
+                if (rawTitle.isBlank()) {
+                    manualTitleNoteIds.remove(noteId)
+                } else {
+                    manualTitleNoteIds.add(noteId)
                 }
                 notesList[index] = notesList[index].copy(
                     title = finalTitle,
@@ -4173,6 +4383,12 @@ setOnTouchListener(object : View.OnTouchListener {
             val contentText = editText.text.toString()
             val finalTitle = rawTitle.ifEmpty {
                 getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+            }
+
+            if (rawTitle.isBlank()) {
+                manualTitleNoteIds.remove(noteId)
+            } else {
+                manualTitleNoteIds.add(noteId)
             }
 
             val updatedNote = notesList[index].copy(
@@ -4601,6 +4817,15 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     override fun onDestroy() {
+        // Final synchronous write so the newest notes are present in
+        // SharedPreferences before the service/process disappears.
+        try {
+            if (::prefs.isInitialized) {
+                saveNotesToPrefs()
+            }
+        } catch (_: Exception) {
+        }
+
         super.onDestroy()
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
