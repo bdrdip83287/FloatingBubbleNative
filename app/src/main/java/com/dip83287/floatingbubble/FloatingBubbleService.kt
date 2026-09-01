@@ -23,6 +23,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.Uri
 import android.os.*
+import java.io.File
 import android.provider.Settings
 import android.provider.MediaStore
 import android.text.Editable
