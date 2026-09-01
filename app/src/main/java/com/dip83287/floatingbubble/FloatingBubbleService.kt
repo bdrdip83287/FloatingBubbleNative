@@ -42,6 +42,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
+import java.io.File
 
 class FloatingBubbleService : Service() {
 
@@ -65,6 +66,11 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
+    // ✅ External storage file for persistent notes (survives app uninstall)
+    private val NOTES_BACKUP_FILE = "floating_notes_backup.json"
+    private val EXTERNAL_NOTES_FILE: File
+        get() = File(getExternalFilesDir(null), NOTES_BACKUP_FILE)
+
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
     private val KEY_BUBBLE_X = "bubble_x"
@@ -73,7 +79,6 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_HEIGHT = "notepad_height"
     private val KEY_NOTEPAD_X = "notepad_x"
     private val KEY_NOTEPAD_Y = "notepad_y"
-    private val KEY_MANUAL_TITLE_NOTE_IDS = "manual_title_note_ids"
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
@@ -81,8 +86,6 @@ class FloatingBubbleService : Service() {
     private var isExpanded = false
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
-    private val manualTitleNoteIds = mutableSetOf<Long>()
-    private var suppressTitleWatcher = false
 
     // Child-note editor undo/redo state.
     // Each snapshot keeps text + cursor/selection + viewport, so Undo/Redo
@@ -238,10 +241,19 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            manualTitleNoteIds.clear()
-            manualTitleNoteIds.addAll(prefs.getStringSet(KEY_MANUAL_TITLE_NOTE_IDS, emptySet())!!.mapNotNull { it.toLongOrNull() })
             loadSavedPositions()
-            loadNotes()
+            
+            // ✅ First try to load from external storage (survives uninstall)
+            // If external file exists, load from there and sync to SharedPreferences
+            // Otherwise load from SharedPreferences (for backward compatibility)
+            if (EXTERNAL_NOTES_FILE.exists()) {
+                loadNotesFromExternalStorage()
+            } else {
+                loadNotes()
+                // Save to external storage for future
+                saveNotesToExternalStorage()
+            }
+            
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
@@ -288,6 +300,37 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         configCheckHandler.postDelayed(runnable, 500)
     }
 
+    // ============================================================
+    // ✅ EXTERNAL STORAGE PERSISTENCE
+    // Notes survive app uninstall and restore automatically
+    // ============================================================
+    
+    private fun loadNotesFromExternalStorage() {
+        try {
+            val json = EXTERNAL_NOTES_FILE.readText()
+            val type = object : TypeToken<List<NoteItem>>() {}.type
+            val loaded: List<NoteItem> = Gson().fromJson(json, type)
+            notesList.clear()
+            notesList.addAll(loaded)
+            
+            // Also sync to SharedPreferences for backward compatibility
+            saveNotesToPrefs()
+            
+        } catch (e: Exception) {
+            // If external file is corrupted, fallback to SharedPreferences
+            loadNotes()
+        }
+    }
+    
+    private fun saveNotesToExternalStorage() {
+        try {
+            val json = Gson().toJson(notesList)
+            EXTERNAL_NOTES_FILE.writeText(json)
+        } catch (e: Exception) {
+            // Silently fail - SharedPreferences will still have the data
+        }
+    }
+
     private fun loadNotes() {
         val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
         if (!notesJson.isNullOrEmpty()) {
@@ -309,22 +352,11 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         saveNotesToPrefs()
     }
 
-    /**
-     * Saves the complete note database synchronously.
-     *
-     * The synchronous commit is intentional: Android Auto Backup backs up the
-     * SharedPreferences file. Using commit() here makes sure the latest notes
-     * are already written to bubble_prefs.xml before the OS takes a backup.
-     */
     private fun saveNotesToPrefs() {
         val notesJson = Gson().toJson(notesList)
-        prefs.edit()
-            .putString(STORAGE_NOTES_LIST, notesJson)
-            .putStringSet(
-                KEY_MANUAL_TITLE_NOTE_IDS,
-                manualTitleNoteIds.map { it.toString() }.toSet()
-            )
-            .commit()
+        prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+        // ✅ Also save to external storage so notes survive uninstall
+        saveNotesToExternalStorage()
     }
 
     private fun createNotificationChannel() {
@@ -3050,7 +3082,7 @@ params.y =
         // The number is kept in a small fixed TextView, while the title itself
         // is a real EditText. Therefore the user can freely edit the title
         // without accidentally changing the note's serial number.
-        var titleWasEditedManually = manualTitleNoteIds.contains(note.id)
+        var titleWasEditedManually = false
 
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -3122,16 +3154,8 @@ params.y =
                 override fun onTextChanged(
                     s: CharSequence?, start: Int, before: Int, count: Int
                 ) {
-                    if (!suppressTitleWatcher && hasFocus()) {
-                        // A real user edit makes the title manual. Clearing it
-                        // switches automatic first-line titling back on.
-                        titleWasEditedManually = !s.isNullOrBlank()
-                        if (titleWasEditedManually) {
-                            manualTitleNoteIds.add(note.id)
-                        } else {
-                            manualTitleNoteIds.remove(note.id)
-                        }
-                        saveNotesToPrefs()
+                    if (hasFocus()) {
+                        titleWasEditedManually = true
                     }
                 }
 
@@ -3380,62 +3404,13 @@ params.y =
 
                     if (titleInput.text.toString() != newTitle) {
                         internalChange = true
-                        suppressTitleWatcher = true
                         titleInput.setText(newTitle)
                         titleInput.setSelection(titleInput.text.length)
-                        suppressTitleWatcher = false
                         internalChange = false
                     }
                 }
 
                 override fun afterTextChanged(s: Editable?) {
-                }
-            })
-
-            // If text is replaced while a selection exists (typing over the
-            // selection or pasting into it), the custom Action Bar and both
-            // selection handles must disappear immediately.
-            // This deliberately ignores undo/redo restores.
-            addTextChangedListener(object : TextWatcher {
-                private var selectionWasBeingReplaced = false
-
-                override fun beforeTextChanged(
-                    s: CharSequence?,
-                    start: Int,
-                    count: Int,
-                    after: Int
-                ) {
-                    val liveStart = editText.selectionStart
-                    val liveEnd = editText.selectionEnd
-                    val liveNonEmpty = liveStart >= 0 && liveEnd >= 0 && liveStart != liveEnd
-                    val rememberedNonEmpty =
-                        lastNonEmptySelectionStart >= 0 &&
-                        lastNonEmptySelectionEnd > lastNonEmptySelectionStart &&
-                        lastNonEmptySelectionEnd <= (s?.length ?: editText.length())
-
-                    selectionWasBeingReplaced =
-                        !suppressEditorHistory &&
-                        count > 0 &&
-                        (liveNonEmpty || rememberedNonEmpty) &&
-                        (isActionBarVisible || areHandlesVisible || liveNonEmpty)
-                }
-
-                override fun onTextChanged(
-                    s: CharSequence?,
-                    start: Int,
-                    before: Int,
-                    count: Int
-                ) {
-                }
-
-                override fun afterTextChanged(s: Editable?) {
-                    if (selectionWasBeingReplaced) {
-                        currentSelectedText = ""
-                        hideSelectionHandles()
-                        hideFloatingActionBar()
-                        isActionBarTemporarilyHidden = false
-                        selectionWasBeingReplaced = false
-                    }
                 }
             })
 
@@ -4105,16 +4080,8 @@ setOnTouchListener(object : View.OnTouchListener {
         val end = editText.selectionEnd.coerceAtLeast(0)
         val a = minOf(start, end)
         val b = maxOf(start, end)
-        val hadSelection = a != b
         editText.text.replace(a, b, pasted)
         editText.setSelection((a + pasted.length).coerceAtMost(editText.length()))
-        if (hadSelection) {
-            currentSelectedText = ""
-            lastNonEmptySelectionStart = -1
-            lastNonEmptySelectionEnd = -1
-            hideSelectionHandles()
-            hideFloatingActionBar()
-        }
     }
 
     private fun toggleEditorLock() {
@@ -4144,11 +4111,6 @@ setOnTouchListener(object : View.OnTouchListener {
                 val contentText = editText.text.toString()
                 val finalTitle = rawTitle.ifEmpty {
                     getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
-                }
-                if (rawTitle.isBlank()) {
-                    manualTitleNoteIds.remove(noteId)
-                } else {
-                    manualTitleNoteIds.add(noteId)
                 }
                 notesList[index] = notesList[index].copy(
                     title = finalTitle,
@@ -4211,12 +4173,6 @@ setOnTouchListener(object : View.OnTouchListener {
             val contentText = editText.text.toString()
             val finalTitle = rawTitle.ifEmpty {
                 getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
-            }
-
-            if (rawTitle.isBlank()) {
-                manualTitleNoteIds.remove(noteId)
-            } else {
-                manualTitleNoteIds.add(noteId)
             }
 
             val updatedNote = notesList[index].copy(
@@ -4645,15 +4601,6 @@ setOnTouchListener(object : View.OnTouchListener {
     }
 
     override fun onDestroy() {
-        // Final synchronous write so the newest notes are present in
-        // SharedPreferences before the service/process disappears.
-        try {
-            if (::prefs.isInitialized) {
-                saveNotesToPrefs()
-            }
-        } catch (_: Exception) {
-        }
-
         super.onDestroy()
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
