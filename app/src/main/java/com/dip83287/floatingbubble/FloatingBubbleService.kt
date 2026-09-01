@@ -372,7 +372,7 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     private fun requestAndroidBackup() {
     try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            BackupManager(this).dataChanged(packageName)
+            BackupManager(this).dataChanged()  // ✅ Correct
         }
     } catch (_: Exception) {
     }
