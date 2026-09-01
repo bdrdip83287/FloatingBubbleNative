@@ -3,13 +3,11 @@ package com.dip83287.floatingbubble
 import android.animation.Animator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
-import android.app.backup.BackupManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.ClipboardManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -25,8 +23,6 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
-import android.provider.MediaStore
-import android.provider.DocumentsContract
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
@@ -46,9 +42,6 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
-import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 
 class FloatingBubbleService : Service() {
 
@@ -81,14 +74,6 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_X = "notepad_x"
     private val KEY_NOTEPAD_Y = "notepad_y"
     private val KEY_MANUAL_TITLE_NOTE_IDS = "manual_title_note_ids"
-
-    // Persistent uninstall-safe backup. The primary copy remains in SharedPreferences
-    // so the existing app behavior is unchanged; this second copy is stored in the
-    // public Downloads/Floating Notes folder so it can survive app uninstall.
-    private val PERSISTENT_BACKUP_FILE_NAME = "floating_notes_backup.json"
-    private val PERSISTENT_BACKUP_FOLDER = "Floating Notes"
-    private val persistentBackupHandler = Handler(Looper.getMainLooper())
-    private var persistentBackupRunnable: Runnable? = null
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
@@ -247,11 +232,6 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         var isLocked: Boolean = false
     )
 
-    private data class PersistentBackupData(
-        val notes: List<NoteItem>,
-        val manualTitleNoteIds: Set<Long>
-    )
-
     override fun onCreate() {
         super.onCreate()
         try {
@@ -309,176 +289,42 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     }
 
     private fun loadNotes() {
-        var restoredFromPrefs = false
         val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
-
         if (!notesJson.isNullOrEmpty()) {
             try {
                 val type = object : TypeToken<List<NoteItem>>() {}.type
                 val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
                 notesList.clear()
                 notesList.addAll(loaded)
-                restoredFromPrefs = true
-            } catch (_: Exception) {
-                restoredFromPrefs = false
+            } catch (e: Exception) {
+                if (notesList.isEmpty()) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+            }
+        } else {
+            if (notesList.isEmpty()) {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             }
         }
-
-        // If Android Auto Backup did not restore bubble_prefs, try the
-        // uninstall-safe copy in shared Downloads before creating a new note.
-        if (!restoredFromPrefs) {
-            restoredFromPrefs = restoreNotesFromPersistentBackup()
-        }
-
-        if (!restoredFromPrefs && notesList.isEmpty()) {
-            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-        }
-
-        // Keep both backup layers synchronized with the restored/current data.
         saveNotesToPrefs()
     }
 
     /**
-     * Saves the complete note database synchronously to SharedPreferences,
-     * schedules the persistent shared-storage backup, and notifies Android
-     * Auto Backup that the app data has changed.
+     * Saves the complete note database synchronously.
+     *
+     * The synchronous commit is intentional: Android Auto Backup backs up the
+     * SharedPreferences file. Using commit() here makes sure the latest notes
+     * are already written to bubble_prefs.xml before the OS takes a backup.
      */
     private fun saveNotesToPrefs() {
         val notesJson = Gson().toJson(notesList)
-        val committed = prefs.edit()
+        prefs.edit()
             .putString(STORAGE_NOTES_LIST, notesJson)
             .putStringSet(
                 KEY_MANUAL_TITLE_NOTE_IDS,
                 manualTitleNoteIds.map { it.toString() }.toSet()
             )
             .commit()
-
-        if (committed) {
-            schedulePersistentBackup()
-            try {
-                BackupManager.dataChanged(packageName)
-            } catch (_: Exception) {
-                // Auto Backup is optional; the persistent shared-storage copy
-                // remains the second recovery path.
-            }
-        }
-    }
-
-    private fun schedulePersistentBackup() {
-        persistentBackupRunnable?.let { persistentBackupHandler.removeCallbacks(it) }
-        persistentBackupRunnable = Runnable {
-            writePersistentBackup()
-        }
-        persistentBackupHandler.postDelayed(persistentBackupRunnable!!, 700L)
-    }
-
-    /**
-     * Writes a complete, self-contained JSON backup to the public Downloads
-     * folder. Files in shared storage are not removed merely because the app
-     * package is uninstalled, so this acts as the fallback recovery source.
-     */
-    private fun writePersistentBackup() {
-        try {
-            val backup = PersistentBackupData(
-                notes = notesList.toList(),
-                manualTitleNoteIds = manualTitleNoteIds.toSet()
-            )
-            val json = Gson().toJson(backup)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = contentResolver
-                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + PERSISTENT_BACKUP_FOLDER
-
-                val projection = arrayOf(MediaStore.Downloads._ID)
-                val selection = "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?"
-                val args = arrayOf(PERSISTENT_BACKUP_FILE_NAME, relativePath + "/")
-
-                var existingUri: Uri? = null
-                resolver.query(collection, projection, selection, args, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                        existingUri = Uri.withAppendedPath(collection, id.toString())
-                    }
-                }
-
-                val uri = existingUri ?: run {
-                    val values = ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, PERSISTENT_BACKUP_FILE_NAME)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                        put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
-                        put(MediaStore.Downloads.IS_PENDING, 1)
-                    }
-                    resolver.insert(collection, values)
-                }
-
-                if (uri != null) {
-                    resolver.openOutputStream(uri, "wt")?.use { output ->
-                        output.write(json.toByteArray(Charsets.UTF_8))
-                        output.flush()
-                    }
-
-                    if (existingUri == null) {
-                        val values = ContentValues().apply {
-                            put(MediaStore.Downloads.IS_PENDING, 0)
-                        }
-                        resolver.update(uri, values, null, null)
-                    }
-                }
-            } else {
-                val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val folder = File(downloads, PERSISTENT_BACKUP_FOLDER)
-                if (!folder.exists()) folder.mkdirs()
-                val file = File(folder, PERSISTENT_BACKUP_FILE_NAME)
-                FileOutputStream(file, false).use { output ->
-                    output.write(json.toByteArray(Charsets.UTF_8))
-                    output.flush()
-                    output.fd.sync()
-                }
-            }
-        } catch (_: Exception) {
-            // SharedPreferences + Android Auto Backup remain the primary path.
-        }
-    }
-
-    /**
-     * Restores the persistent shared-storage backup when SharedPreferences
-     * was removed by uninstall and Android Auto Backup did not restore it.
-     */
-    private fun restoreNotesFromPersistentBackup(): Boolean {
-        return try {
-            val json = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(MediaStore.Downloads._ID)
-                val selection = "${MediaStore.Downloads.DISPLAY_NAME}=?"
-                val args = arrayOf(PERSISTENT_BACKUP_FILE_NAME)
-                var uri: Uri? = null
-                contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                        uri = Uri.withAppendedPath(collection, id.toString())
-                    }
-                }
-                uri?.let { contentResolver.openInputStream(it)?.bufferedReader(Charsets.UTF_8)?.use { reader -> reader.readText() } }
-            } else {
-                val file = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "$PERSISTENT_BACKUP_FOLDER/$PERSISTENT_BACKUP_FILE_NAME"
-                )
-                if (file.exists()) FileInputStream(file).bufferedReader(Charsets.UTF_8).use { it.readText() } else null
-            } ?: return false
-
-            val backup = Gson().fromJson(json, PersistentBackupData::class.java)
-                ?: return false
-
-            notesList.clear()
-            notesList.addAll(backup.notes)
-            manualTitleNoteIds.clear()
-            manualTitleNoteIds.addAll(backup.manualTitleNoteIds)
-            true
-        } catch (_: Exception) {
-            false
-        }
     }
 
     private fun createNotificationChannel() {
@@ -4803,11 +4649,7 @@ setOnTouchListener(object : View.OnTouchListener {
         // SharedPreferences before the service/process disappears.
         try {
             if (::prefs.isInitialized) {
-                persistentBackupRunnable?.let { persistentBackupHandler.removeCallbacks(it) }
                 saveNotesToPrefs()
-                // Flush the persistent copy immediately instead of waiting for
-                // the debounce timer because the service is being destroyed.
-                writePersistentBackup()
             }
         } catch (_: Exception) {
         }
@@ -4828,4 +4670,3 @@ setOnTouchListener(object : View.OnTouchListener {
 
     override fun onBind(intent: Intent?) = null
 }
-    
