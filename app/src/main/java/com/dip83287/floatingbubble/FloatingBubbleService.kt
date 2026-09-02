@@ -239,6 +239,18 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
 
     override fun onCreate() {
         super.onCreate()
+
+        // DIAGNOSTIC: show immediately so we can confirm that the Service itself starts.
+        // This is intentionally before any SharedPreferences/UI initialization.
+        try {
+            Toast.makeText(
+                this,
+                "RESTORE DIAGNOSTIC\nFloatingBubbleService started",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (_: Exception) {
+        }
+
         try {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -269,6 +281,15 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             startConfigurationCheck()
 
         } catch (e: Exception) {
+            // DIAGNOSTIC: never hide startup errors.
+            try {
+                Toast.makeText(
+                    this,
+                    "RESTORE DIAGNOSTIC\nService startup error: ${e.javaClass.simpleName}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (_: Exception) {
+            }
         }
     }
 
