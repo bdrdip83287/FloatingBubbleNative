@@ -255,6 +255,14 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+
+            // DIAGNOSTIC STEP 2: confirm SharedPreferences initialization itself.
+            Toast.makeText(
+                this,
+                "RESTORE DIAGNOSTIC\nStep 2: SharedPreferences initialized",
+                Toast.LENGTH_LONG
+            ).show()
+
             manualTitleNoteIds.clear()
             manualTitleNoteIds.addAll(prefs.getStringSet(KEY_MANUAL_TITLE_NOTE_IDS, emptySet())!!.mapNotNull { it.toLongOrNull() })
             loadSavedPositions()
@@ -265,7 +273,28 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             val isFreshInstall = !hasDiagnosticInstallMarker()
             val notesKeyWasPresent = prefs.contains(STORAGE_NOTES_LIST)
 
+            // DIAGNOSTIC STEP 3: inspect the note key BEFORE loadNotes().
+            val rawNotesJson = prefs.getString(STORAGE_NOTES_LIST, null)
+            Toast.makeText(
+                this,
+                "RESTORE DIAGNOSTIC\nStep 3: notesKeyPresent=$notesKeyWasPresent\nJSON chars=${rawNotesJson?.length ?: 0}",
+                Toast.LENGTH_LONG
+            ).show()
+
             loadNotes()
+
+            // DIAGNOSTIC STEP 4: show the actual note count after loadNotes().
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    Toast.makeText(
+                        this,
+                        "RESTORE DIAGNOSTIC\nStep 4: loadNotes() finished\nNotes loaded: ${notesList.size}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (_: Exception) {
+                }
+            }, 3500L)
+
             showRestoreSourceDiagnostic(isFreshInstall, notesKeyWasPresent)
 
             createNotificationChannel()
