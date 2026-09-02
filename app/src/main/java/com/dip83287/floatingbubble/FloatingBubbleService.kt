@@ -283,17 +283,7 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
 
             loadNotes()
 
-            // DIAGNOSTIC STEP 4: show the actual note count after loadNotes().
-            Handler(Looper.getMainLooper()).postDelayed({
-                try {
-                    Toast.makeText(
-                        this,
-                        "RESTORE DIAGNOSTIC\nStep 4: loadNotes() finished\nNotes loaded: ${notesList.size}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                } catch (_: Exception) {
-                }
-            }, 3500L)
+            // DIAGNOSTIC STEP 4 is now instrumented inside loadNotes() itself.
 
             showRestoreSourceDiagnostic(isFreshInstall, notesKeyWasPresent)
 
@@ -409,25 +399,79 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         configCheckHandler.postDelayed(runnable, 500)
     }
 
+    private fun diagnosticToast(message: String) {
+        try {
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    Toast.makeText(this, "RESTORE DIAGNOSTIC\n$message", Toast.LENGTH_LONG).show()
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private fun loadNotes() {
-        val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
+        diagnosticToast("Step 4A: loadNotes() entered")
+
+        var notesJson: String? = null
+        try {
+            notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
+            diagnosticToast(
+                "Step 4B: prefs.getString() finished\nJSON chars=${notesJson?.length ?: 0}"
+            )
+        } catch (e: Exception) {
+            diagnosticToast(
+                "Step 4B ERROR: prefs.getString()\n${e.javaClass.simpleName}: ${e.message}"
+            )
+            throw e
+        }
+
         if (!notesJson.isNullOrEmpty()) {
+            diagnosticToast("Step 4C: JSON exists; Gson parsing about to start")
             try {
                 val type = object : TypeToken<List<NoteItem>>() {}.type
+                diagnosticToast("Step 4D: TypeToken created; Gson.fromJson() about to start")
+
                 val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
+                diagnosticToast(
+                    "Step 4E: Gson.fromJson() finished\nLoaded objects=${loaded.size}"
+                )
+
                 notesList.clear()
+                diagnosticToast("Step 4F: notesList.clear() finished")
+
                 notesList.addAll(loaded)
+                diagnosticToast("Step 4G: notesList.addAll() finished\nCurrent notes=${notesList.size}")
             } catch (e: Exception) {
+                diagnosticToast(
+                    "Step 4X ERROR: Gson/list processing\n${e.javaClass.simpleName}: ${e.message}"
+                )
                 if (notesList.isEmpty()) {
                     notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                    diagnosticToast("Step 4Y: fallback default note created")
                 }
             }
         } else {
+            diagnosticToast("Step 4C: JSON is empty; default-note branch")
             if (notesList.isEmpty()) {
                 notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                diagnosticToast("Step 4D: default note created")
             }
         }
-        saveNotesToPrefs()
+
+        diagnosticToast("Step 4H: about to call saveNotesToPrefs()")
+        try {
+            saveNotesToPrefs()
+            diagnosticToast("Step 4I: saveNotesToPrefs() finished\nNotes=${notesList.size}")
+        } catch (e: Exception) {
+            diagnosticToast(
+                "Step 4Z ERROR: saveNotesToPrefs()\n${e.javaClass.simpleName}: ${e.message}"
+            )
+            throw e
+        }
+
+        diagnosticToast("Step 4J: loadNotes() completely finished\nNotes=${notesList.size}")
     }
 
     /**
@@ -438,14 +482,22 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
      * are already written to bubble_prefs.xml before the OS takes a backup.
      */
     private fun saveNotesToPrefs() {
+        diagnosticToast("Step 4H-1: saveNotesToPrefs() entered")
+
         val notesJson = Gson().toJson(notesList)
-        prefs.edit()
+        diagnosticToast("Step 4H-2: Gson.toJson() finished\nJSON chars=${notesJson.length}")
+
+        val editor = prefs.edit()
             .putString(STORAGE_NOTES_LIST, notesJson)
             .putStringSet(
                 KEY_MANUAL_TITLE_NOTE_IDS,
                 manualTitleNoteIds.map { it.toString() }.toSet()
             )
-            .commit()
+
+        diagnosticToast("Step 4H-3: SharedPreferences.Editor prepared; commit() about to start")
+
+        val committed = editor.commit()
+        diagnosticToast("Step 4H-4: commit() returned=$committed")
     }
 
     private fun createNotificationChannel() {
