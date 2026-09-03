@@ -64,7 +64,7 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
-    // ✅ External storage file for persistent notes (survives app uninstall)
+    // ✅ External storage file for persistent notes
     private val NOTES_BACKUP_FILE = "floating_notes_backup.json"
     private val EXTERNAL_NOTES_FILE: File
         get() = File(getExternalFilesDir(null), NOTES_BACKUP_FILE)
@@ -217,37 +217,39 @@ class FloatingBubbleService : Service() {
     )
 
     override fun onCreate() {
-    super.onCreate()
-    try {
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        loadSavedPositions()
+        super.onCreate()
+        try {
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            loadSavedPositions()
 
-        // ✅ Priority: External Storage > SharedPreferences
-        if (EXTERNAL_NOTES_FILE.exists()) {
-            loadNotesFromExternalStorage()
-        } else {
-            loadNotes()
-            // প্রথমবার External Storage তৈরি করুন
-            saveNotesToExternalStorage()
+            // ✅ Step 1: Check if external storage file exists
+            if (EXTERNAL_NOTES_FILE.exists()) {
+                // ✅ Step 2: Read from external storage
+                loadNotesFromExternalStorage()
+            } else {
+                // ✅ Step 3: No external file - load from SharedPreferences
+                loadNotes()
+                // ✅ Step 4: Save to external storage for future
+                saveNotesToExternalStorage()
+            }
+
+            createNotificationChannel()
+            startForeground(1001, createNotification())
+            createDeleteZone()
+            scrollHideHandler = Handler(Looper.getMainLooper())
+            scrollStopHandler = Handler(Looper.getMainLooper())
+
+            lastFontScale = resources.configuration.fontScale
+            lastScreenWidth = resources.displayMetrics.widthPixels
+            lastScreenHeight = resources.displayMetrics.heightPixels
+
+            startConfigurationCheck()
+
+        } catch (e: Exception) {
         }
-
-        createNotificationChannel()
-        startForeground(1001, createNotification())
-        createDeleteZone()
-        scrollHideHandler = Handler(Looper.getMainLooper())
-        scrollStopHandler = Handler(Looper.getMainLooper())
-
-        lastFontScale = resources.configuration.fontScale
-        lastScreenWidth = resources.displayMetrics.widthPixels
-        lastScreenHeight = resources.displayMetrics.heightPixels
-
-        startConfigurationCheck()
-
-    } catch (e: Exception) {
     }
-}
 
     private fun startConfigurationCheck() {
         val runnable = object : Runnable {
@@ -279,70 +281,63 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ EXTERNAL STORAGE PERSISTENCE
-    // Notes survive app uninstall and restore automatically
+    // ✅ EXTERNAL STORAGE PERSISTENCE - FIXED
     // ============================================================
 
-    // ✅ FIXED: External Storage থেকে লোড করার সময় SharedPreferences-এ সেভ করবেন না
-// ============================================================
-// ✅ EXTERNAL STORAGE PERSISTENCE - FIXED
-// Notes survive app uninstall and restore automatically
-// ============================================================
-
-private fun loadNotesFromExternalStorage() {
-    try {
-        val json = EXTERNAL_NOTES_FILE.readText()
-        val type = object : TypeToken<List<NoteItem>>() {}.type
-        val loaded: List<NoteItem> = Gson().fromJson(json, type)
-        notesList.clear()
-        notesList.addAll(loaded)
-        
-        // ✅ শুধু SharedPreferences আপডেট করুন, External Storage নয়
-        val notesJson = Gson().toJson(notesList)
-        prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-        
-    } catch (e: Exception) {
-        // If external file is corrupted, fallback to SharedPreferences
-        loadNotes()
-    }
-}
-
-private fun saveNotesToExternalStorage() {
-    try {
-        val json = Gson().toJson(notesList)
-        EXTERNAL_NOTES_FILE.writeText(json)
-    } catch (e: Exception) {
-        // Silently fail - SharedPreferences will still have the data
-    }
-}
-
-private fun loadNotes() {
-    val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
-    if (!notesJson.isNullOrEmpty()) {
+    private fun loadNotesFromExternalStorage() {
         try {
+            val json = EXTERNAL_NOTES_FILE.readText()
             val type = object : TypeToken<List<NoteItem>>() {}.type
-            val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
+            val loaded: List<NoteItem> = Gson().fromJson(json, type)
             notesList.clear()
             notesList.addAll(loaded)
+
+            // ✅ Sync with SharedPreferences
+            val notesJson = Gson().toJson(notesList)
+            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+
         } catch (e: Exception) {
+            // If external file is corrupted, fallback to SharedPreferences
+            loadNotes()
+        }
+    }
+
+    private fun saveNotesToExternalStorage() {
+        try {
+            val json = Gson().toJson(notesList)
+            EXTERNAL_NOTES_FILE.writeText(json)
+        } catch (e: Exception) {
+            // Silently fail
+        }
+    }
+
+    private fun loadNotes() {
+        val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
+        if (!notesJson.isNullOrEmpty()) {
+            try {
+                val type = object : TypeToken<List<NoteItem>>() {}.type
+                val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
+                notesList.clear()
+                notesList.addAll(loaded)
+            } catch (e: Exception) {
+                if (notesList.isEmpty()) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+            }
+        } else {
             if (notesList.isEmpty()) {
                 notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             }
         }
-    } else {
-        if (notesList.isEmpty()) {
-            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-        }
+        saveNotesToPrefs()
     }
-    saveNotesToPrefs()
-}
 
-private fun saveNotesToPrefs() {
-    val notesJson = Gson().toJson(notesList)
-    prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-    // ✅ Always save to external storage so notes survive uninstall
-    saveNotesToExternalStorage()
-}
+    private fun saveNotesToPrefs() {
+        val notesJson = Gson().toJson(notesList)
+        prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+        // ✅ Always save to external storage
+        saveNotesToExternalStorage()
+    }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -927,7 +922,7 @@ private fun saveNotesToPrefs() {
     }
 
     // ============================================================
-    // Top Bar Icons - Canvas + Path + Drawable
+    // Top Bar Icons
     // ============================================================
 
     private fun createTopBarIconButton(
@@ -1168,8 +1163,7 @@ private fun saveNotesToPrefs() {
     }
 
     // ================================================================
-    // Shared custom magnifier for BOTH selection-handle dragging and
-    // long-press + drag character selection.
+    // Shared custom magnifier
     // ================================================================
     private var customSelectionMagnifier: Magnifier? = null
     private var customMagnifierTarget: EditText? = null
