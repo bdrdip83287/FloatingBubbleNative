@@ -517,6 +517,37 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
                 "writeVerified=$verified, expectedHash=$expectedHash, readBackHash=$readBackHash"
         )
     }
+    
+    private fun startConfigurationCheck() {
+    val runnable = object : Runnable {
+        override fun run() {
+            try {
+                val currentFontScale = resources.configuration.fontScale
+                val currentScreenWidth = resources.displayMetrics.widthPixels
+                val currentScreenHeight = resources.displayMetrics.heightPixels
+
+                if (currentFontScale != lastFontScale ||
+                    currentScreenWidth != lastScreenWidth ||
+                    currentScreenHeight != lastScreenHeight) {
+
+                    lastFontScale = currentFontScale
+                    lastScreenWidth = currentScreenWidth
+                    lastScreenHeight = currentScreenHeight
+
+                    if (editText.hasSelection() && !isScrolling) {
+                        updateHandlePositionsSafe()
+                    }
+                }
+            } catch (_: Exception) {
+            }
+
+            configCheckHandler.postDelayed(this, 500)
+        }
+    }
+
+    configCheckRunnable = runnable
+    configCheckHandler.postDelayed(runnable, 500)
+}
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
