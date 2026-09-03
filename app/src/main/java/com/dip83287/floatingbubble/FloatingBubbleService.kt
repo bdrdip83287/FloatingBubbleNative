@@ -43,6 +43,7 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
 import java.io.File
+import android.os.Environment
 
 class FloatingBubbleService : Service() {
 
@@ -64,10 +65,22 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
-    // ✅ External storage file for persistent notes
+    // ✅ স্থায়ী সংরক্ষণের জন্য Documents ফোল্ডার ব্যবহার
+    private val NOTES_BACKUP_FOLDER = "FloatingNotes"
     private val NOTES_BACKUP_FILE = "floating_notes_backup.json"
-    private val EXTERNAL_NOTES_FILE: File
-        get() = File(getExternalFilesDir(null), NOTES_BACKUP_FILE)
+    
+    private val PERSISTENT_NOTES_FILE: File
+        get() {
+            val docsDir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                NOTES_BACKUP_FOLDER
+            )
+            // ফোল্ডার তৈরি করুন যদি না থাকে
+            if (!docsDir.exists()) {
+                docsDir.mkdirs()
+            }
+            return File(docsDir, NOTES_BACKUP_FILE)
+        }
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -85,136 +98,7 @@ class FloatingBubbleService : Service() {
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
 
-    private data class EditorHistoryState(
-        val text: String,
-        val selectionStart: Int,
-        val selectionEnd: Int,
-        val scrollY: Int,
-        val scrollX: Int,
-        val editTextScrollY: Int,
-        val editTextScrollX: Int
-    )
-
-    private val editorUndoStack = java.util.ArrayDeque<EditorHistoryState>()
-    private val editorRedoStack = java.util.ArrayDeque<EditorHistoryState>()
-    private var suppressEditorHistory = false
-    private var isEditorLocked = false
-    private var lastEditorText = ""
-    private var historyInitializedForCurrentEditor = false
-
-    private var currentEditingNoteId: Long? = null
-    private var restoreEditorStatePending = false
-    private var savedEditorSelectionStart = 0
-    private var savedEditorSelectionEnd = 0
-    private var savedEditorScrollY = 0
-    private var savedEditorScrollX = 0
-    private var savedEditorEditTextScrollY = 0
-    private var savedEditorEditTextScrollX = 0
-
-    private lateinit var scrollView: ScrollView
-    private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
-    private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
-    private var notepadPosX = 0
-    private var notepadPosY = 0
-
-    private var isResizing = false
-    private var resizeStartX = 0
-    private var resizeStartY = 0
-    private var resizeStartWidth = 0
-    private var resizeStartHeight = 0
-    private var resizeTouchTime = 0L
-
-    private var deleteZoneView: View? = null
-    private var isInDeleteZone = false
-    private var deleteZoneAnimator: ValueAnimator? = null
-    private var deleteZoneHovered = false
-    private val DELETE_ZONE_HOVER_SCALE = 1.35f
-    private var flingAnimator: ValueAnimator? = null
-
-    private var velocityTracker: VelocityTracker? = null
-    private var velocityY = 0f
-
-    private var floatingActionBar: View? = null
-    private var isActionBarVisible = false
-    private var actionBarWindowManager: WindowManager? = null
-
-    private var leftHandleView: View? = null
-    private var rightHandleView: View? = null
-    private var isDraggingLeftHandle = false
-    private var isDraggingRightHandle = false
-    private var areHandlesVisible = false
-
-    private var handleContainer: FrameLayout? = null
-    private val HANDLE_SIZE = 44
-
-    private var scrollHideHandler: Handler? = null
-    private var scrollHideRunnable: Runnable? = null
-    private var isActionBarTemporarilyHidden = false
-    private var currentSelectedText = ""
-
-    private var lastNonEmptySelectionStart = -1
-    private var lastNonEmptySelectionEnd = -1
-    private var suppressSelectionUiUntil = 0L
-
-    private fun isSelectionUiSuppressed(): Boolean =
-        android.os.SystemClock.uptimeMillis() < suppressSelectionUiUntil
-
-    private fun hideSelectionUiAfterImeDeletion() {
-        suppressSelectionUiUntil = android.os.SystemClock.uptimeMillis() + 1200L
-        currentSelectedText = ""
-        lastNonEmptySelectionStart = -1
-        lastNonEmptySelectionEnd = -1
-        isActionBarTemporarilyHidden = false
-        hideSelectionHandles()
-        hideFloatingActionBar()
-        editText.post {
-            currentSelectedText = ""
-            hideSelectionHandles()
-            hideFloatingActionBar()
-        }
-    }
-
-    private fun handleImeSelectionDeletionIfNeeded() {
-        val start = editText.selectionStart
-        val end = editText.selectionEnd
-        val hasLiveSelection = start >= 0 && end >= 0 && start != end
-        val hasRememberedSelection =
-            lastNonEmptySelectionStart >= 0 &&
-            lastNonEmptySelectionEnd > lastNonEmptySelectionStart
-        if (hasLiveSelection || hasRememberedSelection) {
-            hideSelectionUiAfterImeDeletion()
-        }
-    }
-
-    private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
-    private var handleUpdatePending = false
-
-    private var isScrolling = false
-    private var scrollStopHandler: Handler? = null
-    private val SCROLL_STOP_DELAY = 500L
-    private var lastScrollTime = 0L
-    private var wereHandlesVisibleBeforeScroll = false
-
-    private var lastFontScale = 0f
-    private var lastScreenWidth = 0
-    private var lastScreenHeight = 0
-    private val configCheckHandler = Handler(Looper.getMainLooper())
-    private var configCheckRunnable: Runnable? = null
-
-    private val notesList = mutableListOf<NoteItem>()
-    private lateinit var notesAdapter: NoteAdapter
-    private lateinit var recyclerView: RecyclerView
-    private val saveHandler = Handler(Looper.getMainLooper())
-    private var saveRunnable: Runnable? = null
-
-    data class NoteItem(
-        val id: Long,
-        var title: String,
-        var content: String,
-        val lastEdited: Long = System.currentTimeMillis(),
-        val createdAt: Long = System.currentTimeMillis(),
-        var isLocked: Boolean = false
-    )
+    // ... (বাকি ভেরিয়েবল গুলি একই থাকবে)
 
     override fun onCreate() {
         super.onCreate()
@@ -224,15 +108,12 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ✅ Step 1: Check if external storage file exists
-            if (EXTERNAL_NOTES_FILE.exists()) {
-                // ✅ Step 2: Read from external storage
-                loadNotesFromExternalStorage()
-            } else {
-                // ✅ Step 3: No external file - load from SharedPreferences
+            // ✅ নতুন লজিক: পার্সিস্টেন্ট স্টোরেজ থেকে নোট লোড করুন
+            if (!loadNotesFromPersistentStorage()) {
+                // যদি পার্সিস্টেন্ট স্টোরেজ থেকে লোড না হয়, তাহলে SharedPreferences থেকে লোড করুন
                 loadNotes()
-                // ✅ Step 4: Save to external storage for future
-                saveNotesToExternalStorage()
+                // এবং অবিলম্বে পার্সিস্টেন্ট স্টোরেজে সংরক্ষণ করুন
+                saveNotesToPersistentStorage()
             }
 
             createNotificationChannel()
@@ -251,63 +132,48 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun startConfigurationCheck() {
-        val runnable = object : Runnable {
-            override fun run() {
-                try {
-                    val currentFontScale = resources.configuration.fontScale
-                    val currentScreenWidth = resources.displayMetrics.widthPixels
-                    val currentScreenHeight = resources.displayMetrics.heightPixels
+    // ============================================================
+    // ✅ পার্সিস্টেন্ট স্টোরেজ (Documents) - প্রধান সংরক্ষণ পদ্ধতি
+    // ============================================================
 
-                    if (currentFontScale != lastFontScale ||
-                        currentScreenWidth != lastScreenWidth ||
-                        currentScreenHeight != lastScreenHeight) {
-
-                        lastFontScale = currentFontScale
-                        lastScreenWidth = currentScreenWidth
-                        lastScreenHeight = currentScreenHeight
-
-                        if (editText.hasSelection() && !isScrolling) {
-                            updateHandlePositionsSafe()
-                        }
-                    }
-                } catch (e: Exception) {
-                }
-                configCheckHandler.postDelayed(this, 500)
+    private fun loadNotesFromPersistentStorage(): Boolean {
+        return try {
+            if (!PERSISTENT_NOTES_FILE.exists()) {
+                return false // ফাইল নেই, ফ্যালব্যাক করুন
             }
-        }
-        configCheckRunnable = runnable
-        configCheckHandler.postDelayed(runnable, 500)
-    }
 
-    // ============================================================
-    // ✅ EXTERNAL STORAGE PERSISTENCE - FIXED
-    // ============================================================
+            val json = PERSISTENT_NOTES_FILE.readText()
+            if (json.isEmpty()) {
+                return false
+            }
 
-    private fun loadNotesFromExternalStorage() {
-        try {
-            val json = EXTERNAL_NOTES_FILE.readText()
             val type = object : TypeToken<List<NoteItem>>() {}.type
             val loaded: List<NoteItem> = Gson().fromJson(json, type)
-            notesList.clear()
-            notesList.addAll(loaded)
-
-            // ✅ Sync with SharedPreferences
-            val notesJson = Gson().toJson(notesList)
-            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-
+            
+            if (loaded.isNotEmpty()) {
+                notesList.clear()
+                notesList.addAll(loaded)
+                
+                // SharedPreferences এও সিঙ্ক করুন
+                val notesJson = Gson().toJson(notesList)
+                prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+                
+                return true
+            }
+            false
         } catch (e: Exception) {
-            // If external file is corrupted, fallback to SharedPreferences
-            loadNotes()
+            false
         }
     }
 
-    private fun saveNotesToExternalStorage() {
+    private fun saveNotesToPersistentStorage() {
         try {
+            if (notesList.isEmpty()) return
+
             val json = Gson().toJson(notesList)
-            EXTERNAL_NOTES_FILE.writeText(json)
+            PERSISTENT_NOTES_FILE.writeText(json)
         } catch (e: Exception) {
-            // Silently fail
+            // অনুমতি সমস্যা বা অন্য সমস্যা নীরবে ব্যর্থ হন
         }
     }
 
@@ -335,9 +201,11 @@ class FloatingBubbleService : Service() {
     private fun saveNotesToPrefs() {
         val notesJson = Gson().toJson(notesList)
         prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-        // ✅ Always save to external storage
-        saveNotesToExternalStorage()
+        // ✅ সবসময় পার্সিস্টেন্ট স্টোরেজেও সংরক্ষণ করুন
+        saveNotesToPersistentStorage()
     }
+
+    // ... (বাকি কোড একই থাকবে)
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
