@@ -8,7 +8,6 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.ClipboardManager
 import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -22,9 +21,10 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.Uri
 import android.os.*
+import android.os.Environment
 import android.provider.Settings
 import android.provider.MediaStore
-import android.os.Environment
+import android.content.ContentValues
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
@@ -65,14 +65,6 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
-    // Permanent uninstall-proof backup. This file is stored in shared Downloads
-    // (not app-specific storage), so it survives app uninstall/reinstall.
-    private val PERMANENT_BACKUP_FILE_NAME = "floating_notes_backup.json"
-    private val PERMANENT_BACKUP_RELATIVE_PATH = "Download/Floating Notes/"
-    private val PERMANENT_BACKUP_LEGACY_DIR = "Floating Notes"
-    private val INSTALL_MARKER_FILE = "floating_notes_install_marker"
-    private var isFreshInstall = false
-
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
     private val KEY_BUBBLE_X = "bubble_x"
@@ -81,6 +73,15 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_HEIGHT = "notepad_height"
     private val KEY_NOTEPAD_X = "notepad_x"
     private val KEY_NOTEPAD_Y = "notepad_y"
+
+    // ============================================================
+    // PERMANENT NOTE BACKUP (survives app uninstall)
+    // ============================================================
+    private val PERMANENT_BACKUP_FILE_NAME = "floating_notes_backup.json"
+    private val PERMANENT_BACKUP_RELATIVE_PATH = "Download/Floating Notes/"
+    private val PERMANENT_BACKUP_LEGACY_DIR = "Floating Notes"
+    private val INSTALL_MARKER_FILE = "floating_notes_install_marker"
+    private var isFreshInstall = false
 
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
@@ -218,114 +219,90 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         configCheckHandler.postDelayed(runnable, 500)
     }
 
-    /**
-     * Detects a genuinely new installation. Files inside getNoBackupFilesDir()
-     * are deliberately excluded from Android backup/restore, so this marker is
-     * removed by uninstall and recreated only on the next installation.
-     */
-    private fun initializeInstallMarker(): Boolean {
-        return try {
-            val marker = File(getNoBackupFilesDir(), INSTALL_MARKER_FILE)
-            if (marker.exists()) {
-                false
-            } else {
-                marker.parentFile?.mkdirs()
-                marker.writeText(System.currentTimeMillis().toString(), Charsets.UTF_8)
-                true
-            }
-        } catch (e: Exception) {
-            // If the marker cannot be written, do not assume a fresh install.
-            EmergencyLog.logException(e, "initializeInstallMarker")
-            false
-        }
-    }
-
-    /**
-     * Loads notes using two persistence layers.
-     *
-     * On a fresh installation, the shared Downloads backup is tried FIRST so
-     * that a stale OEM/Android-restored SharedPreferences snapshot can never
-     * overwrite the user's permanent backup.
-     *
-     * On a normal app restart, SharedPreferences is tried FIRST for speed and
-     * the permanent backup is used only when the local copy is unavailable.
-     */
     private fun loadNotes() {
         var loadedSuccessfully = false
 
+        // On a genuinely fresh install, prefer the uninstall-proof backup first.
+        // This prevents any stale restored SharedPreferences from overriding it.
         if (isFreshInstall) {
-            val backupNotes = loadNotesFromPermanentBackup()
-            if (backupNotes != null) {
-                notesList.clear()
-                notesList.addAll(backupNotes)
-                loadedSuccessfully = true
-                EmergencyLog.log("Fresh install: notes restored from permanent backup")
-            }
+            loadedSuccessfully = loadNotesFromPermanentBackup()
         }
 
+        // Normal app restart: SharedPreferences remains the primary/local source.
         if (!loadedSuccessfully) {
             val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
             if (!notesJson.isNullOrEmpty()) {
                 try {
                     val type = object : TypeToken<List<NoteItem>>() {}.type
                     val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
-                    notesList.clear()
-                    notesList.addAll(loaded)
-                    loadedSuccessfully = loaded.isNotEmpty()
+                    if (loaded != null) {
+                        notesList.clear()
+                        notesList.addAll(loaded)
+                        loadedSuccessfully = notesList.isNotEmpty()
+                    }
                 } catch (e: Exception) {
-                    EmergencyLog.logException(e, "loadNotes SharedPreferences")
+                    EmergencyLog.logException(e, "loadNotes from SharedPreferences")
                 }
             }
         }
 
+        // Fallback: restore from permanent shared-storage backup.
         if (!loadedSuccessfully) {
-            val backupNotes = loadNotesFromPermanentBackup()
-            if (backupNotes != null) {
-                notesList.clear()
-                notesList.addAll(backupNotes)
-                loadedSuccessfully = true
-                EmergencyLog.log("Notes restored from permanent backup fallback")
-            }
+            loadedSuccessfully = loadNotesFromPermanentBackup()
         }
 
         if (!loadedSuccessfully || notesList.isEmpty()) {
             notesList.clear()
             notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-            EmergencyLog.log("No saved notes found: created Untitled Note")
         }
 
-        // Synchronize the fast local cache and the permanent shared backup.
+        // Keep the normal local storage synchronized with the restored/current notes.
         saveNotesToPrefs()
     }
 
-    /**
-     * Reads the permanent backup from Download/Floating Notes/.
-     * Returns null when the backup does not exist or cannot be parsed.
-     */
-    private fun loadNotesFromPermanentBackup(): List<NoteItem>? {
+    private fun initializeInstallMarker(): Boolean {
         return try {
-            val json = readPermanentBackupJson() ?: return null
-            if (json.isBlank()) return null
-
-            val type = object : TypeToken<List<NoteItem>>() {}.type
-            val loaded: List<NoteItem>? = Gson().fromJson(json, type)
-            if (loaded != null && loaded.isNotEmpty()) loaded else null
+            val marker = File(noBackupFilesDir, INSTALL_MARKER_FILE)
+            if (marker.exists()) {
+                false
+            } else {
+                marker.parentFile?.mkdirs()
+                marker.writeText("installed")
+                true
+            }
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "loadNotesFromPermanentBackup")
-            null
+            EmergencyLog.logException(e, "initializeInstallMarker")
+            false
         }
     }
 
-    /**
-     * Reads the shared backup file on Android 10+ through MediaStore Downloads.
-     * On older Android versions it falls back to the public Downloads directory.
-     */
+    private fun loadNotesFromPermanentBackup(): Boolean {
+        return try {
+            val notesJson = readPermanentBackupJson()
+            if (notesJson.isNullOrEmpty()) return false
+
+            val type = object : TypeToken<List<NoteItem>>() {}.type
+            val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
+            if (loaded.isNullOrEmpty()) return false
+
+            notesList.clear()
+            notesList.addAll(loaded)
+            EmergencyLog.log("Permanent backup restored: ${notesList.size} notes")
+            true
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "loadNotesFromPermanentBackup")
+            false
+        }
+    }
+
     private fun readPermanentBackupJson(): String? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.MediaColumns.DISPLAY_NAME)
-                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+                val projection = arrayOf(MediaStore.MediaColumns._ID)
+                val selection =
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND " +
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
                 val selectionArgs = arrayOf(
                     PERMANENT_BACKUP_FILE_NAME,
                     PERMANENT_BACKUP_RELATIVE_PATH
@@ -339,15 +316,23 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
                     null
                 )?.use { cursor ->
                     if (cursor.moveToFirst()) {
-                        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                        val id = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                        )
                         val uri = ContentUris.withAppendedId(collection, id)
-                        return contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                            return reader.readText()
+                        }
                     }
                 }
                 null
             } else {
-                val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val file = File(downloads, "$PERMANENT_BACKUP_LEGACY_DIR/$PERMANENT_BACKUP_FILE_NAME")
+                val downloads =
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val file = File(
+                    File(downloads, PERMANENT_BACKUP_LEGACY_DIR),
+                    PERMANENT_BACKUP_FILE_NAME
+                )
                 if (file.exists()) file.readText() else null
             }
         } catch (e: Exception) {
@@ -356,38 +341,15 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         }
     }
 
-    /**
-     * Saves notes locally and to the uninstall-proof shared backup.
-     * SharedPreferences remains the fast local cache; the Downloads JSON is the
-     * permanent recovery copy.
-     */
-    private fun saveNotesToPrefs() {
-        val notesJson = Gson().toJson(notesList)
-
-        // Use commit so that the local cache is definitely written before this
-        // method returns. This also makes rapid edits/deletes safer.
-        val committed = prefs.edit()
-            .putString(STORAGE_NOTES_LIST, notesJson)
-            .commit()
-
-        if (!committed) {
-            EmergencyLog.logError("SharedPreferences note save failed")
-        }
-
-        saveNotesToPermanentBackup(notesJson)
-    }
-
-    /**
-     * Writes the JSON backup to shared Downloads.
-     * Android 10+ uses MediaStore Downloads, which survives uninstall.
-     * Android 9 and below use the public Downloads directory.
-     */
-    private fun saveNotesToPermanentBackup(json: String) {
+    private fun saveNotesToPermanentBackup(notesJson: String) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                val projection = arrayOf(MediaStore.Downloads._ID)
-                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+
+                val projection = arrayOf(MediaStore.MediaColumns._ID)
+                val selection =
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND " +
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
                 val selectionArgs = arrayOf(
                     PERMANENT_BACKUP_FILE_NAME,
                     PERMANENT_BACKUP_RELATIVE_PATH
@@ -402,51 +364,67 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
                     null
                 )?.use { cursor ->
                     if (cursor.moveToFirst()) {
-                        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                        val id = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                        )
                         existingUri = ContentUris.withAppendedId(collection, id)
                     }
                 }
 
-                val uri = existingUri ?: run {
+                if (existingUri != null) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                    }
+                    contentResolver.update(existingUri!!, values, null, null)
+                    contentResolver.openOutputStream(existingUri!!, "wt")?.use { output ->
+                        output.write(notesJson.toByteArray(Charsets.UTF_8))
+                    }
+                } else {
                     val values = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, PERMANENT_BACKUP_FILE_NAME)
                         put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
                         put(MediaStore.MediaColumns.RELATIVE_PATH, PERMANENT_BACKUP_RELATIVE_PATH)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+
+                    val uri = contentResolver.insert(collection, values)
+                    if (uri != null) {
+                        try {
+                            contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                                output.write(notesJson.toByteArray(Charsets.UTF_8))
+                            }
+                            val completed = ContentValues().apply {
+                                put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            }
+                            contentResolver.update(uri, completed, null, null)
+                        } catch (e: Exception) {
+                            contentResolver.delete(uri, null, null)
+                            throw e
                         }
                     }
-                    contentResolver.insert(collection, values)
-                } ?: throw IllegalStateException("Unable to create permanent backup file")
-
-                contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                    output.write(json.toByteArray(Charsets.UTF_8))
-                    output.flush()
-                } ?: throw IllegalStateException("Unable to open permanent backup file")
-
-                // Publish a newly-created MediaStore item. Existing items are already visible.
-                if (existingUri == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.IS_PENDING, 0)
-                    }
-                    contentResolver.update(uri, values, null, null)
                 }
             } else {
-                val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val directory = File(downloads, PERMANENT_BACKUP_LEGACY_DIR)
-                if (!directory.exists() && !directory.mkdirs()) {
-                    throw IllegalStateException("Unable to create backup directory")
-                }
-                val file = File(directory, PERMANENT_BACKUP_FILE_NAME)
-                file.writeText(json, Charsets.UTF_8)
+                val downloads =
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val folder = File(downloads, PERMANENT_BACKUP_LEGACY_DIR)
+                if (!folder.exists()) folder.mkdirs()
+                File(folder, PERMANENT_BACKUP_FILE_NAME).writeText(notesJson)
             }
 
-            EmergencyLog.log("Permanent note backup saved successfully")
+            EmergencyLog.log("Permanent notes backup saved")
         } catch (e: Exception) {
-            // Never crash the note UI because a backup write failed.
-            // SharedPreferences already contains the current copy.
+            // Never let backup failure break the existing note functionality.
             EmergencyLog.logException(e, "saveNotesToPermanentBackup")
         }
+    }
+
+    private fun saveNotesToPrefs() {
+        val notesJson = Gson().toJson(notesList)
+        val committed = prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).commit()
+        if (!committed) {
+            EmergencyLog.logError("SharedPreferences notes commit failed")
+        }
+        saveNotesToPermanentBackup(notesJson)
     }
 
     private fun createNotificationChannel() {
