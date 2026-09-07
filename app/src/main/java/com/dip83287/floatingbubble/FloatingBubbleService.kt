@@ -24,6 +24,7 @@ import android.provider.Settings
 import android.provider.MediaStore
 import android.content.ContentValues
 import android.os.Environment
+import android.content.ContentUris
 import java.io.File
 import android.text.Editable
 import android.text.InputType
