@@ -306,55 +306,58 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     /** Reads the permanent backup from MediaStore on Android 10+ or public
      * Downloads/Floating Notes on older Android versions. */
     private fun readPermanentBackupJson(): String? {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = MediaStore.Downloads.getContentUri(
-                    MediaStore.VOLUME_EXTERNAL_PRIMARY
-                )
-                val projection = arrayOf(
-                    MediaStore.MediaColumns._ID,
-                    MediaStore.MediaColumns.DISPLAY_NAME
-                )
-                val selection =
-                    "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
-                val selectionArgs = arrayOf(
-                    PERMANENT_BACKUP_FILE_NAME,
-                    PERMANENT_BACKUP_RELATIVE_PATH
-                )
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = MediaStore.Downloads.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY
+            )
+            val projection = arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME
+            )
+            val selection =
+                "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+            val selectionArgs = arrayOf(
+                PERMANENT_BACKUP_FILE_NAME,
+                PERMANENT_BACKUP_RELATIVE_PATH
+            )
 
-                contentResolver.query(
-                    collection,
-                    projection,
-                    selection,
-                    selectionArgs,
-                    "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
-                )?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val id = cursor.getLong(
-                            cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                        )
-                        val uri = ContentUris.withAppendedId(collection, id)
-                        permanentBackupUri = uri
-                        contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use {
-                            return it.readText()
-                        }
+            contentResolver.query(
+                collection,
+                projection,
+                selection,
+                selectionArgs,
+                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(
+                        cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    )
+                    val uri = ContentUris.withAppendedId(collection, id)
+                    permanentBackupUri = uri
+                    contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use {
+                        return@readPermanentBackupJson it.readText()
                     }
                 }
-            } else {
-                val dir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    PERMANENT_BACKUP_LEGACY_DIR
-                )
-                val file = File(dir, PERMANENT_BACKUP_FILE_NAME)
-                if (file.exists()) {
-                    return file.readText(Charsets.UTF_8)
-                }
             }
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "readPermanentBackupJson")
+            null  // Add explicit null return for Android Q+ path
+        } else {
+            val dir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                PERMANENT_BACKUP_LEGACY_DIR
+            )
+            val file = File(dir, PERMANENT_BACKUP_FILE_NAME)
+            if (file.exists()) {
+                file.readText(Charsets.UTF_8)
+            } else {
+                null
+            }
         }
-        return null
+    } catch (e: Exception) {
+        EmergencyLog.logException(e, "readPermanentBackupJson")
+        null
     }
+}
 
     /** Writes the exact notes JSON to user-visible shared storage. */
     private fun saveNotesToPermanentBackup(notesJson: String) {
