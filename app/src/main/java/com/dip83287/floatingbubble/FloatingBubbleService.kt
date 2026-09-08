@@ -1,6 +1,3 @@
-cd ~/testApp/FloatingBubbleNative
-
-cat > app/src/main/java/com/dip83287/floatingbubble/FloatingBubbleService.kt << 'EOF'
 package com.dip83287.floatingbubble
 
 import android.animation.Animator
@@ -992,25 +989,16 @@ class FloatingBubbleService : Service() {
         
         try {
             val currentLayout = editText.layout ?: return
-            
+            if (leftHandleView == null || rightHandleView == null) {
+                recreateHandlesIfNeeded()
+                return
+            }
+
             val start = editText.selectionStart
             val end = editText.selectionEnd
             
             if (start == end || start < 0 || end < 0 || start > editText.text.length || end > editText.text.length) {
                 return
-            }
-            
-            // ✅ CRITICAL FIX: If handles are null, we need to create them first
-            if (leftHandleView == null || rightHandleView == null) {
-                val handles = createSelectionHandles()
-                leftHandleView = handles.first
-                rightHandleView = handles.second
-                
-                handleContainer?.removeAllViews()
-                handleContainer?.addView(leftHandleView)
-                handleContainer?.addView(rightHandleView)
-                areHandlesVisible = true
-                EmergencyLog.log("Handles created inside updateHandlePositions")
             }
 
             val editLocation = IntArray(2)
@@ -1057,6 +1045,24 @@ class FloatingBubbleService : Service() {
             
         } catch (e: Exception) {
             EmergencyLog.logException(e, "updateHandlePositions")
+        }
+    }
+    
+    private fun recreateHandlesIfNeeded() {
+        if (leftHandleView == null || rightHandleView == null) {
+            val handles = createSelectionHandles()
+            leftHandleView = handles.first
+            rightHandleView = handles.second
+            
+            handleContainer?.removeAllViews()
+            
+            handleContainer?.addView(leftHandleView)
+            handleContainer?.addView(rightHandleView)
+            areHandlesVisible = true
+            EmergencyLog.log("Handles recreated")
+            
+            // Force update after recreation
+            forceUpdateHandlePositions()
         }
     }
     
@@ -1583,8 +1589,10 @@ class FloatingBubbleService : Service() {
                         // Show action bar
                         showFloatingActionBar(selectedWord)
                         
-                        // ✅ Show handles and force immediate position update
+                        // ✅ Show handles
                         showSelectionHandles()
+                        
+                        // ✅ FORCE immediate position update - bypasses all checks
                         forceUpdateHandlePositions()
                         
                         EmergencyLog.log("Selected word: '$selectedWord' - force updated handles")
@@ -2207,11 +2215,3 @@ class FloatingBubbleService : Service() {
 
     override fun onBind(intent: Intent?) = null
 }
-EOF
-
-# Commit and push
-git add .
-git commit -m "Fix: CRITICAL - Create handles inside updateHandlePositions if null, ensuring instant positioning on long press/double tap"
-git push origin main
-
-echo "✅ FloatingBubbleService.kt fixed - handles now position instantly on selection!"
