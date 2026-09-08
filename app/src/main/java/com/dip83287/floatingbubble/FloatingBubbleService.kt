@@ -12,6 +12,8 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
@@ -82,6 +84,10 @@ class FloatingBubbleService : Service() {
     //
     // The report itself is stored in shared Downloads storage so it can
     // remain on the device after the app is uninstalled.
+    //
+    // FINAL TEST GOAL:
+    // This version does NOT restore notes from any backup. It only records
+    // evidence before/after loadNotes() so we can identify the restore source.
     private val DIAGNOSTIC_INSTALL_MARKER = "floating_notes_install_marker.txt"
     private val DIAGNOSTIC_REPORT_FILE = "restore_diagnostic_report.txt"
     private val DIAGNOSTIC_REPORT_FOLDER = "Floating Notes"
@@ -270,6 +276,18 @@ class FloatingBubbleService : Service() {
             diagnosticFreshInstallAtStartup =
                 initializeDiagnosticInstallMarker()
 
+            // ========================================================
+            // 🔬 FINAL SOURCE FINGERPRINT — BEFORE loadNotes()
+            // ========================================================
+            // Capture the package/backup flags, SharedPreferences XML
+            // file metadata, app-specific external backup-file state,
+            // and app-data directory state BEFORE loadNotes() changes
+            // anything. This is the key source-identification snapshot.
+            // ========================================================
+            appendRestoreSourceFingerprint(
+                "BEFORE_LOAD_NOTES"
+            )
+
             appendRestoreDiagnosticReport(
                 "SERVICE_START_BEFORE_LOAD"
             )
@@ -286,6 +304,13 @@ class FloatingBubbleService : Service() {
 
             appendRestoreDiagnosticReport(
                 "SERVICE_AFTER_LOAD"
+            )
+
+            // Capture the same storage fingerprint AFTER loadNotes().
+            // Differences between BEFORE_LOAD_NOTES and AFTER_LOAD_NOTES
+            // reveal what our own startup code changed.
+            appendRestoreSourceFingerprint(
+                "AFTER_LOAD_NOTES"
             )
 
             createNotificationChannel()
@@ -402,6 +427,307 @@ class FloatingBubbleService : Service() {
         }
     }
 
+
+    // ============================================================
+    // 🔬 FINAL RESTORE SOURCE FINGERPRINT
+    // ============================================================
+
+    /**
+     * Captures storage/package state without modifying notesList or
+     * notes_list. This method is deliberately called BEFORE loadNotes().
+     *
+     * The purpose is to distinguish these possible sources:
+     *
+     * 1) SharedPreferences restored by Android/OEM backup/restore.
+     * 2) An old app-specific external JSON backup unexpectedly present.
+     * 3) Another file inside the app's private data directory.
+     * 4) The app itself creating/restoring notes later during startup.
+     * 5) A different APK/version/package state than expected.
+     *
+     * It does NOT delete, overwrite, or import any note data.
+     */
+    private fun appendRestoreSourceFingerprint(event: String) {
+        try {
+            val now =
+                SimpleDateFormat(
+                    "yyyy-MM-dd HH:mm:ss.SSS",
+                    Locale.US
+                ).format(Date())
+
+            val appInfo: ApplicationInfo =
+                applicationInfo
+
+            val packageInfo: PackageInfo =
+                packageManager.getPackageInfo(
+                    packageName,
+                    0
+                )
+
+            val allowBackup =
+                (appInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0
+
+            val debuggable =
+                (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+            val dataDir =
+                try {
+                    applicationInfo.dataDir
+                } catch (_: Exception) {
+                    "UNAVAILABLE"
+                }
+
+            val sharedPrefsFile =
+                File(
+                    dataDir,
+                    "shared_prefs/$PREFS_NAME.xml"
+                )
+
+            val oldExternalBackupFile =
+                File(
+                    getExternalFilesDir(null),
+                    "floating_notes_backup.json"
+                )
+
+            val appFilesDir =
+                filesDir
+
+            val noBackupDir =
+                getNoBackupFilesDir()
+
+            val cacheDirFile =
+                cacheDir
+
+            val report =
+                buildString {
+                    appendLine()
+                    appendLine(
+                        "------------------------------------------------------------"
+                    )
+                    appendLine(
+                        "RESTORE SOURCE FINGERPRINT"
+                    )
+                    appendLine(
+                        "Time: $now"
+                    )
+                    appendLine(
+                        "Event: $event"
+                    )
+                    appendLine(
+                        "Package: $packageName"
+                    )
+                    appendLine(
+                        "versionCode: ${packageInfo.longVersionCode}"
+                    )
+                    appendLine(
+                        "versionName: ${packageInfo.versionName}"
+                    )
+                    appendLine(
+                        "Android SDK: ${Build.VERSION.SDK_INT}"
+                    )
+                    appendLine(
+                        "ApplicationInfo.FLAG_ALLOW_BACKUP: $allowBackup"
+                    )
+                    appendLine(
+                        "ApplicationInfo.FLAG_DEBUGGABLE: $debuggable"
+                    )
+                    appendLine(
+                        "applicationInfo.dataDir: $dataDir"
+                    )
+                    appendLine()
+
+                    appendLine(
+                        "SharedPreferences XML:"
+                    )
+                    appendLine(
+                        "  path=${sharedPrefsFile.absolutePath}"
+                    )
+                    appendLine(
+                        "  exists=${sharedPrefsFile.exists()}"
+                    )
+                    appendLine(
+                        "  length=${if (sharedPrefsFile.exists()) sharedPrefsFile.length() else 0}"
+                    )
+                    appendLine(
+                        "  lastModified=${if (sharedPrefsFile.exists()) sharedPrefsFile.lastModified() else 0}"
+                    )
+                    appendLine(
+                        "  sha256=${diagnosticSha256File(sharedPrefsFile)}"
+                    )
+                    appendLine(
+                        "  contains_notes_list_key=${diagnosticFileContainsText(sharedPrefsFile, "notes_list")}" 
+                    )
+                    appendLine(
+                        "  contains_first_time_bubble_key=${diagnosticFileContainsText(sharedPrefsFile, KEY_FIRST_TIME_BUBBLE)}"
+                    )
+                    appendLine(
+                        "  contains_bubble_position_keys=${diagnosticFileContainsText(sharedPrefsFile, KEY_BUBBLE_X) || diagnosticFileContainsText(sharedPrefsFile, KEY_BUBBLE_Y)}"
+                    )
+                    appendLine()
+
+                    appendLine(
+                        "Old app-specific external JSON backup (diagnostic ONLY; never loaded):"
+                    )
+                    appendLine(
+                        "  path=${oldExternalBackupFile.absolutePath}"
+                    )
+                    appendLine(
+                        "  exists=${oldExternalBackupFile.exists()}"
+                    )
+                    appendLine(
+                        "  length=${if (oldExternalBackupFile.exists()) oldExternalBackupFile.length() else 0}"
+                    )
+                    appendLine(
+                        "  lastModified=${if (oldExternalBackupFile.exists()) oldExternalBackupFile.lastModified() else 0}"
+                    )
+                    appendLine(
+                        "  sha256=${diagnosticSha256File(oldExternalBackupFile)}"
+                    )
+                    appendLine()
+
+                    appendLine(
+                        "Private app directories:"
+                    )
+                    appendLine(
+                        "  filesDir=${appFilesDir.absolutePath}"
+                    )
+                    appendLine(
+                        "  filesDirExists=${appFilesDir.exists()}"
+                    )
+                    appendLine(
+                        "  noBackupFilesDir=${noBackupDir.absolutePath}"
+                    )
+                    appendLine(
+                        "  noBackupFilesDirExists=${noBackupDir.exists()}"
+                    )
+                    appendLine(
+                        "  installMarkerExists=${File(noBackupDir, DIAGNOSTIC_INSTALL_MARKER).exists()}"
+                    )
+                    appendLine(
+                        "  cacheDir=${cacheDirFile.absolutePath}"
+                    )
+                    appendLine()
+
+                    appendLine(
+                        "Top-level private files/directories:"
+                    )
+
+                    val privateChildren =
+                        try {
+                            File(dataDir).listFiles()
+                                ?.sortedBy { it.name }
+                                ?: emptyList()
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+
+                    if (privateChildren.isEmpty()) {
+                        appendLine("  <NONE OR UNAVAILABLE>")
+                    } else {
+                        privateChildren.forEach { child ->
+                            appendLine(
+                                "  name=${child.name}, " +
+                                    "dir=${child.isDirectory}, " +
+                                    "length=${if (child.isFile) child.length() else 0}, " +
+                                    "lastModified=${child.lastModified()}"
+                            )
+                        }
+                    }
+
+                    appendLine()
+                    appendLine(
+                        "Storage fingerprint conclusion at this moment:"
+                    )
+
+                    if (sharedPrefsFile.exists() &&
+                        diagnosticFileContainsText(
+                            sharedPrefsFile,
+                            "notes_list"
+                        )
+                    ) {
+                        appendLine(
+                            "  notes_list is already physically present in the SharedPreferences XML BEFORE loadNotes()."
+                        )
+                        appendLine(
+                            "  This startup did not create notes_list through loadNotes()."
+                        )
+                    } else {
+                        appendLine(
+                            "  notes_list was NOT detected in the SharedPreferences XML at this fingerprint point."
+                        )
+                    }
+
+                    if (oldExternalBackupFile.exists()) {
+                        appendLine(
+                            "  WARNING: floating_notes_backup.json exists in app-specific external storage."
+                        )
+                        appendLine(
+                            "  The diagnostic code will NOT load it; its presence is recorded only as evidence."
+                        )
+                    } else {
+                        appendLine(
+                            "  No old app-specific external JSON backup was detected at this point."
+                        )
+                    }
+
+                    appendLine(
+                        "------------------------------------------------------------"
+                    )
+                }
+
+            val previousReport =
+                readDiagnosticReport()
+
+            writeDiagnosticReport(
+                previousReport + report
+            )
+
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "RESTORE_DIAGNOSTIC",
+                "Source fingerprint failed",
+                e
+            )
+        }
+    }
+
+    private fun diagnosticSha256File(file: File): String {
+        if (!file.exists() || !file.isFile) {
+            return "NONE"
+        }
+
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+
+            digest.digest().joinToString("") {
+                "%02x".format(it)
+            }
+        } catch (e: Exception) {
+            "ERROR:${e.javaClass.simpleName}"
+        }
+    }
+
+    private fun diagnosticFileContainsText(
+        file: File,
+        text: String
+    ): Boolean {
+        if (!file.exists() || !file.isFile) {
+            return false
+        }
+
+        return try {
+            file.readText(Charsets.UTF_8).contains(text)
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     /**
      * Appends a detailed diagnostic event to:
@@ -594,6 +920,10 @@ class FloatingBubbleService : Service() {
                                 "This means the old notes were " +
                                     "already present in SharedPreferences " +
                                     "before this service loaded them."
+                            )
+
+                            appendLine(
+                                "See RESTORE SOURCE FINGERPRINT for the physical SharedPreferences XML path, hash, backup flag, version, and old external-backup-file state."
                             )
 
                         } else {
