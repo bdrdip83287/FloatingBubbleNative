@@ -1,10 +1,4 @@
 package com.dip83287.floatingbubble
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.io.File
-import android.provider.MediaStore
-import android.os.Environment
 
 import android.animation.Animator
 import android.animation.ValueAnimator
@@ -14,8 +8,8 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.ContentUris
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
@@ -29,6 +23,7 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
+import android.provider.MediaStore
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
@@ -49,6 +44,10 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class FloatingBubbleService : Service() {
 
@@ -71,7 +70,10 @@ class FloatingBubbleService : Service() {
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
 
-    // FINAL RESTORE SOURCE DIAGNOSTIC
+    // ============================================================
+    // THREE-STAGE RESTORE SOURCE DIAGNOSTIC
+    // ============================================================
+    private val DIAG_TARGET_NOTE = "01858288800"
     private val DIAG_MARKER_FILE = "floating_notes_install_marker.txt"
     private val DIAG_REPORT_FILE = "restore_diagnostic_report.txt"
     private val DIAG_REPORT_FOLDER = "Floating Notes"
@@ -167,13 +169,21 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         try {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+
+            // STAGE 1: inspect app storage BEFORE opening SharedPreferences.
             diagnosticFreshInstall = !File(getNoBackupFilesDir(), DIAG_MARKER_FILE).exists()
+            appendThreeStageDiagnostic("STAGE_1_BEFORE_GET_SHARED_PREFERENCES")
             createDiagnosticInstallMarker()
-            appendDiagnosticReport("BEFORE_LOAD_NOTES")
+
+            // STAGE 2: inspect immediately after getSharedPreferences(), but BEFORE loadNotes().
+            prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            appendThreeStageDiagnostic("STAGE_2_AFTER_GET_SHARED_PREFERENCES_BEFORE_LOAD_NOTES")
+
             loadSavedPositions()
             loadNotes()
-            appendDiagnosticReport("AFTER_LOAD_NOTES")
+
+            // STAGE 3: inspect after the normal loadNotes() path.
+            appendThreeStageDiagnostic("STAGE_3_AFTER_LOAD_NOTES")
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
@@ -223,115 +233,205 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
         configCheckHandler.postDelayed(runnable, 500)
     }
 
+    // ============================================================
+    // THREE-STAGE RESTORE SOURCE DIAGNOSTIC
+    // ============================================================
 
-    // ============================================================
-    // FINAL RESTORE SOURCE DIAGNOSTIC METHODS
-    // ============================================================
     private fun createDiagnosticInstallMarker() {
         try {
-            val f = File(getNoBackupFilesDir(), DIAG_MARKER_FILE)
-            if (!f.exists()) f.writeText("createdAt=" + SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date()) + "\npackage=$packageName\n")
-        } catch (e: Exception) { try { EmergencyLog.logException(e, "Diagnostic marker") } catch (_: Exception) {} }
+            val marker = File(getNoBackupFilesDir(), DIAG_MARKER_FILE)
+            if (!marker.exists()) {
+                marker.writeText(
+                    "createdAt=" +
+                        SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date()) +
+                        "\npackage=" + packageName + "\n"
+                )
+            }
+        } catch (e: Exception) {
+            try { EmergencyLog.logException(e, "Diagnostic marker") } catch (_: Exception) {}
+        }
     }
 
-    private fun diagnosticSha256(v: String): String = try {
-        val md = java.security.MessageDigest.getInstance("SHA-256")
-        md.digest(v.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-    } catch (e: Exception) { "HASH_ERROR:${e.javaClass.simpleName}" }
+    private fun diagnosticHash(value: String): String {
+        return try {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            md.digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) { "HASH_ERROR:${e.javaClass.simpleName}" }
+    }
 
-    private fun appendDiagnosticReport(event: String) {
+    private fun appendThreeStageDiagnostic(stage: String) {
         try {
             val sb = StringBuilder()
             sb.appendLine("============================================================")
-            sb.appendLine("FLOATING NOTES FINAL RESTORE SOURCE DIAGNOSTIC")
+            sb.appendLine("FLOATING NOTES THREE-STAGE RESTORE SOURCE DIAGNOSTIC")
             sb.appendLine("Time: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())}")
-            sb.appendLine("Event: $event")
+            sb.appendLine("Stage: $stage")
             sb.appendLine("Package: $packageName")
             sb.appendLine("Android SDK: ${Build.VERSION.SDK_INT}")
+            sb.appendLine("APK versionName: ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull()}")
             sb.appendLine("Fresh-install-at-startup: $diagnosticFreshInstall")
-            try {
-                val pi = packageManager.getPackageInfo(packageName, 0)
-                val vc = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
-                sb.appendLine("APK versionName: ${pi.versionName}")
-                sb.appendLine("APK versionCode: $vc")
-            } catch (e: Exception) { sb.appendLine("APK version ERROR: ${e.javaClass.name}: ${e.message}") }
             sb.appendLine("dataDir: ${applicationInfo.dataDir}")
             sb.appendLine("noBackupFilesDir: ${getNoBackupFilesDir().absolutePath}")
-            val allowBackup = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP) != 0
-            sb.appendLine("ApplicationInfo.FLAG_ALLOW_BACKUP: $allowBackup")
+            sb.appendLine("FLAG_ALLOW_BACKUP: ${((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP) != 0)}")
+
             val marker = File(getNoBackupFilesDir(), DIAG_MARKER_FILE)
             sb.appendLine("diagnosticMarkerExists: ${marker.exists()}")
 
-            val xml = File(File(applicationInfo.dataDir, "shared_prefs"), "$PREFS_NAME.xml")
-            sb.appendLine("SharedPreferences XML path: ${xml.absolutePath}")
-            sb.appendLine("SharedPreferences XML exists: ${xml.exists()}")
-            if (xml.exists()) {
-                sb.appendLine("SharedPreferences XML length: ${xml.length()}")
-                sb.appendLine("SharedPreferences XML lastModified: ${xml.lastModified()}")
+            // Physical SharedPreferences XML. This is intentionally checked even in Stage 1.
+            val prefsFile = File(File(applicationInfo.dataDir, "shared_prefs"), "$PREFS_NAME.xml")
+            sb.appendLine("prefsXmlPath: ${prefsFile.absolutePath}")
+            sb.appendLine("prefsXmlExists: ${prefsFile.exists()}")
+            if (prefsFile.exists()) {
+                sb.appendLine("prefsXmlLength: ${prefsFile.length()}")
+                sb.appendLine("prefsXmlLastModified: ${prefsFile.lastModified()}")
                 try {
-                    val x = xml.readText(Charsets.UTF_8)
-                    sb.appendLine("SharedPreferences XML SHA-256: ${diagnosticSha256(x)}")
-                    sb.appendLine("XML contains notes_list: ${x.contains("name=\"notes_list\"")}")
-                } catch (e: Exception) { sb.appendLine("SharedPreferences XML read ERROR: ${e.javaClass.name}: ${e.message}") }
+                    val xml = prefsFile.readText(Charsets.UTF_8)
+                    sb.appendLine("prefsXmlSHA256: ${diagnosticHash(xml)}")
+                    sb.appendLine("prefsXmlContainsTarget_01858288800: ${xml.contains(DIAG_TARGET_NOTE)}")
+                    sb.appendLine("prefsXmlContainsNotesList: ${xml.contains("name=\"notes_list\"")}")
+                } catch (e: Exception) {
+                    sb.appendLine("prefsXmlReadError: ${e.javaClass.name}: ${e.message}")
+                }
             }
 
-            val keyPresent = try { prefs.contains(STORAGE_NOTES_LIST) } catch (_: Exception) { false }
-            val raw = try { prefs.getString(STORAGE_NOTES_LIST, null) } catch (_: Exception) { null }
-            sb.appendLine("SharedPreferences key present: $keyPresent")
-            sb.appendLine("notes_list JSON chars: ${raw?.length ?: 0}")
-            if (!raw.isNullOrEmpty()) {
-                sb.appendLine("notes_list SHA-256: ${diagnosticSha256(raw)}")
-                try {
-                    val type = object : TypeToken<List<NoteItem>>() {}.type
-                    val parsed: List<NoteItem> = Gson().fromJson(raw, type)
-                    sb.appendLine("Raw SharedPreferences parsed note count: ${parsed.size}")
-                    sb.appendLine("Raw SharedPreferences notes:")
-                    parsed.forEachIndexed { i,n -> sb.appendLine("  ${i+1}. id=${n.id}, title=${n.title}, contentChars=${n.content.length}, lastEdited=${n.lastEdited}") }
-                } catch (e: Exception) { sb.appendLine("Raw SharedPreferences parse ERROR: ${e.javaClass.name}: ${e.message}") }
+            // Logical SharedPreferences state, only after prefs has been initialized.
+            if (::prefs.isInitialized) {
+                val keyPresent = runCatching { prefs.contains(STORAGE_NOTES_LIST) }.getOrDefault(false)
+                val raw = runCatching { prefs.getString(STORAGE_NOTES_LIST, null) }.getOrNull()
+                sb.appendLine("prefsKeyPresent: $keyPresent")
+                sb.appendLine("notesJsonChars: ${raw?.length ?: 0}")
+                if (!raw.isNullOrEmpty()) {
+                    sb.appendLine("notesJsonSHA256: ${diagnosticHash(raw)}")
+                    try {
+                        val type = object : TypeToken<List<NoteItem>>() {}.type
+                        val parsed: List<NoteItem> = Gson().fromJson(raw, type)
+                        sb.appendLine("rawParsedNoteCount: ${parsed.size}")
+                        parsed.forEachIndexed { i, n ->
+                            sb.appendLine("  rawNote${i+1}: id=${n.id}, title=${n.title}, contentChars=${n.content.length}, lastEdited=${n.lastEdited}, targetMatch=${n.title == DIAG_TARGET_NOTE || n.content.contains(DIAG_TARGET_NOTE)}")
+                        }
+                    } catch (e: Exception) {
+                        sb.appendLine("rawParseError: ${e.javaClass.name}: ${e.message}")
+                    }
+                }
+            } else {
+                sb.appendLine("prefsNotInitializedYet=true")
             }
-            sb.appendLine("Current in-memory notesList count: ${notesList.size}")
-            sb.appendLine("Current in-memory notes:")
-            notesList.forEachIndexed { i,n -> sb.appendLine("  ${i+1}. id=${n.id}, title=${n.title}, contentChars=${n.content.length}, lastEdited=${n.lastEdited}") }
-            try {
+
+            sb.appendLine("inMemoryNoteCount: ${notesList.size}")
+            notesList.forEachIndexed { i, n ->
+                sb.appendLine("  memoryNote${i+1}: id=${n.id}, title=${n.title}, contentChars=${n.content.length}, lastEdited=${n.lastEdited}, targetMatch=${n.title == DIAG_TARGET_NOTE || n.content.contains(DIAG_TARGET_NOTE)}")
+            }
+
+            // Scan the app's own private data for the exact target. This is the key addition.
+            // It can reveal whether 01858288800 exists in another app-owned file before/after loadNotes().
+            val hits = mutableListOf<String>()
+            scanOwnAppDataForTarget(File(applicationInfo.dataDir), hits, 0)
+            sb.appendLine("APP_DATA_SCAN_TARGET: $DIAG_TARGET_NOTE")
+            sb.appendLine("appDataTargetHitCount: ${hits.size}")
+            hits.take(50).forEach { sb.appendLine("  HIT: $it") }
+            if (hits.size > 50) sb.appendLine("  ... ${hits.size - 50} more hits omitted")
+
+            // Old app-specific JSON location is fingerprinted but never loaded.
+            runCatching {
                 val old = File(getExternalFilesDir(null), "floating_notes_backup.json")
-                sb.appendLine("Old app-specific JSON exists: ${old.exists()}")
-                if (old.exists()) { sb.appendLine("Old app-specific JSON path: ${old.absolutePath}"); sb.appendLine("Old app-specific JSON length: ${old.length()}") }
-            } catch (e: Exception) { sb.appendLine("Old JSON check ERROR: ${e.javaClass.name}: ${e.message}") }
-            sb.appendLine("IMPORTANT:")
-            if (event == "BEFORE_LOAD_NOTES" && diagnosticFreshInstall && keyPresent && !raw.isNullOrEmpty()) {
-                sb.appendLine("*** notes_list ALREADY EXISTS BEFORE loadNotes() on a fresh-install marker state. ***")
-                sb.appendLine("*** This strongly indicates the data was populated/restored outside loadNotes(). ***")
-            } else if (event == "BEFORE_LOAD_NOTES" && diagnosticFreshInstall && !keyPresent) {
-                sb.appendLine("*** Fresh-install marker state has NO notes_list before loadNotes(). ***")
-            } else sb.appendLine("*** Compare BEFORE_LOAD_NOTES and AFTER_LOAD_NOTES events. ***")
-            sb.appendLine("============================================================\n")
-            writeDiagnosticReport(sb.toString())
-        } catch (e: Exception) { try { EmergencyLog.logException(e, "appendDiagnosticReport") } catch (_: Exception) {} }
+                sb.appendLine("oldAppSpecificJsonExists: ${old.exists()}")
+                if (old.exists()) {
+                    sb.appendLine("oldAppSpecificJsonPath: ${old.absolutePath}")
+                    sb.appendLine("oldAppSpecificJsonLength: ${old.length()}")
+                }
+            }
+
+            sb.appendLine("------------------------------------------------------------")
+            when (stage) {
+                "STAGE_1_BEFORE_GET_SHARED_PREFERENCES" -> {
+                    if (diagnosticFreshInstall && prefsFile.exists()) {
+                        sb.appendLine("STAGE_1_RESULT: SharedPreferences XML already exists before getSharedPreferences().")
+                    }
+                    if (hits.isNotEmpty()) {
+                        sb.appendLine("STAGE_1_RESULT: TARGET 01858288800 already exists somewhere in app-private data before getSharedPreferences().")
+                    }
+                }
+                "STAGE_2_AFTER_GET_SHARED_PREFERENCES_BEFORE_LOAD_NOTES" -> {
+                    sb.appendLine("STAGE_2_RESULT: This is the decisive pre-load state.")
+                }
+                "STAGE_3_AFTER_LOAD_NOTES" -> {
+                    sb.appendLine("STAGE_3_RESULT: Compare Stage 1, Stage 2 and Stage 3 to locate when the target first appeared.")
+                }
+            }
+            sb.appendLine("============================================================")
+            sb.appendLine()
+            writeThreeStageReport(sb.toString())
+        } catch (e: Exception) {
+            try { EmergencyLog.logException(e, "Three-stage diagnostic") } catch (_: Exception) {}
+        }
     }
 
-    private fun writeDiagnosticReport(content: String) {
+    private fun scanOwnAppDataForTarget(file: File, hits: MutableList<String>, depth: Int) {
+        if (depth > 6 || hits.size >= 100) return
+        try {
+            if (file.isDirectory) {
+                file.listFiles()?.forEach { child ->
+                    if (hits.size < 100) scanOwnAppDataForTarget(child, hits, depth + 1)
+                }
+                return
+            }
+            if (!file.isFile || file.length() > 5_000_000L) return
+            val bytes = file.readBytes()
+            val text = runCatching { bytes.toString(Charsets.UTF_8) }.getOrDefault("")
+            if (text.contains(DIAG_TARGET_NOTE)) {
+                hits.add("${file.absolutePath} (length=${file.length()}, lastModified=${file.lastModified()})")
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun writeThreeStageReport(content: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver = contentResolver
-                val rel = "${Environment.DIRECTORY_DOWNLOADS}/$DIAG_REPORT_FOLDER/"
+                val relative = "${Environment.DIRECTORY_DOWNLOADS}/$DIAG_REPORT_FOLDER/"
                 var uri: Uri? = null
-                resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Downloads._ID), "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?", arrayOf(DIAG_REPORT_FILE, rel), null)?.use { c ->
-                    if (c.moveToFirst()) uri = ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, c.getLong(c.getColumnIndexOrThrow(MediaStore.Downloads._ID)))
+                resolver.query(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Downloads._ID),
+                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+                    arrayOf(DIAG_REPORT_FILE, relative), null
+                )?.use { c ->
+                    if (c.moveToFirst()) {
+                        uri = ContentUris.withAppendedId(
+                            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                            c.getLong(c.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                        )
+                    }
                 }
                 if (uri == null) {
-                    val v = ContentValues().apply { put(MediaStore.Downloads.DISPLAY_NAME, DIAG_REPORT_FILE); put(MediaStore.Downloads.MIME_TYPE, "text/plain"); put(MediaStore.Downloads.RELATIVE_PATH, rel); put(MediaStore.Downloads.IS_PENDING, 1) }
-                    uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v)
-                    if (uri != null) resolver.openOutputStream(uri!!, "wa")?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
-                    if (uri != null) resolver.update(uri!!, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
-                } else resolver.openOutputStream(uri!!, "wa")?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
-                if (uri != null) return
-            } catch (e: Exception) { try { EmergencyLog.logException(e, "MediaStore diagnostic report") } catch (_: Exception) {} }
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, DIAG_REPORT_FILE)
+                        put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                        put(MediaStore.Downloads.RELATIVE_PATH, relative)
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    if (uri != null) {
+                        resolver.openOutputStream(uri!!, "wa")?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+                        resolver.update(uri!!, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                        return
+                    }
+                } else {
+                    resolver.openOutputStream(uri!!, "wa")?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+                    return
+                }
+            } catch (e: Exception) {
+                try { EmergencyLog.logException(e, "Three-stage MediaStore writer") } catch (_: Exception) {}
+            }
         }
         try {
-            @Suppress("DEPRECATION") val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), DIAG_REPORT_FOLDER)
+            @Suppress("DEPRECATION")
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), DIAG_REPORT_FOLDER)
             if (!dir.exists()) dir.mkdirs()
             File(dir, DIAG_REPORT_FILE).appendText(content, Charsets.UTF_8)
-        } catch (e: Exception) { try { EmergencyLog.logException(e, "Diagnostic report fallback") } catch (_: Exception) {} }
+        } catch (e: Exception) {
+            try { EmergencyLog.logException(e, "Three-stage fallback writer") } catch (_: Exception) {}
+        }
     }
 
     private fun loadNotes() {
