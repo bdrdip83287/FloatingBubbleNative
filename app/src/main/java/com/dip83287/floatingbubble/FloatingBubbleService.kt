@@ -183,13 +183,17 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             captureThreeStageDiagnostic("STAGE_2_AFTER_GET_SHARED_PREFERENCES_BEFORE_LOAD_NOTES")
 
+            loadSavedPositions()
             try {
-                loadSavedPositions()
                 loadNotes()
-            } finally {
-                // STAGE 3 must always be captured and the report must be attempted
-                // even if a later/earlier initialization step throws.
                 captureThreeStageDiagnostic("STAGE_3_AFTER_LOAD_NOTES")
+            } catch (stage3Error: Exception) {
+                diagnosticStageReports.add(
+                    "STAGE_3_AFTER_LOAD_NOTES\n" +
+                    "STAGE3_EXCEPTION=${stage3Error.javaClass.simpleName}: ${stage3Error.message}\n"
+                )
+            } finally {
+                // IMPORTANT: report writing must happen even if loadNotes() throws.
                 writeThreeStageDiagnosticReport()
             }
             createNotificationChannel()
@@ -297,111 +301,127 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     }
 
     private fun writeThreeStageDiagnosticReport() {
-        val report = try {
-            buildString {
+        try {
+            val report = buildString {
                 append("============================================================\n")
                 append("FLOATING NOTES THREE-STAGE SINGLE-WRITE RESTORE SOURCE DIAGNOSTIC\n")
                 append("Report created: ").append(SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())).append("\n")
-                append("Stage reports captured in RAM during the SAME onCreate() execution.\n")
-                append("The report is written after Stage 3. Diagnostic does NOT create, restore, modify or delete notes.\n")
+                append("IMPORTANT: Stage 1, Stage 2 and Stage 3 were captured in RAM during the SAME onCreate() execution.\n")
+                append("The report is written ONCE after Stage 3. Diagnostic does NOT create, restore, modify or delete notes.\n")
                 append("============================================================\n\n")
-                if (diagnosticStageReports.isEmpty()) {
-                    append("WARNING: No stage report was captured.\n")
-                } else {
-                    diagnosticStageReports.forEachIndexed { index, stage ->
-                        append("---------------- STAGE BLOCK ").append(index + 1).append(" ----------------\n")
-                        append(stage).append("\n")
-                    }
-                }
-                append("STAGE COMPARISON GUIDE\n")
+                append(diagnosticStageReports.joinToString("\n"))
+                append("\nSTAGE COMPARISON GUIDE\n")
                 append("1) Target present in STAGE_1 = it existed before getSharedPreferences().\n")
                 append("2) Absent in STAGE_1 but present in STAGE_2 = it appeared when SharedPreferences was opened; restore is primary suspect.\n")
                 append("3) Absent in STAGE_1/STAGE_2 but present in STAGE_3 = loadNotes() or other app code created/loaded it.\n")
                 append("PERSISTENCE_GOAL: User-created notes must survive uninstall/reinstall in the final app.\n")
                 append("============================================================\n")
             }
-        } catch (e: Exception) {
-            "FLOATING NOTES DIAGNOSTIC REPORT BUILD ERROR\n${e.javaClass.name}: ${e.message}\n"
-        }
-
-        // IMPORTANT: Always write a private copy first. This lets us verify that
-        // the diagnostic itself executed even if MediaStore has an OEM-specific issue.
-        try {
-            File(filesDir, DIAG_REPORT_FILE).writeText(report, Charsets.UTF_8)
-        } catch (e: Exception) {
-            try { EmergencyLog.logException(e, "diagnostic private report") } catch (_: Exception) {}
-        }
-
-        writeDiagnosticReportToDownloads(report)
+            writeDiagnosticReportToDownloads(report)
+        } catch (e: Exception) { try { EmergencyLog.logException(e, "write three-stage diagnostic report") } catch (_: Exception) {} }
     }
 
     private fun writeDiagnosticReportToDownloads(content: String) {
-        var mediaStoreWritten = false
+        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + DIAG_REPORT_FOLDER + "/"
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                val resolver = contentResolver
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = applicationContext.contentResolver
                 val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + DIAG_REPORT_FOLDER + "/"
 
-                // Do not depend on a previous row being found. Delete any matching
-                // rows first, then insert a completely new row.
+                // Delete only our previous diagnostic report.
                 try {
                     resolver.delete(
                         collection,
-                        "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+                        MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
+                            MediaStore.MediaColumns.RELATIVE_PATH + "=?",
                         arrayOf(DIAG_REPORT_FILE, relativePath)
                     )
-                } catch (_: Exception) {}
+                } catch (_: Exception) { }
 
                 val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, DIAG_REPORT_FILE)
-                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                    put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
-                    put(MediaStore.Downloads.IS_PENDING, 1)
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, DIAG_REPORT_FILE)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
 
                 val uri = resolver.insert(collection, values)
-                if (uri != null) {
-                    try {
-                        resolver.openOutputStream(uri, "w")?.use { output ->
-                            output.write(content.toByteArray(Charsets.UTF_8))
-                            output.flush()
-                        }
-                        val done = ContentValues().apply {
-                            put(MediaStore.Downloads.IS_PENDING, 0)
-                        }
-                        resolver.update(uri, done, null, null)
-                        mediaStoreWritten = true
-                    } catch (e: Exception) {
-                        try { resolver.delete(uri, null, null) } catch (_: Exception) {}
-                        try { EmergencyLog.logException(e, "diagnostic MediaStore output") } catch (_: Exception) {}
+                    ?: throw IllegalStateException("MediaStore.Downloads insert returned null")
+
+                try {
+                    resolver.openOutputStream(uri, "w")?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                    } ?: throw IllegalStateException("MediaStore output stream is null")
+
+                    val done = ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
                     }
+                    resolver.update(uri, done, null, null)
+                } catch (writeError: Exception) {
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) { }
+                    throw writeError
                 }
             } else {
                 @Suppress("DEPRECATION")
-                val folder = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    DIAG_REPORT_FOLDER
+                val downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
                 )
-                if (!folder.exists()) folder.mkdirs()
+                val folder = File(downloads, DIAG_REPORT_FOLDER)
+                if (!folder.exists() && !folder.mkdirs() && !folder.exists()) {
+                    throw IllegalStateException("Could not create Downloads/Floating Notes")
+                }
                 File(folder, DIAG_REPORT_FILE).writeText(content, Charsets.UTF_8)
-                mediaStoreWritten = true
             }
-        } catch (e: Exception) {
-            try { EmergencyLog.logException(e, "diagnostic report Downloads") } catch (_: Exception) {}
+            return
+        } catch (primaryError: Exception) {
+            try {
+                EmergencyLog.logException(primaryError, "diagnostic report primary MediaStore writer")
+            } catch (_: Exception) { }
         }
 
-        // Also keep a diagnostic status file inside app-private storage.
-        // This is NOT the final uninstall-surviving backup; it is only a safety
-        // net for diagnosing why the public Downloads write failed.
-        try {
-            File(filesDir, "diagnostic_write_status.txt").writeText(
-                "publicDownloadsWritten=$mediaStoreWritten\n" +
-                "time=" + SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date()) + "\n" +
-                "reportFile=" + DIAG_REPORT_FILE + "\n",
-                Charsets.UTF_8
-            )
-        } catch (_: Exception) {}
+        // Secondary MediaStore.Files fallback for devices/OEMs where Downloads collection
+        // behaves unexpectedly. This still writes to Download/Floating Notes.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val resolver = applicationContext.contentResolver
+                val collection = MediaStore.Files.getContentUri("external")
+                resolver.delete(
+                    collection,
+                    MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
+                        MediaStore.MediaColumns.RELATIVE_PATH + "=?",
+                    arrayOf(DIAG_REPORT_FILE, relativePath)
+                )
+
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, DIAG_REPORT_FILE)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(collection, values)
+                    ?: throw IllegalStateException("MediaStore.Files insert returned null")
+                try {
+                    resolver.openOutputStream(uri, "w")?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                    } ?: throw IllegalStateException("Fallback output stream is null")
+
+                    val done = ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, done, null, null)
+                } catch (fallbackWriteError: Exception) {
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) { }
+                    throw fallbackWriteError
+                }
+                return
+            } catch (fallbackError: Exception) {
+                try {
+                    EmergencyLog.logException(fallbackError, "diagnostic report MediaStore.Files fallback")
+                } catch (_: Exception) { }
+            }
+        }
     }
 
     private fun startConfigurationCheck() {
