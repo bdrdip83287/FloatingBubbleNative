@@ -56,7 +56,7 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val BUBBLE_ICON = "📝"
-    private val BUBBLE_SIZE = 112
+    private val BUBBLE_SIZE = 110
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
@@ -173,34 +173,53 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     override fun onCreate() {
         super.onCreate()
         try {
-            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            // THREE-STAGE DIAGNOSTIC: capture all stages in RAM and write once after Stage 3.
+            // Capture Stage 1 before SharedPreferences is opened.
             diagnosticFreshInstall = !File(getNoBackupFilesDir(), DIAG_MARKER_FILE).exists()
             captureThreeStageDiagnostic("STAGE_1_BEFORE_GET_SHARED_PREFERENCES")
             createThreeStageDiagnosticMarker()
 
+            // Open SharedPreferences, but do not call loadNotes() yet.
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             captureThreeStageDiagnostic("STAGE_2_AFTER_GET_SHARED_PREFERENCES_BEFORE_LOAD_NOTES")
 
             loadSavedPositions()
             loadNotes()
             captureThreeStageDiagnostic("STAGE_3_AFTER_LOAD_NOTES")
-            writeThreeStageDiagnosticReport()
+
+            // Start foreground service before doing any non-essential work.
             createNotificationChannel()
             startForeground(1001, createNotification())
             createDeleteZone()
             scrollHideHandler = Handler(Looper.getMainLooper())
             scrollStopHandler = Handler(Looper.getMainLooper())
-            
+
             lastFontScale = resources.configuration.fontScale
             lastScreenWidth = resources.displayMetrics.widthPixels
             lastScreenHeight = resources.displayMetrics.heightPixels
-            
             startConfigurationCheck()
-            
         } catch (e: Exception) {
-            EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
+            try {
+                EmergencyLog.logException(e, "FloatingBubbleService.onCreate")
+            } catch (_: Exception) {}
+            // IMPORTANT: even if normal startup fails, write the diagnostic report.
+            try {
+                if (diagnosticStageReports.isEmpty()) {
+                    diagnosticStageReports.add(
+                        "STAGE=ON_CREATE_EXCEPTION\n" +
+                        "exception=${e.javaClass.name}\n" +
+                        "message=${e.message}\n"
+                    )
+                }
+            } catch (_: Exception) {}
+        } finally {
+            // ALWAYS attempt the single-write diagnostic, including when onCreate() throws.
+            try {
+                writeThreeStageDiagnosticReport()
+            } catch (e: Exception) {
+                try {
+                    EmergencyLog.logException(e, "diagnostic final write")
+                } catch (_: Exception) {}
+            }
         }
     }
     
@@ -300,7 +319,11 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
                 append("IMPORTANT: Stage 1, Stage 2 and Stage 3 were captured in RAM during the SAME onCreate() execution.\n")
                 append("The report is written ONCE after Stage 3. Diagnostic does NOT create, restore, modify or delete notes.\n")
                 append("============================================================\n\n")
-                append(diagnosticStageReports.joinToString("\n"))
+                if (diagnosticStageReports.isEmpty()) {
+                    append("NO_STAGE_CAPTURED\n")
+                } else {
+                    append(diagnosticStageReports.joinToString("\n"))
+                }
                 append("\nSTAGE COMPARISON GUIDE\n")
                 append("1) Target present in STAGE_1 = it existed before getSharedPreferences().\n")
                 append("2) Absent in STAGE_1 but present in STAGE_2 = it appeared when SharedPreferences was opened; restore is primary suspect.\n")
@@ -313,24 +336,101 @@ private val DELETE_ZONE_HOVER_SCALE = 1.35f
     }
 
     private fun writeDiagnosticReportToDownloads(content: String) {
+        var mediaStoreSuccess = false
+        var legacySuccess = false
+        var appExternalSuccess = false
+        var lastError = ""
+
+        // 1) Android 10+ : MediaStore Downloads (no storage permission required).
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val resolver = contentResolver
                 val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                var oldUri: android.net.Uri? = null
-                resolver.query(collection, arrayOf(MediaStore.Downloads._ID), "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?", arrayOf(DIAG_REPORT_FILE, "${Environment.DIRECTORY_DOWNLOADS}/$DIAG_REPORT_FOLDER/"), null)?.use { c -> if (c.moveToFirst()) oldUri = ContentUris.withAppendedId(collection, c.getLong(0)) }
-                if (oldUri != null) resolver.delete(oldUri!!, null, null)
-                val values = ContentValues().apply { put(MediaStore.Downloads.DISPLAY_NAME, DIAG_REPORT_FILE); put(MediaStore.Downloads.MIME_TYPE, "text/plain"); put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$DIAG_REPORT_FOLDER/"); put(MediaStore.Downloads.IS_PENDING, 1) }
-                val uri = resolver.insert(collection, values) ?: return
-                resolver.openOutputStream(uri, "w")?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
-                val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-                resolver.update(uri, done, null, null)
-            } else {
-                val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), DIAG_REPORT_FOLDER)
+
+                // Remove an older diagnostic with the same name/path.
+                try {
+                    resolver.delete(
+                        collection,
+                        "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+                        arrayOf(
+                            DIAG_REPORT_FILE,
+                            "${Environment.DIRECTORY_DOWNLOADS}/$DIAG_REPORT_FOLDER/"
+                        )
+                    )
+                } catch (e: Exception) {
+                    lastError = "delete-old: ${e.javaClass.simpleName}: ${e.message}"
+                }
+
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, DIAG_REPORT_FILE)
+                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                    put(
+                        MediaStore.Downloads.RELATIVE_PATH,
+                        "${Environment.DIRECTORY_DOWNLOADS}/$DIAG_REPORT_FOLDER/"
+                    )
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+
+                val uri = resolver.insert(collection, values)
+                    ?: throw IllegalStateException("MediaStore insert returned null")
+
+                try {
+                    resolver.openOutputStream(uri, "w")?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                    } ?: throw IllegalStateException("openOutputStream returned null")
+
+                    val done = ContentValues().apply {
+                        put(MediaStore.Downloads.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, done, null, null)
+                    mediaStoreSuccess = true
+                } catch (e: Exception) {
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                    throw e
+                }
+            }
+        } catch (e: Exception) {
+            lastError = "MediaStore: ${e.javaClass.simpleName}: ${e.message}"
+        }
+
+        // 2) Android < 10 : public Downloads fallback.
+        if (!mediaStoreSuccess) {
+            try {
+                @Suppress("DEPRECATION")
+                val downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+                val folder = File(downloads, DIAG_REPORT_FOLDER)
+                if (!folder.exists() && !folder.mkdirs()) {
+                    throw IllegalStateException("Could not create ${folder.absolutePath}")
+                }
+                File(folder, DIAG_REPORT_FILE).writeText(content, Charsets.UTF_8)
+                legacySuccess = true
+            } catch (e: Exception) {
+                lastError = "Legacy: ${e.javaClass.simpleName}: ${e.message}"
+            }
+        }
+
+        // 3) Last-resort private external copy, so the report is not silently lost.
+        if (!mediaStoreSuccess && !legacySuccess) {
+            try {
+                val folder = File(getExternalFilesDir(null), "Floating Notes Diagnostic")
                 if (!folder.exists()) folder.mkdirs()
                 File(folder, DIAG_REPORT_FILE).writeText(content, Charsets.UTF_8)
+                appExternalSuccess = true
+            } catch (e: Exception) {
+                lastError = "AppExternal: ${e.javaClass.simpleName}: ${e.message}"
             }
-        } catch (e: Exception) { try { EmergencyLog.logException(e, "diagnostic report MediaStore") } catch (_: Exception) {} }
+        }
+
+        // Do not alter the diagnostic content, but log where the report was written.
+        try {
+            EmergencyLog.log(
+                "Diagnostic report write: MediaStore=$mediaStoreSuccess, " +
+                "Legacy=$legacySuccess, AppExternal=$appExternalSuccess, error=$lastError"
+            )
+        } catch (_: Exception) {}
     }
 
     private fun startConfigurationCheck() {
