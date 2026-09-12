@@ -263,9 +263,9 @@ class FloatingBubbleService : Service() {
             diagnosticFreshInstallAtStartup =
                 initializeDiagnosticInstallMarker()
 
-            appendPrePreferencesDiagnostic(
-                "STAGE_0_BEFORE_GET_SHARED_PREFERENCES"
-            )
+            appendRestoreDiagnosticReport(
+    "STAGE_0_BEFORE_GET_SHARED_PREFERENCES"
+)
 
             // ========================================================
             // 🔬 STAGE 1 — getSharedPreferences() boundary
