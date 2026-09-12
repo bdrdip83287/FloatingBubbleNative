@@ -85,11 +85,9 @@ class FloatingBubbleService : Service() {
     // The report itself is stored in shared Downloads storage so it can
     // remain on the device after the app is uninstalled.
     //
-    // NEXT TEST GOAL:
-    // This version does NOT restore notes from any backup. It records the
-    // physical SharedPreferences XML BEFORE getSharedPreferences(), then
-    // the SharedPreferences API state, then the state after loadNotes().
-    // This isolates the exact boundary at which the old note appears.
+    // FINAL TEST GOAL:
+    // This version does NOT restore notes from any backup. It only records
+    // evidence before/after loadNotes() so we can identify the restore source.
     private val DIAGNOSTIC_INSTALL_MARKER = "floating_notes_install_marker.txt"
     private val DIAGNOSTIC_REPORT_FILE = "restore_diagnostic_report.txt"
     private val DIAGNOSTIC_REPORT_FOLDER = "Floating Notes"
@@ -255,18 +253,13 @@ class FloatingBubbleService : Service() {
                 getSystemService(WINDOW_SERVICE) as WindowManager
 
             // ========================================================
-            // 🔬 NEXT DIAGNOSTIC — STAGE 0
+            // 🔬 NEXT DIAGNOSTIC — SAFE REPORT FIRST
             // ========================================================
-            // IMPORTANT: this snapshot is taken BEFORE calling
-            // getSharedPreferences(). Therefore the diagnostic reads the
-            // physical SharedPreferences XML file directly from disk.
-            //
-            // This separates two possibilities:
-            //   A) Android/OEM restore already placed notes_list into the
-            //      XML file before our app requested SharedPreferences.
-            //   B) getSharedPreferences() or our own startup code causes
-            //      the old state to become visible later.
+            // IMPORTANT: the report writer used here NEVER touches
+            // SharedPreferences, so it is safe to call before the
+            // lateinit `prefs` variable is initialized.
             // ========================================================
+
             diagnosticFreshInstallAtStartup =
                 initializeDiagnosticInstallMarker()
 
@@ -290,17 +283,11 @@ class FloatingBubbleService : Service() {
             loadSavedPositions()
 
             // ========================================================
-            // 🔬 STAGE 2 — physical source fingerprint after the
-            // SharedPreferences object has been created, but BEFORE
-            // loadNotes() runs.
+            // 🔬 STAGE 2 — BEFORE loadNotes()
             // ========================================================
             appendRestoreSourceFingerprint(
                 "STAGE_2_BEFORE_LOAD_NOTES"
             )
-
-            // ========================================================
-            // STEP 2 — Normal note loading
-            // ========================================================
 
             loadNotes()
 
@@ -311,9 +298,6 @@ class FloatingBubbleService : Service() {
                 "STAGE_3_AFTER_LOAD_NOTES"
             )
 
-            // Capture the same storage fingerprint AFTER loadNotes().
-            // Differences between STAGE_2 and STAGE_3 show exactly what
-            // our own load/save path changed.
             appendRestoreSourceFingerprint(
                 "STAGE_3_PHYSICAL_FINGERPRINT_AFTER_LOAD_NOTES"
             )
@@ -432,134 +416,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-
-    // ============================================================
-    // 🔬 STAGE 0 — RAW DISK SNAPSHOT BEFORE getSharedPreferences()
-    // ============================================================
-    //
-    // This function deliberately does NOT access the SharedPreferences
-    // API. It reads the expected XML file directly from applicationInfo.dataDir.
-    // The report writer itself is independent and stores the report in
-    // public Downloads/Floating Notes.
-    //
-    // This is the key new diagnostic boundary: if notes_list is already
-    // physically present here on a fresh install, the data existed before
-    // getSharedPreferences() was called. If it is absent here but appears
-    // immediately after getSharedPreferences(), that boundary becomes the
-    // next suspect.
-    // ============================================================
-    private fun appendPrePreferencesDiagnostic(event: String) {
-        try {
-            val now =
-                SimpleDateFormat(
-                    "yyyy-MM-dd HH:mm:ss.SSS",
-                    Locale.US
-                ).format(Date())
-
-            val appInfo = applicationInfo
-            val packageInfo = packageManager.getPackageInfo(packageName, 0)
-            val dataDir = appInfo.dataDir
-            val prefsXml =
-                File(
-                    dataDir,
-                    "shared_prefs/$PREFS_NAME.xml"
-                )
-
-            val noBackupDir = getNoBackupFilesDir()
-            val marker = File(
-                noBackupDir,
-                DIAGNOSTIC_INSTALL_MARKER
-            )
-
-            val allowBackup =
-                (appInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0
-
-            val debuggable =
-                (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-
-            val xmlText =
-                if (prefsXml.exists() && prefsXml.isFile) {
-                    try {
-                        prefsXml.readText(Charsets.UTF_8)
-                    } catch (_: Exception) {
-                        ""
-                    }
-                } else {
-                    ""
-                }
-
-            val containsNotesKey =
-                xmlText.contains("notes_list")
-
-            val containsTargetTitle =
-                xmlText.contains("01858288800")
-
-            val externalBackup =
-                try {
-                    File(
-                        getExternalFilesDir(null),
-                        "floating_notes_backup.json"
-                    )
-                } catch (_: Exception) {
-                    null
-                }
-
-            val report = buildString {
-                appendLine()
-                appendLine("============================================================")
-                appendLine("FLOATING NOTES NEXT DIAGNOSTIC")
-                appendLine("Time: $now")
-                appendLine("Event: $event")
-                appendLine("Package: $packageName")
-                appendLine("versionCode: ${packageInfo.longVersionCode}")
-                appendLine("versionName: ${packageInfo.versionName}")
-                appendLine("Android SDK: ${Build.VERSION.SDK_INT}")
-                appendLine("Fresh-install-at-startup: $diagnosticFreshInstallAtStartup")
-                appendLine("ApplicationInfo.FLAG_ALLOW_BACKUP: $allowBackup")
-                appendLine("ApplicationInfo.FLAG_DEBUGGABLE: $debuggable")
-                appendLine("applicationInfo.dataDir: $dataDir")
-                appendLine("noBackupFilesDir: ${noBackupDir.absolutePath}")
-                appendLine("installMarkerExists: ${marker.exists()}")
-                appendLine()
-                appendLine("RAW SharedPreferences XML BEFORE getSharedPreferences():")
-                appendLine("  path=${prefsXml.absolutePath}")
-                appendLine("  exists=${prefsXml.exists()}")
-                appendLine("  length=${if (prefsXml.exists()) prefsXml.length() else 0}")
-                appendLine("  lastModified=${if (prefsXml.exists()) prefsXml.lastModified() else 0}")
-                appendLine("  sha256=${diagnosticSha256File(prefsXml)}")
-                appendLine("  contains_notes_list_key=$containsNotesKey")
-                appendLine("  contains_target_title_01858288800=$containsTargetTitle")
-                appendLine("  raw_xml_chars=${xmlText.length}")
-                appendLine()
-                appendLine("Old app-specific external JSON backup (never loaded):")
-                appendLine("  path=${externalBackup?.absolutePath ?: "UNAVAILABLE"}")
-                appendLine("  exists=${externalBackup?.exists() == true}")
-                appendLine("  length=${if (externalBackup?.exists() == true) externalBackup.length() else 0}")
-                appendLine("  sha256=${externalBackup?.let { diagnosticSha256File(it) } ?: "NONE"}")
-                appendLine()
-                appendLine("STAGE 0 INTERPRETATION:")
-                if (prefsXml.exists() && containsNotesKey) {
-                    appendLine("  notes_list is physically present BEFORE getSharedPreferences().")
-                    appendLine("  Therefore the old note data existed before this API call.")
-                    appendLine("  This strongly points to restored/pre-existing app data, not loadNotes().")
-                } else {
-                    appendLine("  notes_list is NOT physically present BEFORE getSharedPreferences().")
-                    appendLine("  Compare this with STAGE_1_AFTER_GET_SHARED_PREFERENCES.")
-                }
-                appendLine("============================================================")
-            }
-
-            val previousReport = readDiagnosticReport()
-            writeDiagnosticReport(previousReport + report)
-
-        } catch (e: Exception) {
-            android.util.Log.e(
-                "RESTORE_DIAGNOSTIC",
-                "Pre-preferences diagnostic failed",
-                e
-            )
-        }
-    }
 
     // ============================================================
     // 🔬 FINAL RESTORE SOURCE FINGERPRINT
@@ -1167,161 +1023,118 @@ class FloatingBubbleService : Service() {
      *   public Download directory
      */
     private fun readDiagnosticReport(): String {
-
         return try {
-
-            if (
-                Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.Q
-            ) {
-
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val collection =
-                    MediaStore.Downloads
-                        .EXTERNAL_CONTENT_URI
-
-                val projection =
-                    arrayOf(
-                        MediaStore.Downloads._ID
-                    )
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI
 
                 val relativePath =
-                    "${Environment.DIRECTORY_DOWNLOADS}/" +
-                        "$DIAGNOSTIC_REPORT_FOLDER/"
-
-                val selection =
-                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
-                        "${MediaStore.Downloads.RELATIVE_PATH}=?"
-
-                val selectionArgs =
-                    arrayOf(
-                        DIAGNOSTIC_REPORT_FILE,
-                        relativePath
-                    )
+                    Environment.DIRECTORY_DOWNLOADS +
+                        "/" +
+                        DIAGNOSTIC_REPORT_FOLDER +
+                        "/"
 
                 contentResolver.query(
                     collection,
-                    projection,
-                    selection,
-                    selectionArgs,
+                    arrayOf(MediaStore.Downloads._ID),
+                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
+                        "${MediaStore.Downloads.RELATIVE_PATH}=?",
+                    arrayOf(
+                        DIAGNOSTIC_REPORT_FILE,
+                        relativePath
+                    ),
                     null
                 )?.use { cursor ->
-
                     if (cursor.moveToFirst()) {
-
-                        val id =
-                            cursor.getLong(
-                                cursor.getColumnIndexOrThrow(
-                                    MediaStore.Downloads._ID
-                                )
+                        val id = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(
+                                MediaStore.Downloads._ID
                             )
-
-                        val uri =
-                            ContentUris.withAppendedId(
-                                collection,
-                                id
-                            )
-
-                        return contentResolver
-                            .openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use {
-                                it.readText()
-                            }
+                        )
+                        val uri = ContentUris.withAppendedId(
+                            collection,
+                            id
+                        )
+                        return contentResolver.openInputStream(uri)
+                            ?.bufferedReader(Charsets.UTF_8)
+                            ?.use { it.readText() }
                             ?: ""
                     }
                 }
-
                 ""
-
             } else {
-
-                val directory =
+                val file = File(
                     File(
-                        Environment
-                            .getExternalStoragePublicDirectory(
-                                Environment.DIRECTORY_DOWNLOADS
-                            ),
+                        Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_DOWNLOADS
+                        ),
                         DIAGNOSTIC_REPORT_FOLDER
-                    )
-
-                val file =
-                    File(
-                        directory,
-                        DIAGNOSTIC_REPORT_FILE
-                    )
-
+                    ),
+                    DIAGNOSTIC_REPORT_FILE
+                )
                 if (file.exists()) {
-                    file.readText(
-                        Charsets.UTF_8
-                    )
+                    file.readText(Charsets.UTF_8)
                 } else {
                     ""
                 }
             }
-
         } catch (e: Exception) {
-
+            android.util.Log.e(
+                "RESTORE_DIAGNOSTIC",
+                "READ_REPORT_FAILED: ${e.javaClass.name}: ${e.message}",
+                e
+            )
             ""
         }
     }
 
-
     /**
-     * Writes the diagnostic report to shared Downloads storage.
+     * ROBUST diagnostic report writer.
+     *
+     * IMPORTANT:
+     * - Does NOT access SharedPreferences.
+     * - Can therefore run before `prefs` is initialized.
+     * - Android 10+ writes to public Downloads/Floating Notes through
+     *   MediaStore.Downloads.
+     * - Existing report is replaced atomically by writing the complete text.
+     * - Android 9 and below uses the public Downloads directory.
+     * - Every failure is also sent to Logcat with the exact exception.
      */
     private fun writeDiagnosticReport(
         text: String
     ) {
-
         try {
-
-            if (
-                Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.Q
-            ) {
-
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val collection =
-                    MediaStore.Downloads
-                        .EXTERNAL_CONTENT_URI
-
-                val projection =
-                    arrayOf(
-                        MediaStore.Downloads._ID
-                    )
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI
 
                 val relativePath =
-                    "${Environment.DIRECTORY_DOWNLOADS}/" +
-                        "$DIAGNOSTIC_REPORT_FOLDER/"
-
-                val selection =
-                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
-                        "${MediaStore.Downloads.RELATIVE_PATH}=?"
-
-                val selectionArgs =
-                    arrayOf(
-                        DIAGNOSTIC_REPORT_FILE,
-                        relativePath
-                    )
+                    Environment.DIRECTORY_DOWNLOADS +
+                        "/" +
+                        DIAGNOSTIC_REPORT_FOLDER +
+                        "/"
 
                 var uri: Uri? = null
 
+                // First find an existing report.
                 contentResolver.query(
                     collection,
-                    projection,
-                    selection,
-                    selectionArgs,
+                    arrayOf(MediaStore.Downloads._ID),
+                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
+                        "${MediaStore.Downloads.RELATIVE_PATH}=?",
+                    arrayOf(
+                        DIAGNOSTIC_REPORT_FILE,
+                        relativePath
+                    ),
                     null
                 )?.use { cursor ->
-
                     if (cursor.moveToFirst()) {
-
                         val id =
                             cursor.getLong(
                                 cursor.getColumnIndexOrThrow(
                                     MediaStore.Downloads._ID
                                 )
                             )
-
                         uri =
                             ContentUris.withAppendedId(
                                 collection,
@@ -1330,85 +1143,107 @@ class FloatingBubbleService : Service() {
                     }
                 }
 
+                // If it does not exist, create it.
                 if (uri == null) {
-
-                    val values =
-                        ContentValues().apply {
-
-                            put(
-                                MediaStore.Downloads.DISPLAY_NAME,
-                                DIAGNOSTIC_REPORT_FILE
-                            )
-
-                            put(
-                                MediaStore.Downloads.MIME_TYPE,
-                                "text/plain"
-                            )
-
-                            put(
-                                MediaStore.Downloads.RELATIVE_PATH,
-                                relativePath
-                            )
-                        }
-
-                    uri =
-                        contentResolver.insert(
-                            collection,
-                            values
+                    val values = ContentValues().apply {
+                        put(
+                            MediaStore.Downloads.DISPLAY_NAME,
+                            DIAGNOSTIC_REPORT_FILE
                         )
+                        put(
+                            MediaStore.Downloads.MIME_TYPE,
+                            "text/plain"
+                        )
+                        put(
+                            MediaStore.Downloads.RELATIVE_PATH,
+                            relativePath
+                        )
+                    }
+
+                    uri = contentResolver.insert(
+                        collection,
+                        values
+                    )
+
+                    if (uri == null) {
+                        throw IllegalStateException(
+                            "MediaStore insert returned null"
+                        )
+                    }
                 }
 
-                uri?.let { target ->
+                val target = uri
+                    ?: throw IllegalStateException(
+                        "Diagnostic report URI is null"
+                    )
 
-                    contentResolver
-                        .openOutputStream(
-                            target,
-                            "wt"
+                contentResolver.openOutputStream(
+                    target,
+                    "wt"
+                )?.use { output ->
+                    output.write(
+                        text.toByteArray(Charsets.UTF_8)
+                    )
+                    output.flush()
+                } ?: throw IllegalStateException(
+                    "MediaStore openOutputStream returned null"
+                )
+
+                // Verify the file is readable immediately.
+                contentResolver.openInputStream(target)?.use { input ->
+                    val verification = input.readBytes()
+                    if (verification.isEmpty() && text.isNotEmpty()) {
+                        throw IllegalStateException(
+                            "Diagnostic report verification read returned empty data"
                         )
-                        ?.use { output ->
-
-                            output.write(
-                                text.toByteArray(
-                                    Charsets.UTF_8
-                                )
-                            )
-                        }
+                    }
                 }
 
             } else {
+                val directory = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    DIAGNOSTIC_REPORT_FOLDER
+                )
 
-                val directory =
-                    File(
-                        Environment
-                            .getExternalStoragePublicDirectory(
-                                Environment.DIRECTORY_DOWNLOADS
-                            ),
-                        DIAGNOSTIC_REPORT_FOLDER
+                if (!directory.exists() && !directory.mkdirs() && !directory.exists()) {
+                    throw IllegalStateException(
+                        "Could not create ${directory.absolutePath}"
                     )
-
-                if (!directory.exists()) {
-                    directory.mkdirs()
                 }
 
-                File(
+                val file = File(
                     directory,
                     DIAGNOSTIC_REPORT_FILE
-                ).writeText(
+                )
+
+                file.writeText(
                     text,
                     Charsets.UTF_8
                 )
+
+                if (!file.exists() || file.length() != text.toByteArray(Charsets.UTF_8).size.toLong()) {
+                    throw IllegalStateException(
+                        "Diagnostic report verification failed: ${file.absolutePath}"
+                    )
+                }
             }
 
-        } catch (e: Exception) {
+            android.util.Log.i(
+                "RESTORE_DIAGNOSTIC",
+                "Diagnostic report written successfully: " +
+                    "Download/$DIAGNOSTIC_REPORT_FOLDER/$DIAGNOSTIC_REPORT_FILE"
+            )
 
+        } catch (e: Exception) {
             android.util.Log.e(
                 "RESTORE_DIAGNOSTIC",
-                "Could not write diagnostic report",
+                "WRITE_REPORT_FAILED: ${e.javaClass.name}: ${e.message}",
                 e
             )
         }
     }
-
 
     /**
      * Normal note loading.
