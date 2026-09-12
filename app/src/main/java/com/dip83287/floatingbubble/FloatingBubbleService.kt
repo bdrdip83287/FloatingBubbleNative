@@ -253,23 +253,17 @@ class FloatingBubbleService : Service() {
                 getSystemService(WINDOW_SERVICE) as WindowManager
 
             // ========================================================
-            // 🔬 STAGE 0 — Diagnose BEFORE getSharedPreferences()
+            // 🔬 STAGE 0 — Physical storage snapshot BEFORE
+            // getSharedPreferences() is called.
+            //
+            // IMPORTANT:
+            // This helper does NOT access SharedPreferences APIs.
+            // It only inspects the physical XML file and writes the
+            // diagnostic report through the existing report writer.
             // ========================================================
-            // appendRestoreDiagnosticReport() is safe here because it
-            // checks whether prefs has been initialized before reading it.
-            // The report itself is written to shared Downloads storage.
-            // ========================================================
-
-            diagnosticFreshInstallAtStartup =
-                initializeDiagnosticInstallMarker()
-
-            appendRestoreDiagnosticReport(
+            appendPrePreferencesDiagnostic(
                 "STAGE_0_BEFORE_GET_SHARED_PREFERENCES"
             )
-
-            // ========================================================
-            // STAGE 1 — Initialize SharedPreferences
-            // ========================================================
 
             prefs =
                 getSharedPreferences(
@@ -277,36 +271,59 @@ class FloatingBubbleService : Service() {
                     MODE_PRIVATE
                 )
 
-            appendRestoreDiagnosticReport(
-                "STAGE_1_AFTER_GET_SHARED_PREFERENCES_BEFORE_LOAD_NOTES"
-            )
-
             loadSavedPositions()
 
             // ========================================================
-            // STAGE 2 — Physical storage fingerprint BEFORE loadNotes()
+            // 🔬 STEP 1 — Diagnose BEFORE loadNotes()
+            // ========================================================
+            //
+            // This is the most important part of the test.
+            // We capture SharedPreferences BEFORE our own code loads
+            // anything into notesList.
+            //
+            // If, immediately after reinstall, notes_list already
+            // contains the old 3 notes here, then those notes were
+            // restored/created BEFORE loadNotes() ran.
             // ========================================================
 
+            diagnosticFreshInstallAtStartup =
+                initializeDiagnosticInstallMarker()
+
+            // ========================================================
+            // 🔬 FINAL SOURCE FINGERPRINT — BEFORE loadNotes()
+            // ========================================================
+            // Capture the package/backup flags, SharedPreferences XML
+            // file metadata, app-specific external backup-file state,
+            // and app-data directory state BEFORE loadNotes() changes
+            // anything. This is the key source-identification snapshot.
+            // ========================================================
             appendRestoreSourceFingerprint(
-                "STAGE_2_BEFORE_LOAD_NOTES"
+                "BEFORE_LOAD_NOTES"
+            )
+
+            appendRestoreDiagnosticReport(
+                "SERVICE_START_BEFORE_LOAD"
             )
 
             // ========================================================
-            // STAGE 3 — Normal note loading
+            // STEP 2 — Normal note loading
             // ========================================================
 
             loadNotes()
 
             // ========================================================
-            // STAGE 4 — Diagnose AFTER loadNotes()
+            // STEP 3 — Diagnose AFTER loadNotes()
             // ========================================================
 
             appendRestoreDiagnosticReport(
-                "STAGE_3_AFTER_LOAD_NOTES"
+                "SERVICE_AFTER_LOAD"
             )
 
+            // Capture the same storage fingerprint AFTER loadNotes().
+            // Differences between BEFORE_LOAD_NOTES and AFTER_LOAD_NOTES
+            // reveal what our own startup code changed.
             appendRestoreSourceFingerprint(
-                "STAGE_3_PHYSICAL_FINGERPRINT_AFTER_LOAD_NOTES"
+                "AFTER_LOAD_NOTES"
             )
 
             createNotificationChannel()
@@ -423,6 +440,202 @@ class FloatingBubbleService : Service() {
         }
     }
 
+
+    // ============================================================
+    // 🔬 STAGE 0 — BEFORE getSharedPreferences()
+    // ============================================================
+
+    /**
+     * Takes a physical storage snapshot BEFORE the first
+     * getSharedPreferences() call.
+     *
+     * IMPORTANT:
+     * - This method does NOT call getSharedPreferences().
+     * - It does NOT access the prefs object.
+     * - It does NOT load or modify notesList.
+     * - It only inspects the physical SharedPreferences XML file.
+     * - The existing working diagnostic report writer is reused.
+     *
+     * Therefore this stage can tell us whether the old notes were
+     * already physically present in bubble_prefs.xml before Android
+     * app code obtained the SharedPreferences object.
+     */
+    private fun appendPrePreferencesDiagnostic(
+        event: String
+    ) {
+
+        try {
+
+            val now =
+                SimpleDateFormat(
+                    "yyyy-MM-dd HH:mm:ss.SSS",
+                    Locale.US
+                ).format(Date())
+
+            val dataDir =
+                try {
+                    applicationInfo.dataDir
+                } catch (_: Exception) {
+                    "UNAVAILABLE"
+                }
+
+            val prefsXml =
+                File(
+                    dataDir,
+                    "shared_prefs/$PREFS_NAME.xml"
+                )
+
+            val xmlExists =
+                prefsXml.exists() && prefsXml.isFile
+
+            val xmlLength =
+                if (xmlExists) prefsXml.length() else 0L
+
+            val xmlLastModified =
+                if (xmlExists) prefsXml.lastModified() else 0L
+
+            val xmlHash =
+                if (xmlExists) {
+                    diagnosticSha256File(prefsXml)
+                } else {
+                    "NONE"
+                }
+
+            val xmlContainsNotesList =
+                if (xmlExists) {
+                    diagnosticFileContainsText(
+                        prefsXml,
+                        "notes_list"
+                    )
+                } else {
+                    false
+                }
+
+            val xmlContainsTargetTitle =
+                if (xmlExists) {
+                    diagnosticFileContainsText(
+                        prefsXml,
+                        "01858288800"
+                    )
+                } else {
+                    false
+                }
+
+            val report =
+                buildString {
+
+                    appendLine()
+                    appendLine(
+                        "============================================================"
+                    )
+                    appendLine(
+                        "FLOATING NOTES RESTORE DIAGNOSTIC - STAGE 0"
+                    )
+                    appendLine(
+                        "Time: $now"
+                    )
+                    appendLine(
+                        "Event: $event"
+                    )
+                    appendLine(
+                        "Package: $packageName"
+                    )
+                    appendLine(
+                        "Android SDK: ${Build.VERSION.SDK_INT}"
+                    )
+                    appendLine()
+                    appendLine(
+                        "IMPORTANT: getSharedPreferences() HAS NOT BEEN CALLED YET."
+                    )
+                    appendLine(
+                        "This is a physical-file-only snapshot."
+                    )
+                    appendLine()
+                    appendLine(
+                        "Physical SharedPreferences XML:"
+                    )
+                    appendLine(
+                        "  path=${prefsXml.absolutePath}"
+                    )
+                    appendLine(
+                        "  exists=$xmlExists"
+                    )
+                    appendLine(
+                        "  length=$xmlLength"
+                    )
+                    appendLine(
+                        "  lastModified=$xmlLastModified"
+                    )
+                    appendLine(
+                        "  SHA-256=$xmlHash"
+                    )
+                    appendLine(
+                        "  contains notes_list=$xmlContainsNotesList"
+                    )
+                    appendLine(
+                        "  contains target title 01858288800=$xmlContainsTargetTitle"
+                    )
+                    appendLine()
+                    appendLine(
+                        "Interpretation:"
+                    )
+
+                    if (xmlContainsNotesList || xmlContainsTargetTitle) {
+                        appendLine(
+                            "  OLD NOTE DATA APPEARS TO EXIST PHYSICALLY BEFORE getSharedPreferences()."
+                        )
+                        appendLine(
+                            "  This strongly indicates the data was restored/created before the service obtained the SharedPreferences object."
+                        )
+                    } else {
+                        appendLine(
+                            "  Target note data was NOT detected in the physical XML at this stage."
+                        )
+                        appendLine(
+                            "  If the old notes appear later, compare STAGE 1/2/3 to identify when they become available."
+                        )
+                    }
+
+                    appendLine(
+                        "============================================================"
+                    )
+                }
+
+            val previousReport =
+                readDiagnosticReport()
+
+            writeDiagnosticReport(
+                previousReport + report
+            )
+
+        } catch (e: Exception) {
+
+            android.util.Log.e(
+                "RESTORE_DIAGNOSTIC",
+                "Pre-preferences diagnostic failed",
+                e
+            )
+
+            // Last-resort report write. This branch also does NOT touch
+            // SharedPreferences and therefore remains safe before prefs
+            // initialization.
+            try {
+                writeDiagnosticReport(
+                    "\n\n============================================================\n" +
+                        "FLOATING NOTES RESTORE DIAGNOSTIC - STAGE 0 ERROR\n" +
+                        "Event: $event\n" +
+                        "Error: ${e.javaClass.simpleName}: ${e.message}\n" +
+                        "============================================================\n"
+                )
+            } catch (writeError: Exception) {
+                android.util.Log.e(
+                    "RESTORE_DIAGNOSTIC",
+                    "Stage 0 last-resort report write failed",
+                    writeError
+                )
+            }
+        }
+    }
 
     // ============================================================
     // 🔬 FINAL RESTORE SOURCE FINGERPRINT
@@ -746,35 +959,22 @@ class FloatingBubbleService : Service() {
                     Locale.US
                 ).format(Date())
 
-            // STAGE 0 runs before getSharedPreferences().
-            // Do not access the lateinit prefs field until it is initialized.
-            val prefsInitialized =
-                ::prefs.isInitialized
-
             val rawNotesJson =
-                if (prefsInitialized) {
-                    try {
-                        prefs.getString(
-                            STORAGE_NOTES_LIST,
-                            null
-                        )
-                    } catch (e: Exception) {
+                try {
+                    prefs.getString(
+                        STORAGE_NOTES_LIST,
                         null
-                    }
-                } else {
+                    )
+                } catch (e: Exception) {
                     null
                 }
 
             val keyPresent =
-                if (prefsInitialized) {
-                    try {
-                        prefs.contains(
-                            STORAGE_NOTES_LIST
-                        )
-                    } catch (e: Exception) {
-                        false
-                    }
-                } else {
+                try {
+                    prefs.contains(
+                        STORAGE_NOTES_LIST
+                    )
+                } catch (e: Exception) {
                     false
                 }
 
@@ -822,11 +1022,6 @@ class FloatingBubbleService : Service() {
                     appendLine(
                         "Fresh-install-at-startup: " +
                             diagnosticFreshInstallAtStartup
-                    )
-
-                    appendLine(
-                        "SharedPreferences initialized at this event: " +
-                            prefsInitialized
                     )
 
                     appendLine(
@@ -917,9 +1112,8 @@ class FloatingBubbleService : Service() {
                     )
 
                     if (
-                        (event == "SERVICE_START_BEFORE_LOAD" ||
-                            event == "STAGE_0_BEFORE_GET_SHARED_PREFERENCES" ||
-                            event == "STAGE_1_AFTER_GET_SHARED_PREFERENCES_BEFORE_LOAD_NOTES") &&
+                        event ==
+                        "SERVICE_START_BEFORE_LOAD" &&
                         diagnosticFreshInstallAtStartup
                     ) {
 
