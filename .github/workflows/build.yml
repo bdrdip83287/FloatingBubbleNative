@@ -43,7 +43,7 @@ jobs:
           echo "Using sdkmanager:"
           echo "$SDKMANAGER"
 
-          chmod +x "$SDKMANAGER"
+          chmod +x "$SDKMANAGER" 2>/dev/null || true 2>/dev/null || true
 
           echo "Accepting licenses..."
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
