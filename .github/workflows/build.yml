@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -18,27 +18,51 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          echo "Checking sdkmanager..."
+          which sdkmanager
+          sdkmanager --version
+
+          echo "Accepting Android SDK licenses..."
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+          echo "Installing required Android SDK packages..."
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Create debug keystore if not exists
         run: |
-          # Check if keystore already exists in repo
           if [ -f "debug.keystore" ]; then
             echo "Keystore already exists in repo, using it."
             cp debug.keystore app/debug.keystore
+
           elif [ -f "app/debug.keystore" ]; then
             echo "Keystore already exists in app folder, using it."
+
           else
             echo "Creating new keystore..."
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, O=Android, C=US" -noprompt
+
+            keytool -genkey -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug, O=Android, C=US" \
+              -noprompt
+
             cp debug.keystore app/debug.keystore
           fi
-          
-          # Verify keystore exists
+
+          echo "Verifying debug keystore:"
           ls -la app/debug.keystore
 
       - name: Build APK
@@ -51,4 +75,3 @@ jobs:
         with:
           name: FloatingNotes-Latest
           path: app/build/outputs/apk/debug/*.apk
-
