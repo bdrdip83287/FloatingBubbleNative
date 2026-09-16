@@ -8,8 +8,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.ClipboardManager
-import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -24,7 +22,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.Uri
 import android.os.*
-import android.provider.MediaStore
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
@@ -67,9 +64,10 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
-    // ✅ Public storage backup - survives uninstall
-    private val BACKUP_FOLDER = "FloatingNotes"
+    // ✅ External storage file for persistent notes
     private val NOTES_BACKUP_FILE = "floating_notes_backup.json"
+    private val EXTERNAL_NOTES_FILE: File
+        get() = File(getExternalFilesDir(null), NOTES_BACKUP_FILE)
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -226,13 +224,15 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ✅ Load notes: Public storage FIRST (survives uninstall),
-            // then fallback to SharedPreferences
-            val loadedFromPublic = loadNotesFromPublicStorage()
-            if (!loadedFromPublic) {
+            // ✅ Step 1: Check if external storage file exists
+            if (EXTERNAL_NOTES_FILE.exists()) {
+                // ✅ Step 2: Read from external storage
+                loadNotesFromExternalStorage()
+            } else {
+                // ✅ Step 3: No external file - load from SharedPreferences
                 loadNotes()
-                // Sync to public storage on first launch
-                saveNotesToPublicStorage()
+                // ✅ Step 4: Save to external storage for future
+                saveNotesToExternalStorage()
             }
 
             createNotificationChannel()
@@ -281,118 +281,33 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ PUBLIC STORAGE PERSISTENCE
-    // Uses MediaStore (Android 10+) and public Documents (older)
-    // Files survive app uninstall/reinstall.
+    // ✅ EXTERNAL STORAGE PERSISTENCE - FIXED
     // ============================================================
 
-    private fun getLegacyPublicBackupFile(): File {
-        // For Android 9 and below: /storage/emulated/0/Documents/FloatingNotes/
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val folder = File(documentsDir, BACKUP_FOLDER)
-        if (!folder.exists()) folder.mkdirs()
-        return File(folder, NOTES_BACKUP_FILE)
-    }
-
-    private fun loadNotesFromPublicStorage(): Boolean {
-        return try {
-            val json = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                readFromMediaStore()
-            } else {
-                val legacyFile = getLegacyPublicBackupFile()
-                if (legacyFile.exists()) legacyFile.readText() else null
-            }
-
-            if (json.isNullOrEmpty()) return false
-
+    private fun loadNotesFromExternalStorage() {
+        try {
+            val json = EXTERNAL_NOTES_FILE.readText()
             val type = object : TypeToken<List<NoteItem>>() {}.type
             val loaded: List<NoteItem> = Gson().fromJson(json, type)
-            if (loaded.isEmpty()) return false
-
             notesList.clear()
             notesList.addAll(loaded)
 
-            // Sync to SharedPreferences
+            // ✅ Sync with SharedPreferences
             val notesJson = Gson().toJson(notesList)
             prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
 
-            true
         } catch (e: Exception) {
-            false
+            // If external file is corrupted, fallback to SharedPreferences
+            loadNotes()
         }
     }
 
-    private fun saveNotesToPublicStorage() {
+    private fun saveNotesToExternalStorage() {
         try {
             val json = Gson().toJson(notesList)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                writeToMediaStore(json)
-            } else {
-                getLegacyPublicBackupFile().writeText(json)
-            }
+            EXTERNAL_NOTES_FILE.writeText(json)
         } catch (e: Exception) {
-        }
-    }
-
-    private fun readFromMediaStore(): String? {
-        try {
-            val resolver = contentResolver
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
-            val selectionArgs = arrayOf(NOTES_BACKUP_FILE)
-            val cursor = resolver.query(collection, null, selection, selectionArgs, null)
-
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val idCol = it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                    val id = it.getLong(idCol)
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    resolver.openInputStream(uri)?.use { stream ->
-                        return stream.bufferedReader().readText()
-                    }
-                }
-            }
-        } catch (e: Exception) {
-        }
-        return null
-    }
-
-    private fun writeToMediaStore(json: String) {
-        try {
-            val resolver = contentResolver
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
-            val selectionArgs = arrayOf(NOTES_BACKUP_FILE)
-
-            var uri: Uri? = null
-            val cursor = resolver.query(collection, null, selection, selectionArgs, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val idCol = it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                    val id = it.getLong(idCol)
-                    uri = ContentUris.withAppendedId(collection, id)
-                }
-            }
-
-            if (uri == null) {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, NOTES_BACKUP_FILE)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        Environment.DIRECTORY_DOWNLOADS + "/" + BACKUP_FOLDER
-                    )
-                }
-                uri = resolver.insert(collection, values)
-            }
-
-            uri?.let {
-                resolver.openOutputStream(it, "wt")?.use { stream ->
-                    stream.write(json.toByteArray())
-                    stream.flush()
-                }
-            }
-        } catch (e: Exception) {
+            // Silently fail
         }
     }
 
@@ -420,8 +335,8 @@ class FloatingBubbleService : Service() {
     private fun saveNotesToPrefs() {
         val notesJson = Gson().toJson(notesList)
         prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-        // ✅ Always save to public storage so notes survive uninstall
-        saveNotesToPublicStorage()
+        // ✅ Always save to external storage
+        saveNotesToExternalStorage()
     }
 
     private fun createNotificationChannel() {
@@ -1151,6 +1066,7 @@ class FloatingBubbleService : Service() {
         val r = w * 0.28f
         val rect = RectF(cx - r, cy - r, cx + r, cy + r)
         canvas.drawArc(rect, 215f, 250f, false, paint)
+        val ah = w * 0.18f
         val arrow = android.graphics.Path().apply {
             moveTo(w * 0.18f, h * 0.47f)
             lineTo(w * 0.38f, h * 0.30f)
@@ -1182,6 +1098,13 @@ class FloatingBubbleService : Service() {
         val bottom = h * 0.82f
         canvas.drawRoundRect(RectF(left, top, right, bottom), w * 0.07f, w * 0.07f, paint)
         canvas.drawRoundRect(RectF(w * 0.38f, h * 0.16f, w * 0.62f, h * 0.34f), w * 0.05f, w * 0.05f, paint)
+    }
+
+    private fun createTopBarLockDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
+        canvas.drawRoundRect(RectF(w * 0.24f, h * 0.42f, w * 0.76f, h * 0.82f), w * 0.07f, w * 0.07f, paint)
+        val arc = RectF(w * 0.34f, h * 0.18f, w * 0.66f, h * 0.58f)
+        canvas.drawArc(arc, 180f, 180f, false, paint)
+        canvas.drawCircle(w * 0.50f, h * 0.60f, w * 0.045f, paint)
     }
 
     private fun createTopBarDeleteDrawable(iconColor: Int = Color.BLACK): Drawable =
@@ -1239,7 +1162,9 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // Magnifier
+    // ================================================================
+    // Shared custom magnifier
+    // ================================================================
     private var customSelectionMagnifier: Magnifier? = null
     private var customMagnifierTarget: EditText? = null
     private var lastCustomMagnifierTime = 0L
@@ -1787,7 +1712,7 @@ class FloatingBubbleService : Service() {
             if (text.length > 500000) {
                 val timeStamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
                 val fileName = "shared_note_$timeStamp.txt"
-                val cacheFile = File(cacheDir, fileName)
+                val cacheFile = java.io.File(cacheDir, fileName)
                 cacheFile.writeText(text)
                 val fileUri = androidx.core.content.FileProvider.getUriForFile(
                     this, "${packageName}.fileprovider", cacheFile
@@ -1832,6 +1757,13 @@ class FloatingBubbleService : Service() {
             }
         } catch (e: Exception) { }
         isActionBarVisible = false
+    }
+
+    private fun temporarilyHideActionBar() {
+        if (isActionBarVisible && !isActionBarTemporarilyHidden) {
+            isActionBarTemporarilyHidden = true
+            hideFloatingActionBar()
+        }
     }
 
     private fun scheduleActionBarShow() {
@@ -2945,6 +2877,22 @@ class FloatingBubbleService : Service() {
         val b = maxOf(start, end)
         editText.text.replace(a, b, pasted)
         editText.setSelection((a + pasted.length).coerceAtMost(editText.length()))
+    }
+
+    private fun toggleEditorLock() {
+        if (!::editText.isInitialized) return
+        isEditorLocked = !isEditorLocked
+        editText.isFocusable = !isEditorLocked
+        editText.isFocusableInTouchMode = !isEditorLocked
+        editText.isCursorVisible = !isEditorLocked
+        editText.isLongClickable = !isEditorLocked
+        if (isEditorLocked) {
+            editText.clearFocus()
+            hideSelectionHandles()
+            hideFloatingActionBar()
+        } else {
+            editText.requestFocus()
+        }
     }
 
     private fun closeChildNotePad(noteId: Long) {
