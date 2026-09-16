@@ -2442,7 +2442,10 @@ class FloatingBubbleService : Service() {
                 private var lastTapTime = 0L
                 private var lastTapX = 0f
                 private var lastTapY = 0f
-                private var touchMoved = false                private var longPressTriggered = false
+                private var touchMoved = false              
+               
+                private var longPressTriggered = false
+                
                 private var secondTapCandidate = false
                 private var selectionAtDown = false
                 private var selectionAnchor = -1
