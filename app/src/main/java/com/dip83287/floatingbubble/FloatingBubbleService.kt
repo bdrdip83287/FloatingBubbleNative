@@ -42,19 +42,8 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
-import java.io.File
 
 class FloatingBubbleService : Service() {
-
-
-
-    // Legacy paths that should be cleaned up
-    private val LEGACY_PATHS = listOf(
-        "/storage/emulated/0/Download/FloatingNotes",
-        "/storage/emulated/0/Download/Floating Notes",
-        "/storage/emulated/0/Download/FloatingBubbleBackup",
-        "/storage/emulated/0/Documents/Floating Notes"
-    )
 
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
@@ -228,12 +217,7 @@ class FloatingBubbleService : Service() {
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
-
-            // ✅ STEP 1: Cleanup all legacy/duplicate backup files FIRST
-            cleanupLegacyBackupFiles()
-
-            // ✅ STEP 2: Load notes from public storage (single source)
-            loadNotesFromPublicStorage()
+            loadNotes()
 
             createNotificationChannel()
             startForeground(1001, createNotification())
@@ -250,76 +234,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {
         }
     }
-
-
-
-
-
-
-
-    // ============================================================
-    // ✅ MAIN SAVE - Called on every change
-    // ============================================================
-    private fun saveNotesToPrefs() {
-        try {
-            // 1. Save to SharedPreferences (fast access)
-            val notesJson = Gson().toJson(notesList)
-            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-
-            // 2. Save to public storage (survives uninstall)
-            saveNotesToPublicStorage()
-        } catch (e: Exception) {
-        }
-    }
-    
-    // ✅ শুধু SharedPreferences
-private fun loadNotes() {
-    val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
-    if (!notesJson.isNullOrEmpty()) {
-        try {
-            val type = object : TypeToken<List<NoteItem>>() {}.type
-            val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
-            notesList.clear()
-            notesList.addAll(loaded)
-        } catch (e: Exception) {
-            if (notesList.isEmpty()) {
-                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-            }
-        }
-    } else {
-        if (notesList.isEmpty()) {
-            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-        }
-    }
-    // ❌ saveNotesToPrefs() কল হবে না
-}
-
-// ✅ শুধু SharedPreferences
-private fun saveNotesToPrefs() {
-    val notesJson = Gson().toJson(notesList)
-    prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-    // Google Drive Auto Backup নিজেই ব্যাকআপ করবে
-}
-
-// ✅ onCreate() এ:
-override fun onCreate() {
-    super.onCreate()
-    try {
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        loadSavedPositions()
-        loadNotes()  // ← শুধু SharedPreferences থেকে লোড
-        
-        createNotificationChannel()
-        startForeground(1001, createNotification())
-        createDeleteZone()
-        // ... বাকি কোড
-    } catch (e: Exception) {
-    }
-}
-
-
 
     private fun startConfigurationCheck() {
         val runnable = object : Runnable {
@@ -348,6 +262,44 @@ override fun onCreate() {
         }
         configCheckRunnable = runnable
         configCheckHandler.postDelayed(runnable, 500)
+    }
+
+    // ============================================================
+    // ✅ LOAD NOTES - Only from SharedPreferences
+    // Google Drive Auto Backup handles persistence
+    // NEVER calls saveNotesToPrefs() during load
+    // ============================================================
+    private fun loadNotes() {
+        val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
+        if (!notesJson.isNullOrEmpty()) {
+            try {
+                val type = object : TypeToken<List<NoteItem>>() {}.type
+                val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
+                notesList.clear()
+                notesList.addAll(loaded)
+            } catch (e: Exception) {
+                if (notesList.isEmpty()) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+            }
+        } else {
+            if (notesList.isEmpty()) {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            }
+        }
+        // ❌ saveNotesToPrefs() কল হবে না
+    }
+
+    // ============================================================
+    // ✅ SAVE NOTES - Only to SharedPreferences
+    // Google Drive Auto Backup will back this up automatically
+    // ============================================================
+    private fun saveNotesToPrefs() {
+        try {
+            val notesJson = Gson().toJson(notesList)
+            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+        } catch (e: Exception) {
+        }
     }
 
     private fun createNotificationChannel() {
@@ -1077,7 +1029,6 @@ override fun onCreate() {
         val r = w * 0.28f
         val rect = RectF(cx - r, cy - r, cx + r, cy + r)
         canvas.drawArc(rect, 215f, 250f, false, paint)
-        val ah = w * 0.18f
         val arrow = android.graphics.Path().apply {
             moveTo(w * 0.18f, h * 0.47f)
             lineTo(w * 0.38f, h * 0.30f)
@@ -1173,9 +1124,6 @@ override fun onCreate() {
         }
     }
 
-    // ================================================================
-    // Shared custom magnifier
-    // ================================================================
     private var customSelectionMagnifier: Magnifier? = null
     private var customMagnifierTarget: EditText? = null
     private var lastCustomMagnifierTime = 0L
@@ -2494,8 +2442,7 @@ override fun onCreate() {
                 private var lastTapTime = 0L
                 private var lastTapX = 0f
                 private var lastTapY = 0f
-                private var touchMoved = false
-                private var longPressTriggered = false
+                private var touchMoved = false                private var longPressTriggered = false
                 private var secondTapCandidate = false
                 private var selectionAtDown = false
                 private var selectionAnchor = -1
