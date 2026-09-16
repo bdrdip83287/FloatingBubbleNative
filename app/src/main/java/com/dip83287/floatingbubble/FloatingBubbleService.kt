@@ -46,14 +46,7 @@ import java.io.File
 
 class FloatingBubbleService : Service() {
 
-    // ============================================================
-    // ✅ SINGLE SOURCE OF TRUTH - Public Documents folder
-    // এই ফোল্ডারটি অ্যাপ আনইনস্টল করলেও থেকে যায়
-    // ============================================================
-    private val PUBLIC_NOTES_DIR = "/storage/emulated/0/Documents/FloatingNotes"
-    private val PUBLIC_NOTES_FILE = "notes_backup.json"
-    private val PUBLIC_NOTES_PATH: File
-        get() = File(PUBLIC_NOTES_DIR, PUBLIC_NOTES_FILE)
+
 
     // Legacy paths that should be cleaned up
     private val LEGACY_PATHS = listOf(
@@ -258,135 +251,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // ✅ CLEANUP: Remove all legacy backup files (one-time)
-    // ============================================================
-    private fun cleanupLegacyBackupFiles() {
-        try {
-            // Delete legacy directories
-            for (legacyPath in LEGACY_PATHS) {
-                try {
-                    val dir = File(legacyPath)
-                    if (dir.exists()) {
-                        dir.deleteRecursively()
-                    }
-                } catch (_: Exception) {}
-            }
 
-            // Delete any duplicate backup files in Documents and Download
-            val legacyExtensions = listOf(
-                "/storage/emulated/0/Download",
-                "/storage/emulated/0/Documents"
-            )
 
-            for (dirPath in legacyExtensions) {
-                try {
-                    val dir = File(dirPath)
-                    if (dir.exists() && dir.isDirectory) {
-                        dir.listFiles()?.forEach { file ->
-                            val name = file.name.lowercase()
-                            // Delete files matching backup patterns
-                            if (name.contains("floating_notes_backup") ||
-                                name.contains("floatingnotes_backup") ||
-                                name.contains("notes_backup") ||
-                                name.startsWith(".pending-") ||
-                                name.contains("restore_diagnostic") ||
-                                name.contains("restore_save_test")) {
-                                try {
-                                    if (file.isDirectory) file.deleteRecursively()
-                                    else file.delete()
-                                } catch (_: Exception) {}
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
-    }
 
-    // ============================================================
-    // ✅ LOAD NOTES - Single source of truth
-    // Priority: Public Documents > SharedPreferences (migration)
-    // NEVER calls saveNotesToPrefs() during load
-    // ============================================================
-    private fun loadNotesFromPublicStorage() {
-        try {
-            // Ensure directory exists
-            val dir = File(PUBLIC_NOTES_DIR)
-            if (!dir.exists()) {
-                dir.mkdirs()
-            }
 
-            if (PUBLIC_NOTES_PATH.exists()) {
-                // Load from public storage
-                val json = PUBLIC_NOTES_PATH.readText()
-                val type = object : TypeToken<List<NoteItem>>() {}.type
-                val loaded: List<NoteItem> = Gson().fromJson(json, type)
 
-                notesList.clear()
-                notesList.addAll(loaded)
-
-                // Sync to SharedPreferences (so bubble count works correctly)
-                syncToSharedPreferences()
-            } else {
-                // First time: migrate from SharedPreferences if exists
-                val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
-                if (!sharedPrefsJson.isNullOrEmpty()) {
-                    try {
-                        val type = object : TypeToken<List<NoteItem>>() {}.type
-                        val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
-                        notesList.clear()
-                        notesList.addAll(loaded)
-                    } catch (_: Exception) {
-                        notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-                    }
-                } else {
-                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-                }
-                // Save migrated notes to public storage
-                saveNotesToPublicStorage()
-            }
-        } catch (e: Exception) {
-            // Fallback to SharedPreferences
-            val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
-            if (!sharedPrefsJson.isNullOrEmpty()) {
-                try {
-                    val type = object : TypeToken<List<NoteItem>>() {}.type
-                    val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
-                    notesList.clear()
-                    notesList.addAll(loaded)
-                } catch (_: Exception) {
-                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-                }
-            } else {
-                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-            }
-        }
-    }
-
-    // ============================================================
-    // ✅ SAVE NOTES - Atomic write to public storage
-    // Also syncs to SharedPreferences for quick access
-    // ============================================================
-    private fun saveNotesToPublicStorage() {
-        try {
-            val dir = File(PUBLIC_NOTES_DIR)
-            if (!dir.exists()) dir.mkdirs()
-
-            // Atomic write: write to .tmp, then rename
-            val tempFile = File(PUBLIC_NOTES_DIR, "$PUBLIC_NOTES_FILE.tmp")
-            val json = Gson().toJson(notesList)
-            tempFile.writeText(json)
-
-            // Delete existing and rename
-            if (PUBLIC_NOTES_PATH.exists()) {
-                PUBLIC_NOTES_PATH.delete()
-            }
-            tempFile.renameTo(PUBLIC_NOTES_PATH)
-
-        } catch (e: Exception) {
-        }
-    }
 
     // ============================================================
     // ✅ MAIN SAVE - Called on every change
@@ -402,18 +271,55 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {
         }
     }
-
-    // ============================================================
-    // ✅ SYNC - SharedPreferences only (for bubble count, etc.)
-    // Used during load, does NOT write to public storage
-    // ============================================================
-    private fun syncToSharedPreferences() {
+    
+    // ✅ শুধু SharedPreferences
+private fun loadNotes() {
+    val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
+    if (!notesJson.isNullOrEmpty()) {
         try {
-            val notesJson = Gson().toJson(notesList)
-            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+            val type = object : TypeToken<List<NoteItem>>() {}.type
+            val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
+            notesList.clear()
+            notesList.addAll(loaded)
         } catch (e: Exception) {
+            if (notesList.isEmpty()) {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            }
+        }
+    } else {
+        if (notesList.isEmpty()) {
+            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
         }
     }
+    // ❌ saveNotesToPrefs() কল হবে না
+}
+
+// ✅ শুধু SharedPreferences
+private fun saveNotesToPrefs() {
+    val notesJson = Gson().toJson(notesList)
+    prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+    // Google Drive Auto Backup নিজেই ব্যাকআপ করবে
+}
+
+// ✅ onCreate() এ:
+override fun onCreate() {
+    super.onCreate()
+    try {
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        loadSavedPositions()
+        loadNotes()  // ← শুধু SharedPreferences থেকে লোড
+        
+        createNotificationChannel()
+        startForeground(1001, createNotification())
+        createDeleteZone()
+        // ... বাকি কোড
+    } catch (e: Exception) {
+    }
+}
+
+
 
     private fun startConfigurationCheck() {
         val runnable = object : Runnable {
