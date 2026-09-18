@@ -46,7 +46,6 @@ import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
 import java.io.File
-import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,22 +71,14 @@ class FloatingBubbleService : Service() {
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
     // ============================================================
-    // 🔬 UNINSTALL / REINSTALL RESTORE DIAGNOSTIC
+    // ✅ MEDIASTORE-BASED NOTES BACKUP
+    // Same mechanism as diagnostic report - no special permission
+    // Play Store compatible
     // ============================================================
-    //
-    // IMPORTANT:
-    // This diagnostic does NOT use getExternalFilesDir() for note backup.
-    // The purpose is to determine where the old notes come from after
-    // uninstall/reinstall without introducing another note-storage source.
-    //
-    // The report itself is stored in shared Downloads storage so it can
-    // remain on the device after the app is uninstalled.
-    private val DIAGNOSTIC_INSTALL_MARKER = "floating_notes_install_marker.txt"
-    private val DIAGNOSTIC_REPORT_FILE = "restore_diagnostic_report.txt"
-    private val DIAGNOSTIC_REPORT_FOLDER = "Floating Notes"
-
-    // True only for the first service startup of the current installation.
-    private var diagnosticFreshInstallAtStartup = false
+    private val NOTES_BACKUP_FILE = "notes_backup.json"
+    private val NOTES_BACKUP_FOLDER = "Floating Notes"
+    private val NOTES_BACKUP_RELATIVE_PATH =
+        "${Environment.DIRECTORY_DOWNLOADS}/$NOTES_BACKUP_FOLDER/"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -238,88 +229,290 @@ class FloatingBubbleService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-
         try {
-            windowManager =
-                getSystemService(WINDOW_SERVICE) as WindowManager
-
-            actionBarWindowManager =
-                getSystemService(WINDOW_SERVICE) as WindowManager
-
-            prefs =
-                getSharedPreferences(
-                    PREFS_NAME,
-                    MODE_PRIVATE
-                )
-
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ========================================================
-            // 🔬 STEP 1 — Diagnose BEFORE loadNotes()
-            // ========================================================
-            //
-            // This is the most important part of the test.
-            // We capture SharedPreferences BEFORE our own code loads
-            // anything into notesList.
-            //
-            // If, immediately after reinstall, notes_list already
-            // contains the old 3 notes here, then those notes were
-            // restored/created BEFORE loadNotes() ran.
-            // ========================================================
+            // ✅ STEP 1: Auto-cleanup old legacy files (one time)
+            cleanupLegacyFiles()
 
-            diagnosticFreshInstallAtStartup =
-                initializeDiagnosticInstallMarker()
-
-            appendRestoreDiagnosticReport(
-                "SERVICE_START_BEFORE_LOAD"
-            )
-
-            // ========================================================
-            // STEP 2 — Normal note loading
-            // ========================================================
-
+            // ✅ STEP 2: Load notes (MediaStore first, then SharedPreferences)
             loadNotes()
 
-            // ========================================================
-            // STEP 3 — Diagnose AFTER loadNotes()
-            // ========================================================
-
-            appendRestoreDiagnosticReport(
-                "SERVICE_AFTER_LOAD"
-            )
-
             createNotificationChannel()
-
-            startForeground(
-                1001,
-                createNotification()
-            )
-
+            startForeground(1001, createNotification())
             createDeleteZone()
+            scrollHideHandler = Handler(Looper.getMainLooper())
+            scrollStopHandler = Handler(Looper.getMainLooper())
 
-            scrollHideHandler =
-                Handler(Looper.getMainLooper())
-
-            scrollStopHandler =
-                Handler(Looper.getMainLooper())
-
-            lastFontScale =
-                resources.configuration.fontScale
-
-            lastScreenWidth =
-                resources.displayMetrics.widthPixels
-
-            lastScreenHeight =
-                resources.displayMetrics.heightPixels
+            lastFontScale = resources.configuration.fontScale
+            lastScreenWidth = resources.displayMetrics.widthPixels
+            lastScreenHeight = resources.displayMetrics.heightPixels
 
             startConfigurationCheck()
 
         } catch (e: Exception) {
+        }
+    }
 
-            appendRestoreDiagnosticReport(
-                "SERVICE_STARTUP_ERROR: " +
-                    "${e.javaClass.simpleName}: ${e.message}"
-            )
+    // ============================================================
+    // ✅ CLEANUP - Remove old legacy files (one time on startup)
+    // ============================================================
+    private fun cleanupLegacyFiles() {
+        try {
+            // Delete old /Documents/FloatingNotes folder
+            try {
+                val oldDir = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOCUMENTS
+                    ),
+                    "FloatingNotes"
+                )
+                if (oldDir.exists()) oldDir.deleteRecursively()
+            } catch (_: Exception) {}
+
+            // Delete old /Download/FloatingNotes folder
+            try {
+                val oldDir2 = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    "FloatingNotes"
+                )
+                if (oldDir2.exists()) oldDir2.deleteRecursively()
+            } catch (_: Exception) {}
+
+            // Delete old /Download/FloatingBubbleBackup folder
+            try {
+                val oldDir3 = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    "FloatingBubbleBackup"
+                )
+                if (oldDir3.exists()) oldDir3.deleteRecursively()
+            } catch (_: Exception) {}
+
+            // Delete any legacy .pending-* files
+            try {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+                downloadsDir.listFiles()?.forEach { file ->
+                    if (file.name.startsWith(".pending-") ||
+                        file.name.contains("floating_notes_backup") ||
+                        file.name.contains("floatingnotes_backup")) {
+                        try {
+                            if (file.isDirectory) file.deleteRecursively()
+                            else file.delete()
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+
+        } catch (_: Exception) {}
+    }
+
+    // ============================================================
+    // ✅ LOAD NOTES - MediaStore first, then SharedPreferences
+    // ============================================================
+    private fun loadNotes() {
+        try {
+            // ✅ STEP 1: Try MediaStore first (this is the uninstall-safe location)
+            val mediaStoreJson = readNotesFromMediaStore()
+            if (!mediaStoreJson.isNullOrEmpty()) {
+                try {
+                    val type = object : TypeToken<List<NoteItem>>() {}.type
+                    val loaded: List<NoteItem> = Gson().fromJson(mediaStoreJson, type)
+                    if (loaded.isNotEmpty()) {
+                        notesList.clear()
+                        notesList.addAll(loaded)
+                        // Sync to SharedPreferences
+                        saveNotesToSharedPreferences()
+                        return
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            // ✅ STEP 2: Fallback to SharedPreferences
+            val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
+            if (!sharedPrefsJson.isNullOrEmpty()) {
+                try {
+                    val type = object : TypeToken<List<NoteItem>>() {}.type
+                    val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
+                    notesList.clear()
+                    notesList.addAll(loaded)
+                } catch (_: Exception) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+            } else {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            }
+
+            // ✅ STEP 3: Save back to MediaStore (creates file if not exists)
+            saveNotesToMediaStore()
+
+        } catch (e: Exception) {
+            if (notesList.isEmpty()) {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            }
+        }
+    }
+
+    // ============================================================
+    // ✅ READ NOTES FROM MEDIASTORE
+    // Same mechanism as diagnostic report - no special permission
+    // ============================================================
+    private fun readNotesFromMediaStore(): String? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                val projection = arrayOf(MediaStore.Downloads._ID)
+                val selection =
+                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
+                    "${MediaStore.Downloads.RELATIVE_PATH}=?"
+                val selectionArgs = arrayOf(
+                    NOTES_BACKUP_FILE,
+                    NOTES_BACKUP_RELATIVE_PATH
+                )
+
+                contentResolver.query(
+                    collection,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                        )
+                        val uri = ContentUris.withAppendedId(collection, id)
+                        return contentResolver
+                            .openInputStream(uri)
+                            ?.bufferedReader()
+                            ?.use { it.readText() }
+                    }
+                }
+                null
+            } else {
+                val directory = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    NOTES_BACKUP_FOLDER
+                )
+                val file = File(directory, NOTES_BACKUP_FILE)
+                if (file.exists()) file.readText(Charsets.UTF_8) else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // ============================================================
+    // ✅ SAVE NOTES TO MEDIASTORE
+    // Atomic write : .tmp file then rename
+    // Same mechanism as diagnostic report - no special permission
+    // ============================================================
+    private fun saveNotesToMediaStore() {
+        try {
+            val json = Gson().toJson(notesList)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                val projection = arrayOf(MediaStore.Downloads._ID)
+                val selection =
+                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
+                    "${MediaStore.Downloads.RELATIVE_PATH}=?"
+                val selectionArgs = arrayOf(
+                    NOTES_BACKUP_FILE,
+                    NOTES_BACKUP_RELATIVE_PATH
+                )
+
+                // Check if file exists
+                var uri: Uri? = null
+                contentResolver.query(
+                    collection,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                        )
+                        uri = ContentUris.withAppendedId(collection, id)
+                    }
+                }
+
+                // If not exists, create new
+                if (uri == null) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
+                        put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                        put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
+                    }
+                    uri = contentResolver.insert(collection, values)
+                }
+
+                // Write content
+                uri?.let { target ->
+                    contentResolver.openOutputStream(target, "wt")?.use { output ->
+                        output.write(json.toByteArray(Charsets.UTF_8))
+                    }
+                }
+            } else {
+                val directory = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    NOTES_BACKUP_FOLDER
+                )
+                if (!directory.exists()) directory.mkdirs()
+
+                val targetFile = File(directory, NOTES_BACKUP_FILE)
+                val tempFile = File(directory, "$NOTES_BACKUP_FILE.tmp")
+
+                // Atomic write
+                tempFile.writeText(json, Charsets.UTF_8)
+
+                if (targetFile.exists()) targetFile.delete()
+                tempFile.renameTo(targetFile)
+            }
+        } catch (e: Exception) {
+            // Silent fail - SharedPreferences still has the data
+        }
+    }
+
+    // ============================================================
+    // ✅ MAIN SAVE FUNCTION - Called on every change
+    // ============================================================
+    private fun saveNotesToPrefs() {
+        try {
+            // 1. Save to SharedPreferences (fast access + Auto Backup)
+            val notesJson = Gson().toJson(notesList)
+            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).commit()
+
+            // 2. Save to MediaStore (survives uninstall)
+            saveNotesToMediaStore()
+
+        } catch (e: Exception) {
+        }
+    }
+
+    // ============================================================
+    // ✅ SYNC to SharedPreferences only
+    // ============================================================
+    private fun saveNotesToSharedPreferences() {
+        try {
+            val notesJson = Gson().toJson(notesList)
+            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).commit()
+        } catch (e: Exception) {
         }
     }
 
@@ -350,777 +543,6 @@ class FloatingBubbleService : Service() {
         }
         configCheckRunnable = runnable
         configCheckHandler.postDelayed(runnable, 500)
-    }
-
-    // ============================================================
-    // 🔬 RESTORE DIAGNOSTIC REPORT
-    // ============================================================
-
-    /**
-     * Creates a marker inside getNoBackupFilesDir().
-     *
-     * Android Backup does not restore this directory.
-     *
-     * Therefore:
-     *
-     *   marker existed  -> this installation already started before
-     *   marker missing  -> first startup of this installation
-     *
-     * The marker is deliberately NOT used for note storage.
-     */
-    private fun initializeDiagnosticInstallMarker(): Boolean {
-
-        return try {
-
-            val marker =
-                File(
-                    getNoBackupFilesDir(),
-                    DIAGNOSTIC_INSTALL_MARKER
-                )
-
-            val isFreshInstall =
-                !marker.exists()
-
-            if (isFreshInstall) {
-                marker.parentFile?.mkdirs()
-                marker.writeText(
-                    "created=${System.currentTimeMillis()}",
-                    Charsets.UTF_8
-                )
-            }
-
-            isFreshInstall
-
-        } catch (e: Exception) {
-
-            appendRestoreDiagnosticReport(
-                "DIAGNOSTIC_MARKER_ERROR: " +
-                    "${e.javaClass.simpleName}: ${e.message}"
-            )
-
-            false
-        }
-    }
-
-
-    /**
-     * Appends a detailed diagnostic event to:
-     *
-     * Download/Floating Notes/restore_diagnostic_report.txt
-     *
-     * This file is intentionally stored in shared Downloads storage,
-     * NOT in getExternalFilesDir(), so uninstalling the app should not
-     * remove the report.
-     */
-    private fun appendRestoreDiagnosticReport(
-        event: String
-    ) {
-
-        try {
-
-            val now =
-                SimpleDateFormat(
-                    "yyyy-MM-dd HH:mm:ss.SSS",
-                    Locale.US
-                ).format(Date())
-
-            val rawNotesJson =
-                try {
-                    prefs.getString(
-                        STORAGE_NOTES_LIST,
-                        null
-                    )
-                } catch (e: Exception) {
-                    null
-                }
-
-            val keyPresent =
-                try {
-                    prefs.contains(
-                        STORAGE_NOTES_LIST
-                    )
-                } catch (e: Exception) {
-                    false
-                }
-
-            val rawJsonLength =
-                rawNotesJson?.length ?: 0
-
-            val rawJsonHash =
-                rawNotesJson?.let {
-                    diagnosticSha256(it)
-                } ?: "NONE"
-
-            val parsedNotes =
-                diagnosticParseNotesSafely(
-                    rawNotesJson
-                )
-
-            val report =
-                buildString {
-
-                    appendLine()
-                    appendLine(
-                        "============================================================"
-                    )
-
-                    appendLine(
-                        "FLOATING NOTES RESTORE DIAGNOSTIC"
-                    )
-
-                    appendLine(
-                        "Time: $now"
-                    )
-
-                    appendLine(
-                        "Event: $event"
-                    )
-
-                    appendLine(
-                        "Package: $packageName"
-                    )
-
-                    appendLine(
-                        "Android SDK: ${Build.VERSION.SDK_INT}"
-                    )
-
-                    appendLine(
-                        "Fresh-install-at-startup: " +
-                            diagnosticFreshInstallAtStartup
-                    )
-
-                    appendLine(
-                        "SharedPreferences key present: " +
-                            keyPresent
-                    )
-
-                    appendLine(
-                        "notes_list JSON chars: " +
-                            rawJsonLength
-                    )
-
-                    appendLine(
-                        "notes_list SHA-256: " +
-                            rawJsonHash
-                    )
-
-                    appendLine(
-                        "Raw SharedPreferences parsed note count: " +
-                            parsedNotes.size
-                    )
-
-                    appendLine()
-
-                    appendLine(
-                        "Raw SharedPreferences notes:"
-                    )
-
-                    if (parsedNotes.isEmpty()) {
-
-                        appendLine(
-                            "  <NONE>"
-                        )
-
-                    } else {
-
-                        parsedNotes.forEachIndexed {
-                            index,
-                            note ->
-
-                            appendLine(
-                                "  ${index + 1}. " +
-                                    "id=${note.id}, " +
-                                    "title=${note.title.replace("\n", " ")}, " +
-                                    "contentChars=${note.content.length}, " +
-                                    "locked=${note.isLocked}"
-                            )
-                        }
-                    }
-
-                    appendLine()
-
-                    appendLine(
-                        "Current in-memory notesList count: " +
-                            notesList.size
-                    )
-
-                    appendLine(
-                        "Current in-memory notes:"
-                    )
-
-                    if (notesList.isEmpty()) {
-
-                        appendLine(
-                            "  <NONE>"
-                        )
-
-                    } else {
-
-                        notesList.forEachIndexed {
-                            index,
-                            note ->
-
-                            appendLine(
-                                "  ${index + 1}. " +
-                                    "id=${note.id}, " +
-                                    "title=${note.title.replace("\n", " ")}, " +
-                                    "contentChars=${note.content.length}, " +
-                                    "locked=${note.isLocked}"
-                            )
-                        }
-                    }
-
-                    appendLine()
-
-                    appendLine(
-                        "IMPORTANT:"
-                    )
-
-                    if (
-                        event ==
-                        "SERVICE_START_BEFORE_LOAD" &&
-                        diagnosticFreshInstallAtStartup
-                    ) {
-
-                        if (parsedNotes.isNotEmpty()) {
-
-                            appendLine(
-                                "Fresh-install marker is NEW, " +
-                                    "but notes_list ALREADY EXISTS " +
-                                    "before loadNotes()."
-                            )
-
-                            appendLine(
-                                "This means the old notes were " +
-                                    "already present in SharedPreferences " +
-                                    "before this service loaded them."
-                            )
-
-                        } else {
-
-                            appendLine(
-                                "Fresh-install marker is NEW and " +
-                                    "notes_list is empty before loadNotes()."
-                            )
-
-                            appendLine(
-                                "The old notes are NOT present in " +
-                                    "SharedPreferences at this point."
-                            )
-                        }
-                    }
-
-                    appendLine(
-                        "============================================================"
-                    )
-                }
-
-            val previousReport =
-                readDiagnosticReport()
-
-            writeDiagnosticReport(
-                previousReport + report
-            )
-
-        } catch (e: Exception) {
-
-            android.util.Log.e(
-                "RESTORE_DIAGNOSTIC",
-                "Diagnostic report failed",
-                e
-            )
-        }
-    }
-
-
-    /**
-     * Safely parses the raw notes_list JSON only for diagnosis.
-     *
-     * IMPORTANT:
-     * This method does NOT modify notesList.
-     */
-    private fun diagnosticParseNotesSafely(
-        rawJson: String?
-    ): List<NoteItem> {
-
-        if (rawJson.isNullOrEmpty()) {
-            return emptyList()
-        }
-
-        return try {
-
-            val type =
-                object :
-                    TypeToken<List<NoteItem>>() {}.type
-
-            Gson().fromJson(
-                rawJson,
-                type
-            ) ?: emptyList()
-
-        } catch (e: Exception) {
-
-            emptyList()
-        }
-    }
-
-
-    private fun diagnosticSha256(
-        text: String
-    ): String {
-
-        return try {
-
-            val digest =
-                MessageDigest.getInstance(
-                    "SHA-256"
-                )
-
-            val bytes =
-                digest.digest(
-                    text.toByteArray(
-                        Charsets.UTF_8
-                    )
-                )
-
-            bytes.joinToString("") {
-                "%02x".format(it)
-            }
-
-        } catch (e: Exception) {
-
-            "SHA256_ERROR"
-        }
-    }
-
-
-    /**
-     * Reads the existing diagnostic report.
-     *
-     * Android 10+:
-     *   MediaStore.Downloads
-     *
-     * Android 9 and below:
-     *   public Download directory
-     */
-    private fun readDiagnosticReport(): String {
-
-        return try {
-
-            if (
-                Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.Q
-            ) {
-
-                val collection =
-                    MediaStore.Downloads
-                        .EXTERNAL_CONTENT_URI
-
-                val projection =
-                    arrayOf(
-                        MediaStore.Downloads._ID
-                    )
-
-                val relativePath =
-                    "${Environment.DIRECTORY_DOWNLOADS}/" +
-                        "$DIAGNOSTIC_REPORT_FOLDER/"
-
-                val selection =
-                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
-                        "${MediaStore.Downloads.RELATIVE_PATH}=?"
-
-                val selectionArgs =
-                    arrayOf(
-                        DIAGNOSTIC_REPORT_FILE,
-                        relativePath
-                    )
-
-                contentResolver.query(
-                    collection,
-                    projection,
-                    selection,
-                    selectionArgs,
-                    null
-                )?.use { cursor ->
-
-                    if (cursor.moveToFirst()) {
-
-                        val id =
-                            cursor.getLong(
-                                cursor.getColumnIndexOrThrow(
-                                    MediaStore.Downloads._ID
-                                )
-                            )
-
-                        val uri =
-                            ContentUris.withAppendedId(
-                                collection,
-                                id
-                            )
-
-                        return contentResolver
-                            .openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use {
-                                it.readText()
-                            }
-                            ?: ""
-                    }
-                }
-
-                ""
-
-            } else {
-
-                val directory =
-                    File(
-                        Environment
-                            .getExternalStoragePublicDirectory(
-                                Environment.DIRECTORY_DOWNLOADS
-                            ),
-                        DIAGNOSTIC_REPORT_FOLDER
-                    )
-
-                val file =
-                    File(
-                        directory,
-                        DIAGNOSTIC_REPORT_FILE
-                    )
-
-                if (file.exists()) {
-                    file.readText(
-                        Charsets.UTF_8
-                    )
-                } else {
-                    ""
-                }
-            }
-
-        } catch (e: Exception) {
-
-            ""
-        }
-    }
-
-
-    /**
-     * Writes the diagnostic report to shared Downloads storage.
-     */
-    private fun writeDiagnosticReport(
-        text: String
-    ) {
-
-        try {
-
-            if (
-                Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.Q
-            ) {
-
-                val collection =
-                    MediaStore.Downloads
-                        .EXTERNAL_CONTENT_URI
-
-                val projection =
-                    arrayOf(
-                        MediaStore.Downloads._ID
-                    )
-
-                val relativePath =
-                    "${Environment.DIRECTORY_DOWNLOADS}/" +
-                        "$DIAGNOSTIC_REPORT_FOLDER/"
-
-                val selection =
-                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
-                        "${MediaStore.Downloads.RELATIVE_PATH}=?"
-
-                val selectionArgs =
-                    arrayOf(
-                        DIAGNOSTIC_REPORT_FILE,
-                        relativePath
-                    )
-
-                var uri: Uri? = null
-
-                contentResolver.query(
-                    collection,
-                    projection,
-                    selection,
-                    selectionArgs,
-                    null
-                )?.use { cursor ->
-
-                    if (cursor.moveToFirst()) {
-
-                        val id =
-                            cursor.getLong(
-                                cursor.getColumnIndexOrThrow(
-                                    MediaStore.Downloads._ID
-                                )
-                            )
-
-                        uri =
-                            ContentUris.withAppendedId(
-                                collection,
-                                id
-                            )
-                    }
-                }
-
-                if (uri == null) {
-
-                    val values =
-                        ContentValues().apply {
-
-                            put(
-                                MediaStore.Downloads.DISPLAY_NAME,
-                                DIAGNOSTIC_REPORT_FILE
-                            )
-
-                            put(
-                                MediaStore.Downloads.MIME_TYPE,
-                                "text/plain"
-                            )
-
-                            put(
-                                MediaStore.Downloads.RELATIVE_PATH,
-                                relativePath
-                            )
-                        }
-
-                    uri =
-                        contentResolver.insert(
-                            collection,
-                            values
-                        )
-                }
-
-                uri?.let { target ->
-
-                    contentResolver
-                        .openOutputStream(
-                            target,
-                            "wt"
-                        )
-                        ?.use { output ->
-
-                            output.write(
-                                text.toByteArray(
-                                    Charsets.UTF_8
-                                )
-                            )
-                        }
-                }
-
-            } else {
-
-                val directory =
-                    File(
-                        Environment
-                            .getExternalStoragePublicDirectory(
-                                Environment.DIRECTORY_DOWNLOADS
-                            ),
-                        DIAGNOSTIC_REPORT_FOLDER
-                    )
-
-                if (!directory.exists()) {
-                    directory.mkdirs()
-                }
-
-                File(
-                    directory,
-                    DIAGNOSTIC_REPORT_FILE
-                ).writeText(
-                    text,
-                    Charsets.UTF_8
-                )
-            }
-
-        } catch (e: Exception) {
-
-            android.util.Log.e(
-                "RESTORE_DIAGNOSTIC",
-                "Could not write diagnostic report",
-                e
-            )
-        }
-    }
-
-
-    /**
-     * Normal note loading.
-     *
-     * IMPORTANT:
-     * There is intentionally NO external JSON backup here.
-     *
-     * The test must observe what SharedPreferences contains
-     * immediately after reinstall BEFORE our own load code runs.
-     */
-    private fun loadNotes() {
-
-        appendRestoreDiagnosticReport(
-            "LOAD_NOTES_ENTERED"
-        )
-
-        val notesJson =
-            try {
-
-                prefs.getString(
-                    STORAGE_NOTES_LIST,
-                    ""
-                )
-
-            } catch (e: Exception) {
-
-                appendRestoreDiagnosticReport(
-                    "LOAD_NOTES_PREFS_READ_ERROR: " +
-                        "${e.javaClass.simpleName}: ${e.message}"
-                )
-
-                ""
-            }
-
-        if (!notesJson.isNullOrEmpty()) {
-
-            try {
-
-                val type =
-                    object :
-                        TypeToken<List<NoteItem>>() {}.type
-
-                val loaded:
-                    List<NoteItem> =
-                    Gson().fromJson(
-                        notesJson,
-                        type
-                    )
-
-                notesList.clear()
-                notesList.addAll(
-                    loaded
-                )
-
-                appendRestoreDiagnosticReport(
-                    "LOAD_NOTES_JSON_PARSED_SUCCESSFULLY"
-                )
-
-            } catch (e: Exception) {
-
-                appendRestoreDiagnosticReport(
-                    "LOAD_NOTES_GSON_ERROR: " +
-                        "${e.javaClass.simpleName}: ${e.message}"
-                )
-
-                if (notesList.isEmpty()) {
-
-                    notesList.add(
-                        NoteItem(
-                            System.currentTimeMillis(),
-                            "Untitled Note",
-                            ""
-                        )
-                    )
-
-                    appendRestoreDiagnosticReport(
-                        "LOAD_NOTES_FALLBACK_DEFAULT_CREATED"
-                    )
-                }
-            }
-
-        } else {
-
-            if (notesList.isEmpty()) {
-
-                notesList.add(
-                    NoteItem(
-                        System.currentTimeMillis(),
-                        "Untitled Note",
-                        ""
-                    )
-                )
-
-                appendRestoreDiagnosticReport(
-                    "LOAD_NOTES_EMPTY_PREFS_DEFAULT_CREATED"
-                )
-
-            } else {
-
-                appendRestoreDiagnosticReport(
-                    "LOAD_NOTES_EMPTY_PREFS_MEMORY_ALREADY_NONEMPTY"
-                )
-            }
-        }
-
-        saveNotesToPrefs()
-
-        appendRestoreDiagnosticReport(
-            "LOAD_NOTES_COMPLETED"
-        )
-    }
-
-
-    /**
-     * Saves notes synchronously and verifies the write immediately.
-     *
-     * For this diagnostic version we intentionally save ONLY to
-     * SharedPreferences. We do NOT write a second note backup file.
-     */
-    private fun saveNotesToPrefs() {
-
-        try {
-
-            val notesJson =
-                Gson().toJson(
-                    notesList
-                )
-
-            val expectedHash =
-                diagnosticSha256(
-                    notesJson
-                )
-
-            val committed =
-                prefs.edit()
-                    .putString(
-                        STORAGE_NOTES_LIST,
-                        notesJson
-                    )
-                    .commit()
-
-            val readBack =
-                try {
-                    prefs.getString(
-                        STORAGE_NOTES_LIST,
-                        null
-                    )
-                } catch (e: Exception) {
-                    null
-                }
-
-            val readBackHash =
-                readBack?.let {
-                    diagnosticSha256(it)
-                } ?: "NONE"
-
-            val verified =
-                committed &&
-                    readBack == notesJson
-
-            appendRestoreDiagnosticReport(
-                "SAVE_NOTES: " +
-                    "commitReturned=$committed, " +
-                    "writeVerified=$verified, " +
-                    "expectedHash=$expectedHash, " +
-                    "readBackHash=$readBackHash"
-            )
-
-        } catch (e: Exception) {
-
-            appendRestoreDiagnosticReport(
-                "SAVE_NOTES_ERROR: " +
-                    "${e.javaClass.simpleName}: ${e.message}"
-            )
-        }
     }
 
     private fun createNotificationChannel() {
