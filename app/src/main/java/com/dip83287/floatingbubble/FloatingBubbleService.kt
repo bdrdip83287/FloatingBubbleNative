@@ -42,8 +42,30 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
+import java.io.File
 
 class FloatingBubbleService : Service() {
+
+    // ============================================================
+    // ✅ SINGLE SOURCE OF TRUTH
+    // এই ফোল্ডারটি অ্যাপ আনইনস্টল করলেও থেকে যায়
+    // ============================================================
+    private val PUBLIC_NOTES_DIR = "/storage/emulated/0/Documents/FloatingNotes"
+    private val PUBLIC_NOTES_FILE = "notes_backup.json"
+    private val PUBLIC_NOTES_PATH: File
+        get() = File(PUBLIC_NOTES_DIR, PUBLIC_NOTES_FILE)
+
+    // Legacy paths that should be cleaned up on startup
+    private val LEGACY_PATHS = listOf(
+        "/storage/emulated/0/Download/FloatingNotes",
+        "/storage/emulated/0/Download/Floating Notes",
+        "/storage/emulated/0/Download/FloatingBubbleBackup",
+        "/storage/emulated/0/Documents/Floating Notes"
+    )
+
+    // Old suspicious file to remove
+    private val OLD_TARGET_FILE =
+        "/storage/emulated/0/Documents/Floating Apps/notes/note_1778633708-87408.txt"
 
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
@@ -217,7 +239,12 @@ class FloatingBubbleService : Service() {
             actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
-            loadNotes()
+
+            // ✅ STEP 1: Cleanup all legacy/duplicate files ONCE
+            cleanupLegacyFiles()
+
+            // ✅ STEP 2: Load notes from public storage
+            loadNotesFromPublicStorage()
 
             createNotificationChannel()
             startForeground(1001, createNotification())
@@ -231,6 +258,185 @@ class FloatingBubbleService : Service() {
 
             startConfigurationCheck()
 
+        } catch (e: Exception) {
+        }
+    }
+
+    // ============================================================
+    // ✅ CLEANUP - Remove all legacy and duplicate files (one-time)
+    // ============================================================
+    private fun cleanupLegacyFiles() {
+        try {
+            // 1. Delete legacy directories
+            for (legacyPath in LEGACY_PATHS) {
+                try {
+                    val dir = File(legacyPath)
+                    if (dir.exists()) {
+                        dir.deleteRecursively()
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 2. Delete the old suspicious file (01858288800)
+            try {
+                val oldFile = File(OLD_TARGET_FILE)
+                if (oldFile.exists()) {
+                    oldFile.delete()
+                }
+            } catch (_: Exception) {}
+
+            // 3. Delete any duplicate backup files in Download and Documents
+            val scanDirs = listOf(
+                "/storage/emulated/0/Download",
+                "/storage/emulated/0/Documents"
+            )
+
+            for (dirPath in scanDirs) {
+                try {
+                    val dir = File(dirPath)
+                    if (dir.exists() && dir.isDirectory) {
+                        dir.listFiles()?.forEach { file ->
+                            val name = file.name.lowercase()
+                            // Delete files matching old backup patterns
+                            if (name.contains("floating_notes_backup") ||
+                                name.contains("floatingnotes_backup") ||
+                                name.contains("notes_backup") && !file.absolutePath.contains("FloatingNotes/notes_backup.json") ||
+                                name.startsWith(".pending-") ||
+                                name.contains("restore_diagnostic") ||
+                                name.contains("restore_save_test")) {
+                                try {
+                                    if (file.isDirectory) file.deleteRecursively()
+                                    else file.delete()
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 4. Specific cleanup for Floating Apps folder
+            try {
+                val floatingAppsNotes = File("/storage/emulated/0/Documents/Floating Apps/notes")
+                if (floatingAppsNotes.exists() && floatingAppsNotes.isDirectory) {
+                    floatingAppsNotes.listFiles()?.forEach { file ->
+                        try {
+                            // Only delete if contains the specific old note
+                            val content = file.readText()
+                            if (content.contains("01858288800")) {
+                                file.delete()
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+
+        } catch (_: Exception) {}
+    }
+
+    // ============================================================
+    // ✅ LOAD NOTES - Single source of truth
+    // Priority: Public Documents > SharedPreferences (migration)
+    // ============================================================
+    private fun loadNotesFromPublicStorage() {
+        try {
+            // Ensure directory exists
+            val dir = File(PUBLIC_NOTES_DIR)
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+
+            if (PUBLIC_NOTES_PATH.exists()) {
+                // Load from public storage
+                val json = PUBLIC_NOTES_PATH.readText()
+                val type = object : TypeToken<List<NoteItem>>() {}.type
+                val loaded: List<NoteItem> = Gson().fromJson(json, type)
+
+                notesList.clear()
+                notesList.addAll(loaded)
+
+                // Sync to SharedPreferences (so bubble count works)
+                syncToSharedPreferences()
+            } else {
+                // First time: migrate from SharedPreferences if exists
+                val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
+                if (!sharedPrefsJson.isNullOrEmpty()) {
+                    try {
+                        val type = object : TypeToken<List<NoteItem>>() {}.type
+                        val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
+                        notesList.clear()
+                        notesList.addAll(loaded)
+                    } catch (_: Exception) {
+                        notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                    }
+                } else {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+                // Save migrated notes to public storage
+                saveNotesToPublicStorage()
+            }
+        } catch (e: Exception) {
+            // Fallback to SharedPreferences
+            val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
+            if (!sharedPrefsJson.isNullOrEmpty()) {
+                try {
+                    val type = object : TypeToken<List<NoteItem>>() {}.type
+                    val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
+                    notesList.clear()
+                    notesList.addAll(loaded)
+                } catch (_: Exception) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+            } else {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            }
+        }
+    }
+
+    // ============================================================
+    // ✅ SAVE - Atomic write to public storage
+    // ============================================================
+    private fun saveNotesToPublicStorage() {
+        try {
+            val dir = File(PUBLIC_NOTES_DIR)
+            if (!dir.exists()) dir.mkdirs()
+
+            // Atomic write: write to .tmp, then rename
+            val tempFile = File(PUBLIC_NOTES_DIR, "$PUBLIC_NOTES_FILE.tmp")
+            val json = Gson().toJson(notesList)
+            tempFile.writeText(json)
+
+            // Delete existing and rename
+            if (PUBLIC_NOTES_PATH.exists()) {
+                PUBLIC_NOTES_PATH.delete()
+            }
+            tempFile.renameTo(PUBLIC_NOTES_PATH)
+
+        } catch (e: Exception) {
+        }
+    }
+
+    // ============================================================
+    // ✅ MAIN SAVE - Called on every change
+    // ============================================================
+    private fun saveNotesToPrefs() {
+        try {
+            // 1. Save to SharedPreferences (fast access)
+            val notesJson = Gson().toJson(notesList)
+            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
+
+            // 2. Save to public storage (survives uninstall)
+            saveNotesToPublicStorage()
+        } catch (e: Exception) {
+        }
+    }
+
+    // ============================================================
+    // ✅ SYNC - SharedPreferences only
+    // ============================================================
+    private fun syncToSharedPreferences() {
+        try {
+            val notesJson = Gson().toJson(notesList)
+            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
         } catch (e: Exception) {
         }
     }
@@ -262,44 +468,6 @@ class FloatingBubbleService : Service() {
         }
         configCheckRunnable = runnable
         configCheckHandler.postDelayed(runnable, 500)
-    }
-
-    // ============================================================
-    // ✅ LOAD NOTES - Only from SharedPreferences
-    // Google Drive Auto Backup handles persistence
-    // NEVER calls saveNotesToPrefs() during load
-    // ============================================================
-    private fun loadNotes() {
-        val notesJson = prefs.getString(STORAGE_NOTES_LIST, "")
-        if (!notesJson.isNullOrEmpty()) {
-            try {
-                val type = object : TypeToken<List<NoteItem>>() {}.type
-                val loaded: List<NoteItem> = Gson().fromJson(notesJson, type)
-                notesList.clear()
-                notesList.addAll(loaded)
-            } catch (e: Exception) {
-                if (notesList.isEmpty()) {
-                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-                }
-            }
-        } else {
-            if (notesList.isEmpty()) {
-                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-            }
-        }
-        // ❌ saveNotesToPrefs() কল হবে না
-    }
-
-    // ============================================================
-    // ✅ SAVE NOTES - Only to SharedPreferences
-    // Google Drive Auto Backup will back this up automatically
-    // ============================================================
-    private fun saveNotesToPrefs() {
-        try {
-            val notesJson = Gson().toJson(notesList)
-            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).apply()
-        } catch (e: Exception) {
-        }
     }
 
     private fun createNotificationChannel() {
@@ -1029,6 +1197,7 @@ class FloatingBubbleService : Service() {
         val r = w * 0.28f
         val rect = RectF(cx - r, cy - r, cx + r, cy + r)
         canvas.drawArc(rect, 215f, 250f, false, paint)
+        val ah = w * 0.18f
         val arrow = android.graphics.Path().apply {
             moveTo(w * 0.18f, h * 0.47f)
             lineTo(w * 0.38f, h * 0.30f)
@@ -1124,6 +1293,9 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ================================================================
+    // Shared custom magnifier
+    // ================================================================
     private var customSelectionMagnifier: Magnifier? = null
     private var customMagnifierTarget: EditText? = null
     private var lastCustomMagnifierTime = 0L
@@ -2442,10 +2614,8 @@ class FloatingBubbleService : Service() {
                 private var lastTapTime = 0L
                 private var lastTapX = 0f
                 private var lastTapY = 0f
-                private var touchMoved = false              
-               
+                private var touchMoved = false
                 private var longPressTriggered = false
-                
                 private var secondTapCandidate = false
                 private var selectionAtDown = false
                 private var selectionAnchor = -1
