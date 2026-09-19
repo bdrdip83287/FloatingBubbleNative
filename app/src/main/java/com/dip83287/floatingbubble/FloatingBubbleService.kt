@@ -488,9 +488,9 @@ class FloatingBubbleService : Service() {
     }
 
     private fun isNotesBackupFilename(name: String): Boolean {
-        return name == NOTES_BACKUP_FILE ||
-            Regex("^notes_backup \(\d+\)\.json$").matches(name)
-    }
+    return name == NOTES_BACKUP_FILE ||
+        Regex("""^notes_backup \(\d+\)\.json$""").matches(name)
+}
 
     // ============================================================
     // ✅ SAVE NOTES TO MEDIASTORE
