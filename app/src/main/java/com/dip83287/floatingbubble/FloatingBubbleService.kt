@@ -1772,7 +1772,6 @@ class FloatingBubbleService : Service() {
                 if (params != null) {
                     val gap = 14
                     params.leftMargin = (endX + gap).toInt()
-                    params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     if (rightInsideEditor) {
                         handle.animate().cancel()
