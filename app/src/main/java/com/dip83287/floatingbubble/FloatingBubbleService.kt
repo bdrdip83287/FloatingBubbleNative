@@ -1731,7 +1731,8 @@ class FloatingBubbleService : Service() {
             rightHandleView?.let { handle ->
                 val params = handle.layoutParams as? FrameLayout.LayoutParams
                 if (params != null) {
-                    val gap = 14                    params.leftMargin = (endX + gap).toInt()
+                    val gap = 14   
+                    params.leftMargin = (endX + gap).toInt()
                     params.topMargin = (endY - halfHandle).toInt()
                     handle.layoutParams = params
                     if (rightInsideEditor) {
