@@ -380,12 +380,14 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ READ NOTES FROM MEDIASTORE - Robust version
-    // KEY INSIGHT: The OLDEST file (by DATE_MODIFIED) is the REAL user data.
-    // The NEWEST file is usually created by our own saveNotesToMediaStore()
-    // after Google Auto Backup restored OLD SharedPreferences data.
+    // ✅ READ NOTES FROM MEDIASTORE - Version 3
     //
-    // So we pick the OLDEST valid file.
+    // KEY INSIGHT: Compare by NOTE'S latest "lastEdited" timestamp,
+    // NOT by file's dateModified. The file with the newest note
+    // content is the real user data.
+    //
+    // Also: Permanently delete .trashed-* files and all duplicate
+    // backups after picking the winner.
     // ============================================================
     private fun readNotesFromMediaStore(): String? {
         return try {
@@ -402,10 +404,13 @@ class FloatingBubbleService : Service() {
                 data class MediaFileInfo(
                     val id: Long,
                     val name: String,
-                    val dateModified: Long
+                    val dateModified: Long,
+                    val latestNoteEdited: Long,
+                    val noteCount: Int,
+                    val content: String
                 )
 
-                val allBackupFiles = mutableListOf<MediaFileInfo>()
+                val allFiles = mutableListOf<MediaFileInfo>()
 
                 contentResolver.query(
                     collection,
@@ -426,85 +431,60 @@ class FloatingBubbleService : Service() {
                         )
 
                         if (name.startsWith("notes_backup") && name.endsWith(".json")) {
-                            allBackupFiles.add(
-                                MediaFileInfo(
-                                    id = id,
-                                    name = name,
-                                    dateModified = dateModified
-                                )
-                            )
+                            try {
+                                val uri = ContentUris.withAppendedId(collection, id)
+                                val content = contentResolver
+                                    .openInputStream(uri)
+                                    ?.bufferedReader()
+                                    ?.use { it.readText() }
+
+                                if (!content.isNullOrEmpty()) {
+                                    try {
+                                        val type = object : TypeToken<List<NoteItem>>() {}.type
+                                        val parsed: List<NoteItem> = Gson().fromJson(content, type)
+                                        if (parsed != null && parsed.isNotEmpty()) {
+                                            // ✅ Calculate latest lastEdited
+                                            val latestEdit = parsed.maxOfOrNull { it.lastEdited } ?: 0L
+                                            allFiles.add(
+                                                MediaFileInfo(
+                                                    id = id,
+                                                    name = name,
+                                                    dateModified = dateModified,
+                                                    latestNoteEdited = latestEdit,
+                                                    noteCount = parsed.size,
+                                                    content = content
+                                                )
+                                            )
+                                        }
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                            } catch (_: Exception) {
+                            }
                         }
                     }
                 }
 
-                if (allBackupFiles.isEmpty()) {
+                if (allFiles.isEmpty()) {
+                    // ✅ Also try to clean up any .trashed files before returning
+                    cleanupTrashedMediaStoreFiles()
                     return null
                 }
 
-                // ✅ Sort by DATE_MODIFIED: OLDEST first
-                val sortedFiles = allBackupFiles.sortedBy { it.dateModified }
+                // ✅ PICK THE WINNER: File with newest lastEdited note
+                // Priority:
+                //   1. Highest latestNoteEdited
+                //   2. If tie, highest noteCount (more notes = real user data)
+                //   3. If tie, oldest dateModified (first created)
+                val winner = allFiles.sortedWith(
+                    compareByDescending<MediaFileInfo> { it.latestNoteEdited }
+                        .thenByDescending { it.noteCount }
+                        .thenBy { it.dateModified }
+                ).first()
 
-                // ✅ Try each file (oldest first) until we find valid JSON
-                var validContent: String? = null
-                var validFileId: Long? = null
-
-                for (file in sortedFiles) {
-                    try {
-                        val uri = ContentUris.withAppendedId(collection, file.id)
-                        val content = contentResolver
-                            .openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use { it.readText() }
-
-                        if (!content.isNullOrEmpty()) {
-                            try {
-                                val type = object : TypeToken<List<NoteItem>>() {}.type
-                                val parsed: List<NoteItem> = Gson().fromJson(content, type)
-                                // ✅ Only accept if it has REAL notes (not just the default "Untitled Note")
-                                if (parsed != null && parsed.isNotEmpty() && isRealNotesList(parsed)) {
-                                    validContent = content
-                                    validFileId = file.id
-                                    break
-                                }
-                            } catch (_: Exception) {
-                                // Invalid JSON, try next file
-                            }
-                        }
-                    } catch (_: Exception) {
-                        // Try next file
-                    }
-                }
-
-                // ✅ If no "real notes" found, accept ANY valid JSON
-                if (validContent == null) {
-                    for (file in sortedFiles) {
-                        try {
-                            val uri = ContentUris.withAppendedId(collection, file.id)
-                            val content = contentResolver
-                                .openInputStream(uri)
-                                ?.bufferedReader()
-                                ?.use { it.readText() }
-
-                            if (!content.isNullOrEmpty()) {
-                                try {
-                                    val type = object : TypeToken<List<NoteItem>>() {}.type
-                                    val parsed: List<NoteItem> = Gson().fromJson(content, type)
-                                    if (parsed != null && parsed.isNotEmpty()) {
-                                        validContent = content
-                                        validFileId = file.id
-                                        break
-                                    }
-                                } catch (_: Exception) {
-                                }
-                            }
-                        } catch (_: Exception) {
-                        }
-                    }
-                }
-
-                // ✅ Delete ALL files except the chosen one
-                for (file in allBackupFiles) {
-                    if (file.id != validFileId) {
+                // ✅ Delete ALL other backup files (permanently)
+                for (file in allFiles) {
+                    if (file.id != winner.id) {
                         try {
                             val deleteUri = ContentUris.withAppendedId(collection, file.id)
                             contentResolver.delete(deleteUri, null, null)
@@ -512,35 +492,37 @@ class FloatingBubbleService : Service() {
                     }
                 }
 
-                // ✅ Rename the chosen file to exact "notes_backup.json"
-                val finalContent = validContent
-                val finalFileId = validFileId
+                // ✅ Rename winner to exact "notes_backup.json"
+                if (winner.name != NOTES_BACKUP_FILE) {
+                    try {
+                        // Delete winner
+                        val deleteUri = ContentUris.withAppendedId(collection, winner.id)
+                        contentResolver.delete(deleteUri, null, null)
 
-                if (finalFileId != null && finalContent != null) {
-                    val currentFile = allBackupFiles.find { it.id == finalFileId }
-                    if (currentFile != null && currentFile.name != NOTES_BACKUP_FILE) {
-                        try {
-                            val deleteUri = ContentUris.withAppendedId(collection, finalFileId)
-                            contentResolver.delete(deleteUri, null, null)
-
-                            val values = ContentValues().apply {
-                                put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
-                                put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                                put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
+                        // Create fresh file with correct name
+                        val values = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
+                            put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                            put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
+                        }
+                        val newUri = contentResolver.insert(collection, values)
+                        newUri?.let { target ->
+                            contentResolver.openOutputStream(target, "wt")?.use { output ->
+                                output.write(winner.content.toByteArray(Charsets.UTF_8))
                             }
-                            val newUri = contentResolver.insert(collection, values)
-                            newUri?.let { target ->
-                                contentResolver.openOutputStream(target, "wt")?.use { output ->
-                                    output.write(finalContent.toByteArray(Charsets.UTF_8))
-                                }
-                            }
-                        } catch (_: Exception) {}
-                    }
+                        }
+                    } catch (_: Exception) {}
                 }
 
-                return finalContent
+                // ✅ Clean up .trashed files
+                cleanupTrashedMediaStoreFiles()
+
+                return winner.content
+
             } else {
+                // ============================================================
                 // Android 9 and below
+                // ============================================================
                 val directory = File(
                     Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_DOWNLOADS
@@ -549,70 +531,132 @@ class FloatingBubbleService : Service() {
                 )
                 if (!directory.exists()) return null
 
-                val allFiles = directory.listFiles()?.filter {
-                    it.name.startsWith("notes_backup") && it.name.endsWith(".json")
-                }?.sortedBy { it.lastModified() } ?: emptyList()
+                data class LocalFileInfo(
+                    val file: File,
+                    val latestNoteEdited: Long,
+                    val noteCount: Int,
+                    val content: String
+                )
 
-                if (allFiles.isEmpty()) return null
+                val allFiles = mutableListOf<LocalFileInfo>()
 
-                var validContent: String? = null
-                var validFile: File? = null
-
-                // ✅ Try each file (oldest first)
-                for (file in allFiles) {
-                    try {
-                        val content = file.readText(Charsets.UTF_8)
-                        if (content.isNotEmpty()) {
-                            val type = object : TypeToken<List<NoteItem>>() {}.type
-                            val parsed: List<NoteItem> = Gson().fromJson(content, type)
-                            if (parsed != null && parsed.isNotEmpty() && isRealNotesList(parsed)) {
-                                validContent = content
-                                validFile = file
-                                break
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                // If no real notes, accept any valid JSON
-                if (validContent == null) {
-                    for (file in allFiles) {
+                directory.listFiles()?.forEach { file ->
+                    if (file.name.startsWith("notes_backup") && file.name.endsWith(".json")) {
                         try {
                             val content = file.readText(Charsets.UTF_8)
                             if (content.isNotEmpty()) {
                                 val type = object : TypeToken<List<NoteItem>>() {}.type
                                 val parsed: List<NoteItem> = Gson().fromJson(content, type)
                                 if (parsed != null && parsed.isNotEmpty()) {
-                                    validContent = content
-                                    validFile = file
-                                    break
+                                    val latestEdit = parsed.maxOfOrNull { it.lastEdited } ?: 0L
+                                    allFiles.add(
+                                        LocalFileInfo(
+                                            file = file,
+                                            latestNoteEdited = latestEdit,
+                                            noteCount = parsed.size,
+                                            content = content
+                                        )
+                                    )
                                 }
                             }
                         } catch (_: Exception) {}
                     }
                 }
 
+                if (allFiles.isEmpty()) {
+                    // Delete .trashed files
+                    directory.listFiles()?.forEach { file ->
+                        if (file.name.startsWith(".trashed-")) file.delete()
+                    }
+                    return null
+                }
+
+                val winner = allFiles.sortedWith(
+                    compareByDescending<LocalFileInfo> { it.latestNoteEdited }
+                        .thenByDescending { it.noteCount }
+                        .thenBy { it.file.lastModified() }
+                ).first()
+
                 // Delete all other files
-                for (file in allFiles) {
-                    if (file != validFile) {
-                        file.delete()
+                for (info in allFiles) {
+                    if (info.file != winner.file) {
+                        info.file.delete()
                     }
                 }
 
-                val finalFile = validFile
-                val finalContent9 = validContent
-
-                if (finalFile != null && finalFile.name != NOTES_BACKUP_FILE) {
-                    val target = File(directory, NOTES_BACKUP_FILE)
-                    if (target.exists()) target.delete()
-                    finalFile.renameTo(target)
+                // Delete .trashed files
+                directory.listFiles()?.forEach { file ->
+                    if (file.name.startsWith(".trashed-")) file.delete()
                 }
 
-                return finalContent9
+                // Rename winner to exact name
+                if (winner.file.name != NOTES_BACKUP_FILE) {
+                    val target = File(directory, NOTES_BACKUP_FILE)
+                    if (target.exists()) target.delete()
+                    winner.file.renameTo(target)
+                }
+
+                return winner.content
             }
         } catch (e: Exception) {
             null
         }
+    }
+
+    // ============================================================
+    // ✅ Cleanup .trashed-* files from MediaStore
+    // Android 11+ moves deleted files to a trash. We need to
+    // empty the trash to save storage and avoid duplicates.
+    // ============================================================
+    private fun cleanupTrashedMediaStoreFiles() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+
+            // Query for trashed files
+            val projection = arrayOf(
+                MediaStore.Downloads._ID,
+                MediaStore.Downloads.DISPLAY_NAME,
+                MediaStore.Downloads.IS_TRASHED
+            )
+            val selection = "${MediaStore.Downloads.RELATIVE_PATH} LIKE ?"
+            val selectionArgs = arrayOf("${NOTES_BACKUP_RELATIVE_PATH}%")
+
+            val trashedIds = mutableListOf<Long>()
+
+            contentResolver.query(
+                collection,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(
+                        cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                    )
+                    val name = cursor.getString(
+                        cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                    ) ?: ""
+
+                    // Check if it's a note backup (trashed or not)
+                    if (name.startsWith("notes_backup") || name.contains("notes_backup")) {
+                        trashedIds.add(id)
+                    }
+                }
+            }
+
+            // Delete all matching files permanently
+            // (MediaStore will handle the trash automatically)
+            for (id in trashedIds) {
+                try {
+                    val uri = ContentUris.withAppendedId(collection, id)
+                    contentResolver.delete(uri, null, null)
+                } catch (_: Exception) {}
+            }
+
+        } catch (_: Exception) {}
     }
 
     // ============================================================
