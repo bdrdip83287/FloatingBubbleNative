@@ -656,76 +656,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // ✅ Aggressively clean up .trashed-* files
-    // Call this on every app start (once)
-    // ============================================================
-    private fun cleanupTrashedMediaStoreFiles() {
-        try {
-            // On Android 9 and below, delete .trashed files directly
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                val directory = File(
-                    Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS
-                    ),
-                    NOTES_BACKUP_FOLDER
-                )
-                if (directory.exists()) {
-                    directory.listFiles()?.forEach { file ->
-                        if (file.name.startsWith(".trashed-")) {
-                            try { file.delete() } catch (_: Exception) {}
-                        }
-                    }
-                }
-                return
-            }
 
-            // On Android 10+, MediaStore handles trash automatically
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-
-            val projection = arrayOf(
-                MediaStore.Downloads._ID,
-                MediaStore.Downloads.DISPLAY_NAME,
-                MediaStore.Downloads.IS_TRASHED
-            )
-            val selection = "${MediaStore.Downloads.RELATIVE_PATH} LIKE ?"
-            val selectionArgs = arrayOf("${NOTES_BACKUP_RELATIVE_PATH}%")
-
-            val toDelete = mutableListOf<Long>()
-
-            contentResolver.query(
-                collection,
-                projection,
-                selection,
-                selectionArgs,
-                null
-            )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
-                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
-                val trashedCol = cursor.getColumnIndex(MediaStore.Downloads.IS_TRASHED)
-
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idCol)
-                    val name = cursor.getString(nameCol) ?: ""
-                    val isTrashed = if (trashedCol >= 0) cursor.getInt(trashedCol) == 1 else false
-
-                    if (isTrashed || name.startsWith(".trashed-")) {
-                        toDelete.add(id)
-                    }
-                }
-            }
-
-            for (id in toDelete) {
-                try {
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    contentResolver.delete(uri, null, null)
-                } catch (_: Exception) {}
-            }
-
-        } catch (_: Exception) {}
-    }
 
     // ============================================================
     // ✅ Cleanup .trashed-* files from MediaStore
