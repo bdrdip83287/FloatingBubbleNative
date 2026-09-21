@@ -330,11 +330,13 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ LOAD NOTES - MediaStore first, then SharedPreferences
+    // ✅ LOAD NOTES - MediaStore is ALWAYS the source of truth
+    // Never trust SharedPreferences alone (Google Auto Backup can
+    // restore OLD data). MediaStore file is the real user data.
     // ============================================================
     private fun loadNotes() {
         try {
-            // ✅ STEP 1: Try MediaStore first
+            // ✅ STEP 1: ALWAYS try MediaStore FIRST
             val mediaStoreJson = readNotesFromMediaStore()
             if (!mediaStoreJson.isNullOrEmpty()) {
                 try {
@@ -343,6 +345,7 @@ class FloatingBubbleService : Service() {
                     if (loaded.isNotEmpty()) {
                         notesList.clear()
                         notesList.addAll(loaded)
+                        // Sync to SharedPreferences so notification count is correct
                         saveNotesToSharedPreferences()
                         return
                     }
@@ -350,7 +353,8 @@ class FloatingBubbleService : Service() {
                 }
             }
 
-            // ✅ STEP 2: Fallback to SharedPreferences
+            // ✅ STEP 2: Only if MediaStore has NO valid data,
+            // then fall back to SharedPreferences (first install)
             val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
             if (!sharedPrefsJson.isNullOrEmpty()) {
                 try {
@@ -365,7 +369,7 @@ class FloatingBubbleService : Service() {
                 notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             }
 
-            // ✅ STEP 3: Save back to MediaStore
+            // ✅ STEP 3: Save back to MediaStore (creates file if not exists)
             saveNotesToMediaStore()
 
         } catch (e: Exception) {
@@ -377,10 +381,11 @@ class FloatingBubbleService : Service() {
 
     // ============================================================
     // ✅ READ NOTES FROM MEDIASTORE - Robust version
-    // 1. Scan ALL notes_backup* files
-    // 2. Pick the newest with valid data
-    // 3. Delete all old files
-    // 4. Rename to exact "notes_backup.json"
+    // KEY INSIGHT: The OLDEST file (by DATE_MODIFIED) is the REAL user data.
+    // The NEWEST file is usually created by our own saveNotesToMediaStore()
+    // after Google Auto Backup restored OLD SharedPreferences data.
+    //
+    // So we pick the OLDEST valid file.
     // ============================================================
     private fun readNotesFromMediaStore(): String? {
         return try {
@@ -436,8 +441,10 @@ class FloatingBubbleService : Service() {
                     return null
                 }
 
-                val sortedFiles = allBackupFiles.sortedByDescending { it.dateModified }
+                // ✅ Sort by DATE_MODIFIED: OLDEST first
+                val sortedFiles = allBackupFiles.sortedBy { it.dateModified }
 
+                // ✅ Try each file (oldest first) until we find valid JSON
                 var validContent: String? = null
                 var validFileId: Long? = null
 
@@ -453,19 +460,50 @@ class FloatingBubbleService : Service() {
                             try {
                                 val type = object : TypeToken<List<NoteItem>>() {}.type
                                 val parsed: List<NoteItem> = Gson().fromJson(content, type)
-                                if (parsed != null && parsed.isNotEmpty()) {
+                                // ✅ Only accept if it has REAL notes (not just the default "Untitled Note")
+                                if (parsed != null && parsed.isNotEmpty() && isRealNotesList(parsed)) {
                                     validContent = content
                                     validFileId = file.id
                                     break
                                 }
                             } catch (_: Exception) {
+                                // Invalid JSON, try next file
                             }
                         }
                     } catch (_: Exception) {
+                        // Try next file
                     }
                 }
 
-                for (file in sortedFiles) {
+                // ✅ If no "real notes" found, accept ANY valid JSON
+                if (validContent == null) {
+                    for (file in sortedFiles) {
+                        try {
+                            val uri = ContentUris.withAppendedId(collection, file.id)
+                            val content = contentResolver
+                                .openInputStream(uri)
+                                ?.bufferedReader()
+                                ?.use { it.readText() }
+
+                            if (!content.isNullOrEmpty()) {
+                                try {
+                                    val type = object : TypeToken<List<NoteItem>>() {}.type
+                                    val parsed: List<NoteItem> = Gson().fromJson(content, type)
+                                    if (parsed != null && parsed.isNotEmpty()) {
+                                        validContent = content
+                                        validFileId = file.id
+                                        break
+                                    }
+                                } catch (_: Exception) {
+                                }
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+
+                // ✅ Delete ALL files except the chosen one
+                for (file in allBackupFiles) {
                     if (file.id != validFileId) {
                         try {
                             val deleteUri = ContentUris.withAppendedId(collection, file.id)
@@ -474,33 +512,35 @@ class FloatingBubbleService : Service() {
                     }
                 }
 
+                // ✅ Rename the chosen file to exact "notes_backup.json"
                 val finalContent = validContent
-val finalFileId = validFileId
+                val finalFileId = validFileId
 
-if (finalFileId != null && finalContent != null) {
-    val currentFile = sortedFiles.find { it.id == finalFileId }
-    if (currentFile != null && currentFile.name != NOTES_BACKUP_FILE) {
-        try {
-            val deleteUri = ContentUris.withAppendedId(collection, finalFileId)
-            contentResolver.delete(deleteUri, null, null)
+                if (finalFileId != null && finalContent != null) {
+                    val currentFile = allBackupFiles.find { it.id == finalFileId }
+                    if (currentFile != null && currentFile.name != NOTES_BACKUP_FILE) {
+                        try {
+                            val deleteUri = ContentUris.withAppendedId(collection, finalFileId)
+                            contentResolver.delete(deleteUri, null, null)
 
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
-                put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
-            }
-            val newUri = contentResolver.insert(collection, values)
-            newUri?.let { target ->
-                contentResolver.openOutputStream(target, "wt")?.use { output ->
-                    output.write(finalContent.toByteArray(Charsets.UTF_8))
+                            val values = ContentValues().apply {
+                                put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
+                                put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                                put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
+                            }
+                            val newUri = contentResolver.insert(collection, values)
+                            newUri?.let { target ->
+                                contentResolver.openOutputStream(target, "wt")?.use { output ->
+                                    output.write(finalContent.toByteArray(Charsets.UTF_8))
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
-            }
-        } catch (_: Exception) {}
-    }
-}
 
-return finalContent
+                return finalContent
             } else {
+                // Android 9 and below
                 val directory = File(
                     Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_DOWNLOADS
@@ -511,20 +551,21 @@ return finalContent
 
                 val allFiles = directory.listFiles()?.filter {
                     it.name.startsWith("notes_backup") && it.name.endsWith(".json")
-                }?.sortedByDescending { it.lastModified() } ?: emptyList()
+                }?.sortedBy { it.lastModified() } ?: emptyList()
 
                 if (allFiles.isEmpty()) return null
 
                 var validContent: String? = null
                 var validFile: File? = null
 
+                // ✅ Try each file (oldest first)
                 for (file in allFiles) {
                     try {
                         val content = file.readText(Charsets.UTF_8)
                         if (content.isNotEmpty()) {
                             val type = object : TypeToken<List<NoteItem>>() {}.type
                             val parsed: List<NoteItem> = Gson().fromJson(content, type)
-                            if (parsed != null && parsed.isNotEmpty()) {
+                            if (parsed != null && parsed.isNotEmpty() && isRealNotesList(parsed)) {
                                 validContent = content
                                 validFile = file
                                 break
@@ -533,6 +574,25 @@ return finalContent
                     } catch (_: Exception) {}
                 }
 
+                // If no real notes, accept any valid JSON
+                if (validContent == null) {
+                    for (file in allFiles) {
+                        try {
+                            val content = file.readText(Charsets.UTF_8)
+                            if (content.isNotEmpty()) {
+                                val type = object : TypeToken<List<NoteItem>>() {}.type
+                                val parsed: List<NoteItem> = Gson().fromJson(content, type)
+                                if (parsed != null && parsed.isNotEmpty()) {
+                                    validContent = content
+                                    validFile = file
+                                    break
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+
+                // Delete all other files
                 for (file in allFiles) {
                     if (file != validFile) {
                         file.delete()
@@ -540,19 +600,37 @@ return finalContent
                 }
 
                 val finalFile = validFile
-val finalContent9 = validContent
+                val finalContent9 = validContent
 
-if (finalFile != null && finalFile.name != NOTES_BACKUP_FILE) {
-    val target = File(directory, NOTES_BACKUP_FILE)
-    if (target.exists()) target.delete()
-    finalFile.renameTo(target)
-}
+                if (finalFile != null && finalFile.name != NOTES_BACKUP_FILE) {
+                    val target = File(directory, NOTES_BACKUP_FILE)
+                    if (target.exists()) target.delete()
+                    finalFile.renameTo(target)
+                }
 
-return finalContent9
+                return finalContent9
             }
         } catch (e: Exception) {
             null
         }
+    }
+
+    // ============================================================
+    // ✅ Helper: Check if the notes list contains REAL user data
+    // (not just the auto-generated "Untitled Note" or the
+    // suspicious "01858288800" from Auto Backup restore)
+    // ============================================================
+    private fun isRealNotesList(notes: List<NoteItem>): Boolean {
+        if (notes.isEmpty()) return false
+        // If it's just 1 note and it looks like a default/suspicious one, reject
+        if (notes.size == 1) {
+            val note = notes[0]
+            // Reject default "Untitled Note"
+            if (note.title == "Untitled Note" && note.content.isEmpty()) return false
+            // Reject the suspicious "01858288800" Auto Backup restore
+            if (note.title == "01858288800" && note.content == "01858288800") return false
+        }
+        return true
     }
 
     // ============================================================
