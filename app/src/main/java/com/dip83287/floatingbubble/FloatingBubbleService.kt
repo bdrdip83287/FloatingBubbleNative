@@ -474,29 +474,32 @@ class FloatingBubbleService : Service() {
                     }
                 }
 
-                if (validFileId != null && validContent != null) {
-                    val currentFile = sortedFiles.find { it.id == validFileId }
-                    if (currentFile != null && currentFile.name != NOTES_BACKUP_FILE) {
-                        try {
-                            val deleteUri = ContentUris.withAppendedId(collection, validFileId)
-                            contentResolver.delete(deleteUri, null, null)
+                val finalContent = validContent
+val finalFileId = validFileId
 
-                            val values = ContentValues().apply {
-                                put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
-                                put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                                put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
-                            }
-                            val newUri = contentResolver.insert(collection, values)
-                            newUri?.let { target ->
-                                contentResolver.openOutputStream(target, "wt")?.use { output ->
-                                    output.write(validContent.toByteArray(Charsets.UTF_8))
-                                }
-                            }
-                        } catch (_: Exception) {}
-                    }
+if (finalFileId != null && finalContent != null) {
+    val currentFile = sortedFiles.find { it.id == finalFileId }
+    if (currentFile != null && currentFile.name != NOTES_BACKUP_FILE) {
+        try {
+            val deleteUri = ContentUris.withAppendedId(collection, finalFileId)
+            contentResolver.delete(deleteUri, null, null)
+
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
+                put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
+            }
+            val newUri = contentResolver.insert(collection, values)
+            newUri?.let { target ->
+                contentResolver.openOutputStream(target, "wt")?.use { output ->
+                    output.write(finalContent.toByteArray(Charsets.UTF_8))
                 }
+            }
+        } catch (_: Exception) {}
+    }
+}
 
-                return validContent
+return finalContent
             } else {
                 val directory = File(
                     Environment.getExternalStoragePublicDirectory(
@@ -536,13 +539,16 @@ class FloatingBubbleService : Service() {
                     }
                 }
 
-                if (validFile != null && validFile.name != NOTES_BACKUP_FILE) {
-                    val target = File(directory, NOTES_BACKUP_FILE)
-                    if (target.exists()) target.delete()
-                    validFile.renameTo(target)
-                }
+                val finalFile = validFile
+val finalContent9 = validContent
 
-                return validContent
+if (finalFile != null && finalFile.name != NOTES_BACKUP_FILE) {
+    val target = File(directory, NOTES_BACKUP_FILE)
+    if (target.exists()) target.delete()
+    finalFile.renameTo(target)
+}
+
+return finalContent9
             }
         } catch (e: Exception) {
             null
