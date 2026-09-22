@@ -389,20 +389,29 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ READ NOTES FROM MEDIASTORE - Robust version
+    // ✅ READ NOTES FROM MEDIASTORE - Version 5 (Documents folder)
+    //
+    // Uses MediaStore.Files for /Documents/ folder access
+    // on Android 10+ without MANAGE_EXTERNAL_STORAGE
     // ============================================================
     private fun readNotesFromMediaStore(): String? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = MediaStore.Files.getContentUri("external")
+                // ✅ Use MediaStore.Files with VOLUME_EXTERNAL_PRIMARY
+                val collection = MediaStore.Files.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY
+                )
+
                 val projection = arrayOf(
                     MediaStore.Files.FileColumns._ID,
                     MediaStore.Files.FileColumns.DISPLAY_NAME,
                     MediaStore.Files.FileColumns.DATE_MODIFIED,
                     MediaStore.Files.FileColumns.RELATIVE_PATH
                 )
+
+                // ✅ Query files where RELATIVE_PATH matches our folder
                 val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("${NOTES_BACKUP_RELATIVE_PATH}%")
+                val selectionArgs = arrayOf("%${NOTES_BACKUP_FOLDER}%")
 
                 data class MediaFileInfo(
                     val id: Long,
@@ -423,58 +432,66 @@ class FloatingBubbleService : Service() {
                     selectionArgs,
                     null
                 )?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
-                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                    val idCol = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
+                    val nameCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                    val dateCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                    val pathCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.RELATIVE_PATH)
+
+                    if (idCol < 0 || nameCol < 0) return@use
 
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
                         val name = cursor.getString(nameCol) ?: ""
-                        val dateModified = cursor.getLong(dateCol)
+                        val dateModified = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
+                        val relPath = if (pathCol >= 0) cursor.getString(pathCol) ?: "" else ""
 
-                        if (name.startsWith("notes_backup") && name.endsWith(".json")) {
-                            try {
-                                val uri = ContentUris.withAppendedId(collection, id)
-                                val content = contentResolver
-                                    .openInputStream(uri)
-                                    ?.bufferedReader()
-                                    ?.use { it.readText() }
+                        // ✅ Check that the file is in our target folder
+                        if (!relPath.contains(NOTES_BACKUP_FOLDER)) continue
 
-                                if (!content.isNullOrEmpty()) {
-                                    try {
-                                        val type = object : TypeToken<List<NoteItem>>() {}.type
-                                        val parsed: List<NoteItem> = Gson().fromJson(content, type)
-                                        if (parsed != null && parsed.isNotEmpty()) {
-                                            val latestEdit = parsed.maxOfOrNull { it.lastEdited } ?: 0L
-                                            allValidFiles.add(
-                                                MediaFileInfo(
-                                                    id = id,
-                                                    name = name,
-                                                    dateModified = dateModified,
-                                                    latestNoteEdited = latestEdit,
-                                                    noteCount = parsed.size,
-                                                    content = content
-                                                )
+                        // ✅ Check name pattern
+                        if (!name.startsWith("notes_backup") || !name.endsWith(".json")) {
+                            continue
+                        }
+
+                        // ✅ Read and validate content
+                        try {
+                            val uri = ContentUris.withAppendedId(collection, id)
+                            val content = contentResolver
+                                .openInputStream(uri)
+                                ?.bufferedReader()
+                                ?.use { it.readText() }
+
+                            if (!content.isNullOrEmpty()) {
+                                try {
+                                    val type = object : TypeToken<List<NoteItem>>() {}.type
+                                    val parsed: List<NoteItem> = Gson().fromJson(content, type)
+                                    if (parsed != null && parsed.isNotEmpty()) {
+                                        val latestEdit = parsed.maxOfOrNull { it.lastEdited } ?: 0L
+                                        allValidFiles.add(
+                                            MediaFileInfo(
+                                                id = id,
+                                                name = name,
+                                                dateModified = dateModified,
+                                                latestNoteEdited = latestEdit,
+                                                noteCount = parsed.size,
+                                                content = content
                                             )
-                                        } else {
-                                            allFileIds.add(id)
-                                        }
-                                    } catch (_: Exception) {
+                                        )
+                                    } else {
                                         allFileIds.add(id)
                                     }
-                                } else {
+                                } catch (_: Exception) {
                                     allFileIds.add(id)
                                 }
-                            } catch (_: Exception) {}
-                        } else {
-                            // Non-matching file in our folder - delete
-                            allFileIds.add(id)
+                            } else {
+                                allFileIds.add(id)
+                            }
+                        } catch (_: Exception) {
                         }
                     }
                 }
 
                 if (allValidFiles.isEmpty()) {
-                    // Cleanup invalid files
                     for (id in allFileIds) {
                         try {
                             val uri = ContentUris.withAppendedId(collection, id)
@@ -484,14 +501,14 @@ class FloatingBubbleService : Service() {
                     return null
                 }
 
-                // ✅ Pick winner: newest lastEdited, then most notes, then oldest file
+                // ✅ Pick winner: newest lastEdited + most notes + oldest file
                 val winner = allValidFiles.sortedWith(
                     compareByDescending<MediaFileInfo> { it.latestNoteEdited }
                         .thenByDescending { it.noteCount }
                         .thenBy { it.dateModified }
                 ).first()
 
-                // ✅ Delete all other files
+                // ✅ Delete all other valid files
                 for (file in allValidFiles) {
                     if (file.id != winner.id) {
                         try {
@@ -500,6 +517,8 @@ class FloatingBubbleService : Service() {
                         } catch (_: Exception) {}
                     }
                 }
+
+                // ✅ Delete all invalid files
                 for (id in allFileIds) {
                     try {
                         val uri = ContentUris.withAppendedId(collection, id)
@@ -507,7 +526,7 @@ class FloatingBubbleService : Service() {
                     } catch (_: Exception) {}
                 }
 
-                // ✅ Ensure winner has exact name
+                // ✅ Rename winner to exact "notes_backup.json"
                 if (winner.name != NOTES_BACKUP_FILE) {
                     try {
                         val deleteUri = ContentUris.withAppendedId(collection, winner.id)
@@ -530,7 +549,7 @@ class FloatingBubbleService : Service() {
                 return winner.content
 
             } else {
-                // Android 9 and below
+                // Android 9 and below: direct file read
                 val directory = File(
                     Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_DOCUMENTS
@@ -618,20 +637,26 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ SAVE NOTES TO MEDIASTORE - Exact name only
+    // ✅ SAVE NOTES TO MEDIASTORE - Version 2
+    // Uses MediaStore.Files for Documents folder
     // ============================================================
     private fun saveNotesToMediaStore() {
         try {
             val json = Gson().toJson(notesList)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = MediaStore.Files.getContentUri("external")
+                val collection = MediaStore.Files.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY
+                )
+
                 val projection = arrayOf(
                     MediaStore.Files.FileColumns._ID,
-                    MediaStore.Files.FileColumns.DISPLAY_NAME
+                    MediaStore.Files.FileColumns.DISPLAY_NAME,
+                    MediaStore.Files.FileColumns.RELATIVE_PATH
                 )
+
                 val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("${NOTES_BACKUP_RELATIVE_PATH}%")
+                val selectionArgs = arrayOf("%${NOTES_BACKUP_FOLDER}%")
 
                 var exactId: Long? = null
                 val duplicates = mutableListOf<Long>()
@@ -643,16 +668,22 @@ class FloatingBubbleService : Service() {
                     selectionArgs,
                     null
                 )?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                    val idCol = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
+                    val nameCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                    val pathCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.RELATIVE_PATH)
+
+                    if (idCol < 0 || nameCol < 0) return@use
 
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
                         val name = cursor.getString(nameCol) ?: ""
+                        val relPath = if (pathCol >= 0) cursor.getString(pathCol) ?: "" else ""
+
+                        if (!relPath.contains(NOTES_BACKUP_FOLDER)) continue
 
                         if (name == NOTES_BACKUP_FILE) {
                             exactId = id
-                        } else {
+                        } else if (name.startsWith("notes_backup") && name.endsWith(".json")) {
                             duplicates.add(id)
                         }
                     }
@@ -700,7 +731,6 @@ class FloatingBubbleService : Service() {
                 if (targetFile.exists()) targetFile.delete()
                 tempFile.renameTo(targetFile)
 
-                // Delete duplicates
                 directory.listFiles()?.forEach { file ->
                     if (file.name.startsWith("notes_backup") &&
                         file.name.endsWith(".json") &&
