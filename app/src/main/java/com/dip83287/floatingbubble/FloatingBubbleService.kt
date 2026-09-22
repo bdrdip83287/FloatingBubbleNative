@@ -22,6 +22,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -234,16 +235,22 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ✅ STEP 1: Detect fresh install and wipe Auto Backup data
+            // ✅ STEP 1: Detect fresh install
             val isFreshInstall = detectFreshInstall()
-            if (isFreshInstall) {
-                wipeSharedPreferencesExceptSettings()
-            }
 
             // ✅ STEP 2: Cleanup old legacy files
             cleanupLegacyFiles()
 
-            // ✅ STEP 3: Load notes (MediaStore only)
+            // ✅ STEP 3: Rescan notes folder BEFORE wiping prefs
+            //    যাতে MediaStore index rebuild হয় (reinstall-এর পরে দরকার)
+            rescanNotesFolder()
+
+            // ✅ STEP 4: Wipe prefs only if MediaStore has no data
+            if (isFreshInstall) {
+                wipeSharedPreferencesExceptSettings()
+            }
+
+            // ✅ STEP 5: Load notes (MediaStore → SharedPreferences fallback)
             loadNotes()
 
             createNotificationChannel()
@@ -280,11 +287,44 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ WIPE SharedPreferences (keep settings)
+    // ✅ WIPE SharedPreferences (only if MediaStore has no data)
     // ============================================================
     private fun wipeSharedPreferencesExceptSettings() {
         try {
-            prefs.edit().remove(STORAGE_NOTES_LIST).commit()
+            // ✅ MediaStore-এ notes থাকলে SharedPreferences মুছবেন না
+            val mediaStoreJson = readNotesFromMediaStore()
+            if (mediaStoreJson.isNullOrEmpty()) {
+                prefs.edit().remove(STORAGE_NOTES_LIST).commit()
+            }
+        } catch (_: Exception) {}
+    }
+
+    // ============================================================
+    // ✅ RESCAN notes folder via MediaScannerConnection
+    //    reinstall-এর পরে MediaStore index rebuild করার জন্য
+    // ============================================================
+    private fun rescanNotesFolder() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // MediaStore-এ entry থাকলে rescan দরকার নেই
+                // তবে uninstall-এর পরে entry মুছে যায়, তাই direct file rescan দরকার
+            }
+            val dir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                NOTES_BACKUP_FOLDER
+            )
+            if (!dir.exists()) return
+            val files = dir.listFiles()?.filter {
+                it.isFile && it.name.startsWith("notes_backup") && it.name.endsWith(".json")
+            } ?: return
+            if (files.isEmpty()) return
+            val paths = files.map { it.absolutePath }.toTypedArray()
+            MediaScannerConnection.scanFile(
+                this,
+                paths,
+                Array(paths.size) { "application/json" },
+                null
+            )
         } catch (_: Exception) {}
     }
 
@@ -356,10 +396,12 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ LOAD NOTES - MediaStore is THE ONLY source
+    // ✅ LOAD NOTES
+    // Priority: MediaStore → SharedPreferences → new note
     // ============================================================
     private fun loadNotes() {
         try {
+            // ✅ STEP 1: MediaStore থেকে পড়ার চেষ্টা
             val mediaStoreJson = readNotesFromMediaStore()
             if (!mediaStoreJson.isNullOrEmpty()) {
                 try {
@@ -371,11 +413,26 @@ class FloatingBubbleService : Service() {
                         saveNotesToSharedPreferences()
                         return
                     }
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
             }
 
-            // MediaStore empty → create new note
+            // ✅ STEP 2: MediaStore fail → SharedPreferences fallback
+            val prefsJson = prefs.getString(STORAGE_NOTES_LIST, null)
+            if (!prefsJson.isNullOrEmpty()) {
+                try {
+                    val type = object : TypeToken<List<NoteItem>>() {}.type
+                    val loaded: List<NoteItem> = Gson().fromJson(prefsJson, type)
+                    if (loaded.isNotEmpty()) {
+                        notesList.clear()
+                        notesList.addAll(loaded)
+                        // MediaStore-এ আবার সেভ করার চেষ্টা
+                        saveNotesToMediaStore()
+                        return
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // ✅ STEP 3: সব fail → নতুন note
             notesList.clear()
             notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             saveNotesToMediaStore()
@@ -389,15 +446,13 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ READ NOTES FROM MEDIASTORE - Version 5 (Documents folder)
-    //
+    // ✅ READ NOTES FROM MEDIASTORE
     // Uses MediaStore.Files for /Documents/ folder access
     // on Android 10+ without MANAGE_EXTERNAL_STORAGE
     // ============================================================
     private fun readNotesFromMediaStore(): String? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // ✅ Use MediaStore.Files with VOLUME_EXTERNAL_PRIMARY
                 val collection = MediaStore.Files.getContentUri(
                     MediaStore.VOLUME_EXTERNAL_PRIMARY
                 )
@@ -409,9 +464,13 @@ class FloatingBubbleService : Service() {
                     MediaStore.Files.FileColumns.RELATIVE_PATH
                 )
 
-                // ✅ Query files where RELATIVE_PATH matches our folder
-                val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("%${NOTES_BACKUP_FOLDER}%")
+                // ✅ FIX: RELATIVE_PATH + DISPLAY_NAME উভয় filter করা হয়েছে
+                val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ? AND " +
+                        "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf(
+                    "%${NOTES_BACKUP_FOLDER}%",
+                    "notes_backup%"
+                )
 
                 data class MediaFileInfo(
                     val id: Long,
@@ -445,15 +504,15 @@ class FloatingBubbleService : Service() {
                         val dateModified = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
                         val relPath = if (pathCol >= 0) cursor.getString(pathCol) ?: "" else ""
 
-                        // ✅ Check that the file is in our target folder
-                        if (!relPath.contains(NOTES_BACKUP_FOLDER)) continue
+                        // ✅ FIX: case-insensitive path check
+                        val normalizedPath = relPath.lowercase()
+                        val targetFolder = NOTES_BACKUP_FOLDER.lowercase()
+                        if (!normalizedPath.contains(targetFolder)) continue
 
-                        // ✅ Check name pattern
                         if (!name.startsWith("notes_backup") || !name.endsWith(".json")) {
                             continue
                         }
 
-                        // ✅ Read and validate content
                         try {
                             val uri = ContentUris.withAppendedId(collection, id)
                             val content = contentResolver
@@ -526,26 +585,8 @@ class FloatingBubbleService : Service() {
                     } catch (_: Exception) {}
                 }
 
-                // ✅ Rename winner to exact "notes_backup.json"
-                if (winner.name != NOTES_BACKUP_FILE) {
-                    try {
-                        val deleteUri = ContentUris.withAppendedId(collection, winner.id)
-                        contentResolver.delete(deleteUri, null, null)
-
-                        val values = ContentValues().apply {
-                            put(MediaStore.Files.FileColumns.DISPLAY_NAME, NOTES_BACKUP_FILE)
-                            put(MediaStore.Files.FileColumns.MIME_TYPE, "application/json")
-                            put(MediaStore.Files.FileColumns.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
-                        }
-                        val newUri = contentResolver.insert(collection, values)
-                        newUri?.let { target ->
-                            contentResolver.openOutputStream(target, "wt")?.use { output ->
-                                output.write(winner.content.toByteArray(Charsets.UTF_8))
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
+                // ✅ FIX: Rename বাদ দেওয়া হয়েছে (rename-এ file হারানোর ঝুঁকি আছে)
+                //    winner-এর content সরাসরি return করা হচ্ছে
                 return winner.content
 
             } else {
@@ -637,7 +678,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ SAVE NOTES TO MEDIASTORE - Version 2
+    // ✅ SAVE NOTES TO MEDIASTORE
     // Uses MediaStore.Files for Documents folder
     // ============================================================
     private fun saveNotesToMediaStore() {
@@ -655,8 +696,10 @@ class FloatingBubbleService : Service() {
                     MediaStore.Files.FileColumns.RELATIVE_PATH
                 )
 
-                val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("%${NOTES_BACKUP_FOLDER}%")
+                // ✅ FIX: RELATIVE_PATH + DISPLAY_NAME উভয় filter
+                val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ? AND " +
+                        "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("%${NOTES_BACKUP_FOLDER}%", "notes_backup%")
 
                 var exactId: Long? = null
                 val duplicates = mutableListOf<Long>()
@@ -679,7 +722,7 @@ class FloatingBubbleService : Service() {
                         val name = cursor.getString(nameCol) ?: ""
                         val relPath = if (pathCol >= 0) cursor.getString(pathCol) ?: "" else ""
 
-                        if (!relPath.contains(NOTES_BACKUP_FOLDER)) continue
+                        if (!relPath.lowercase().contains(NOTES_BACKUP_FOLDER.lowercase())) continue
 
                         if (name == NOTES_BACKUP_FILE) {
                             exactId = id
@@ -708,6 +751,7 @@ class FloatingBubbleService : Service() {
                     }
                 }
 
+                // ✅ FIX: সব duplicate delete
                 for (dupId in duplicates) {
                     try {
                         val uri = ContentUris.withAppendedId(collection, dupId)
