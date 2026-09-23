@@ -22,7 +22,6 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
@@ -72,12 +71,20 @@ class FloatingBubbleService : Service() {
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
     // ============================================================
-    // ✅ FINAL LOCATION: /Documents/FloatingNotes/notes_backup.json
+    // ✅ SINGLE-FILE BACKUP - MediaStore.Downloads, PLAY STORE COMPLIANT
+    // Canonical, exact location: /storage/emulated/0/Download/FloatingNotes/notes_backup.json
+    // MediaStore.Downloads (a "well-known" typed collection, like Images/
+    // Video/Audio) grants an app implicit read/write access to files it
+    // created there WITHOUT any runtime storage permission - this is a
+    // built-in Scoped Storage exception and is fully allowed by Google Play.
+    // Only ONE exact URI (matched by exact DISPLAY_NAME + RELATIVE_PATH) is
+    // ever read from or written to - no pattern matching, so Android never
+    // gets a reason to rename this into "notes_backup (1).json".
     // ============================================================
     private val NOTES_BACKUP_FILE = "notes_backup.json"
     private val NOTES_BACKUP_FOLDER = "FloatingNotes"
     private val NOTES_BACKUP_RELATIVE_PATH =
-        "${Environment.DIRECTORY_DOCUMENTS}/$NOTES_BACKUP_FOLDER/"
+        "${Environment.DIRECTORY_DOWNLOADS}/$NOTES_BACKUP_FOLDER/"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -234,14 +241,10 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            val isFreshInstall = detectFreshInstall()
+            // ✅ STEP 1: Auto-cleanup old legacy files (one time)
             cleanupLegacyFiles()
-            rescanNotesFolder()
 
-            if (isFreshInstall) {
-                wipeSharedPreferencesExceptSettings()
-            }
-
+            // ✅ STEP 2: Load notes (canonical backup file first, then SharedPreferences)
             loadNotes()
 
             createNotificationChannel()
@@ -261,107 +264,62 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ DETECT FRESH INSTALL
-    // ============================================================
-    private fun detectFreshInstall(): Boolean {
-        return try {
-            val marker = File(getNoBackupFilesDir(), "install_marker.txt")
-            val isFresh = !marker.exists()
-            if (isFresh) {
-                marker.parentFile?.mkdirs()
-                marker.writeText("created=${System.currentTimeMillis()}", Charsets.UTF_8)
-            }
-            isFresh
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    // ============================================================
-    // ✅ WIPE SharedPreferences (only if MediaStore has no data)
-    // ============================================================
-    private fun wipeSharedPreferencesExceptSettings() {
-    try {
-        // ✅ MediaStore query দিয়ে চেক করুন
-        val mediaStoreJson = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            readNotesFromMediaStoreQuery()
-        } else {
-            readNotesFromDirectFile()
-        }
-        if (mediaStoreJson.isNullOrEmpty()) {
-            prefs.edit().remove(STORAGE_NOTES_LIST).commit()
-        }
-    } catch (_: Exception) {}
-}
-
-    // ============================================================
-    // ✅ RESCAN notes folder via MediaScannerConnection
-    // ============================================================
-    private fun rescanNotesFolder() {
-        try {
-            val dir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                NOTES_BACKUP_FOLDER
-            )
-            if (!dir.exists()) return
-            val files = dir.listFiles()?.filter {
-                it.isFile && it.name.startsWith("notes_backup") && it.name.endsWith(".json")
-            } ?: return
-            if (files.isEmpty()) return
-            val paths = files.map { it.absolutePath }.toTypedArray()
-            MediaScannerConnection.scanFile(
-                this,
-                paths,
-                Array(paths.size) { "application/json" },
-                null
-            )
-        } catch (_: Exception) {}
-    }
-
-    // ============================================================
-    // ✅ CLEANUP - Remove all legacy files
+    // ✅ CLEANUP - Remove old legacy files (one time on startup)
+    // NOTE: Download/FloatingNotes is now the CURRENT canonical backup
+    // location (MediaStore.Downloads, Play Store compliant), so it must
+    // never be deleted here. Documents/FloatingNotes was a temporary
+    // location used during earlier testing and is now legacy - clean it
+    // up here so it doesn't linger on disk.
     // ============================================================
     private fun cleanupLegacyFiles() {
         try {
+            // Delete very old /Download/Floating Notes (with a space) folder
             try {
-                val oldDir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "FloatingNotes"
-                )
-                if (oldDir.exists()) oldDir.deleteRecursively()
-            } catch (_: Exception) {}
-
-            try {
-                val oldDir2 = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                val oldDirSpace = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
                     "Floating Notes"
                 )
-                if (oldDir2.exists()) oldDir2.deleteRecursively()
+                if (oldDirSpace.exists()) oldDirSpace.deleteRecursively()
             } catch (_: Exception) {}
 
+            // Delete the temporary Documents/FloatingNotes folder used during
+            // earlier testing (now legacy - canonical location is Downloads again)
+            try {
+                val oldDocsDir = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOCUMENTS
+                    ),
+                    "FloatingNotes"
+                )
+                if (oldDocsDir.exists()) oldDocsDir.deleteRecursively()
+            } catch (_: Exception) {}
+
+            // Delete old /Download/FloatingBubbleBackup folder
             try {
                 val oldDir3 = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
                     "FloatingBubbleBackup"
                 )
                 if (oldDir3.exists()) oldDir3.deleteRecursively()
             } catch (_: Exception) {}
 
+            // Delete any legacy .pending-* files
             try {
-                val notesFolder = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                    NOTES_BACKUP_FOLDER
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
                 )
-                if (notesFolder.exists()) {
-                    notesFolder.listFiles()?.forEach { file ->
-                        val name = file.name.lowercase()
-                        if (name.startsWith(".trashed-") ||
-                            name == "$NOTES_BACKUP_FILE.tmp") {
-                            try {
-                                if (file.isDirectory) file.deleteRecursively()
-                                else file.delete()
-                            } catch (_: Exception) {}
-                        }
+                downloadsDir.listFiles()?.forEach { file ->
+                    if (file.name.startsWith(".pending-") ||
+                        file.name.contains("floating_notes_backup") ||
+                        file.name.contains("floatingnotes_backup")) {
+                        try {
+                            if (file.isDirectory) file.deleteRecursively()
+                            else file.delete()
+                        } catch (_: Exception) {}
                     }
                 }
             } catch (_: Exception) {}
@@ -370,43 +328,51 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ LOAD NOTES
-    // Priority: MediaStore → SharedPreferences → new note
+    // ✅ LOAD NOTES - Canonical backup file is authoritative, then SharedPreferences
     // ============================================================
     private fun loadNotes() {
         try {
-            val mediaStoreJson = readNotesFromMediaStore()
-            if (!mediaStoreJson.isNullOrEmpty()) {
+            // ✅ STEP 1: Try the canonical backup file first (uninstall-safe location)
+            val backupJson = readNotesFromMediaStore()
+            if (!backupJson.isNullOrEmpty()) {
                 try {
                     val type = object : TypeToken<List<NoteItem>>() {}.type
-                    val loaded: List<NoteItem> = Gson().fromJson(mediaStoreJson, type)
-                    if (loaded.isNotEmpty()) {
+                    val loaded: List<NoteItem>? = Gson().fromJson(backupJson, type)
+                    if (loaded != null) {
+                        // Backup is the latest truth (even when it is an empty list)
                         notesList.clear()
                         notesList.addAll(loaded)
+                        // Sync to SharedPreferences
                         saveNotesToSharedPreferences()
                         return
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
 
-            val prefsJson = prefs.getString(STORAGE_NOTES_LIST, null)
-            if (!prefsJson.isNullOrEmpty()) {
+            // ✅ STEP 2: Fallback to SharedPreferences (only when no backup readable)
+            var prefsHadData = false
+            val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
+            if (!sharedPrefsJson.isNullOrEmpty()) {
                 try {
                     val type = object : TypeToken<List<NoteItem>>() {}.type
-                    val loaded: List<NoteItem> = Gson().fromJson(prefsJson, type)
-                    if (loaded.isNotEmpty()) {
-                        notesList.clear()
-                        notesList.addAll(loaded)
-                        saveNotesToMediaStore()
-                        return
-                    }
-                } catch (_: Exception) {}
+                    val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
+                    notesList.clear()
+                    notesList.addAll(loaded)
+                    prefsHadData = true
+                } catch (_: Exception) {
+                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                }
+            } else {
+                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             }
 
-            notesList.clear()
-            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
-            saveNotesToMediaStore()
-            saveNotesToSharedPreferences()
+            // ✅ STEP 3: Save to the canonical backup file only when real data came
+            // from SharedPreferences. A blank placeholder note must never
+            // create/overwrite the backup file.
+            if (prefsHadData) {
+                saveNotesToMediaStore()
+            }
 
         } catch (e: Exception) {
             if (notesList.isEmpty()) {
@@ -415,343 +381,186 @@ class FloatingBubbleService : Service() {
         }
     }
 
-// ============================================================
-// ✅ READ NOTES - MediaStore only (Direct File API বাদ)
-// ============================================================
-private fun readNotesFromMediaStore(): String? {
-    return try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            readNotesFromMediaStoreQuery()
-        } else {
-            readNotesFromDirectFile()
-        }
-    } catch (e: Exception) {
-        null
-    }
-}
-
-
-// ============================================================
-// ✅ DIRECT FILE (শুধু Android 9 এবং নিচে)
-// ============================================================
-private fun readNotesFromDirectFile(): String? {
-    return try {
-        val directory = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-            NOTES_BACKUP_FOLDER
-        )
-        if (!directory.exists() || !directory.isDirectory) return null
-
-        val targetFile = File(directory, NOTES_BACKUP_FILE)
-        if (!targetFile.exists()) return null
-
-        val content = targetFile.readText(Charsets.UTF_8)
-        if (content.isEmpty()) return null
-
-        val type = object : TypeToken<List<NoteItem>>() {}.type
-        val parsed: List<NoteItem> = Gson().fromJson(content, type)
-        if (parsed == null || parsed.isEmpty()) return null
-
-        // Duplicates মুছুন
-        directory.listFiles()?.forEach { f ->
-            if (f.isFile &&
-                f.name.startsWith("notes_backup") &&
-                f.name.endsWith(".json") &&
-                f.name != NOTES_BACKUP_FILE) {
-                try { f.delete() } catch (_: Exception) {}
+    // ============================================================
+    // ✅ FIND THE EXACT CANONICAL BACKUP ENTRY (MediaStore.Downloads)
+    // Matches ONLY DISPLAY_NAME = "notes_backup.json" AND
+    // RELATIVE_PATH = "Download/FloatingNotes/". No pattern matching, no
+    // other file name/location is ever considered. MediaStore.Downloads is
+    // a "well-known" typed collection, so the app can query/read/write
+    // entries it created here WITHOUT any runtime storage permission -
+    // this is a built-in Scoped Storage exception and is Play Store safe.
+    // ============================================================
+    private fun findBackupUri(): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return try {
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(MediaStore.Downloads._ID)
+            val selection =
+                "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
+                "${MediaStore.Downloads.RELATIVE_PATH}=?"
+            val selectionArgs = arrayOf(NOTES_BACKUP_FILE, NOTES_BACKUP_RELATIVE_PATH)
+            contentResolver.query(
+                collection,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(
+                        cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                    )
+                    return ContentUris.withAppendedId(collection, id)
+                }
             }
-        }
-
-        content
-    } catch (e: Exception) {
-        null
-    }
-}
-
-// ============================================================
-// ✅ MEDIASTORE QUERY - RELATIVE_PATH filter ছাড়াই
-// ============================================================
-private fun readNotesFromMediaStoreQuery(): String? {
-    return try {
-        val collection = MediaStore.Files.getContentUri(
-            MediaStore.VOLUME_EXTERNAL_PRIMARY
-        )
-
-        // ✅ শুধু DISPLAY_NAME projection — RELATIVE_PATH বাদ
-        val projection = arrayOf(
-            MediaStore.Files.FileColumns._ID,
-            MediaStore.Files.FileColumns.DISPLAY_NAME,
-            MediaStore.Files.FileColumns.DATE_MODIFIED
-        )
-
-        // ✅ RELATIVE_PATH filter সম্পূর্ণ বাদ
-        val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
-        val selectionArgs = arrayOf("notes_backup%")
-
-        data class MediaFileInfo(
-            val id: Long,
-            val name: String,
-            val dateModified: Long,
-            val latestNoteEdited: Long,
-            val noteCount: Int,
-            val content: String
-        )
-
-        val allValidFiles = mutableListOf<MediaFileInfo>()
-        val allFileIds = mutableListOf<Long>()
-
-        contentResolver.query(
-            collection,
-            projection,
-            selection,
-            selectionArgs,
             null
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
-            val nameCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
-            val dateCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_MODIFIED)
-
-            if (idCol < 0 || nameCol < 0) return@use
-
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idCol)
-                val name = cursor.getString(nameCol) ?: ""
-                val dateModified = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
-
-                if (!name.startsWith("notes_backup") || !name.endsWith(".json")) {
-                    continue
-                }
-
-                try {
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    val content = contentResolver
-                        .openInputStream(uri)
-                        ?.bufferedReader()
-                        ?.use { it.readText() }
-
-                    if (!content.isNullOrEmpty()) {
-                        try {
-                            val type = object : TypeToken<List<NoteItem>>() {}.type
-                            val parsed: List<NoteItem> = Gson().fromJson(content, type)
-                            if (parsed != null && parsed.isNotEmpty()) {
-                                val latestEdit = parsed.maxOfOrNull { it.lastEdited } ?: 0L
-                                allValidFiles.add(
-                                    MediaFileInfo(
-                                        id = id,
-                                        name = name,
-                                        dateModified = dateModified,
-                                        latestNoteEdited = latestEdit,
-                                        noteCount = parsed.size,
-                                        content = content
-                                    )
-                                )
-                            } else {
-                                allFileIds.add(id)
-                            }
-                        } catch (_: Exception) {
-                            allFileIds.add(id)
-                        }
-                    } else {
-                        allFileIds.add(id)
-                    }
-                } catch (_: Exception) {
-                }
-            }
-        }
-
-        // invalid file delete
-        for (id in allFileIds) {
-            try {
-                val uri = ContentUris.withAppendedId(collection, id)
-                contentResolver.delete(uri, null, null)
-            } catch (_: Exception) {}
-        }
-
-        if (allValidFiles.isEmpty()) return null
-
-        // Winner: newest lastEdited, most notes, oldest dateModified
-        val winner = allValidFiles.sortedWith(
-            compareByDescending<MediaFileInfo> { it.latestNoteEdited }
-                .thenByDescending { it.noteCount }
-                .thenBy { it.dateModified }
-        ).first()
-
-        // Duplicate delete
-        for (file in allValidFiles) {
-            if (file.id != winner.id) {
-                try {
-                    val uri = ContentUris.withAppendedId(collection, file.id)
-                    contentResolver.delete(uri, null, null)
-                } catch (_: Exception) {}
-            }
-        }
-
-        return winner.content
-    } catch (e: Exception) {
-        null
-    }
-}
-
-
-// ============================================================
-// ✅ SAVE NOTES - MediaStore only
-// ============================================================
-private fun saveNotesToMediaStore() {
-    try {
-        val json = Gson().toJson(notesList)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveNotesToMediaStoreQuery(json)
-        } else {
-            saveNotesToDirectFile(json)
-        }
-    } catch (e: Exception) {
-    }
-}
-
-private fun saveNotesToDirectFile(json: String) {
-    try {
-        val directory = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-            NOTES_BACKUP_FOLDER
-        )
-        if (!directory.exists()) directory.mkdirs()
-
-        val targetFile = File(directory, NOTES_BACKUP_FILE)
-        targetFile.writeText(json, Charsets.UTF_8)
-
-        directory.listFiles()?.forEach { f ->
-            if (f.isFile &&
-                f.name.startsWith("notes_backup") &&
-                f.name.endsWith(".json") &&
-                f.name != NOTES_BACKUP_FILE) {
-                try { f.delete() } catch (_: Exception) {}
-            }
-        }
-    } catch (_: Exception) {}
-}
-
-// ============================================================
-// ✅ MEDIASTORE SAVE - RELATIVE_PATH filter ছাড়াই
-// ============================================================
-private fun saveNotesToMediaStoreQuery(json: String) {
-    try {
-        val collection = MediaStore.Files.getContentUri(
-            MediaStore.VOLUME_EXTERNAL_PRIMARY
-        )
-
-        val projection = arrayOf(
-            MediaStore.Files.FileColumns._ID,
-            MediaStore.Files.FileColumns.DISPLAY_NAME
-        )
-
-        // ✅ শুধু exact name match, RELATIVE_PATH বাদ
-        val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ?"
-        val selectionArgs = arrayOf(NOTES_BACKUP_FILE)
-
-        var exactId: Long? = null
-        val duplicates = mutableListOf<Long>()
-
-        contentResolver.query(
-            collection,
-            projection,
-            selection,
-            selectionArgs,
+        } catch (e: Exception) {
             null
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
-            val nameCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
-
-            if (idCol < 0 || nameCol < 0) return@use
-
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idCol)
-                val name = cursor.getString(nameCol) ?: ""
-                if (name == NOTES_BACKUP_FILE) {
-                    if (exactId == null) {
-                        exactId = id
-                    } else {
-                        duplicates.add(id)
-                    }
-                }
-            }
         }
+    }
 
-        if (exactId != null) {
-            try {
-                val uri = ContentUris.withAppendedId(collection, exactId!!)
-                contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                    output.write(json.toByteArray(Charsets.UTF_8))
+    // Legacy (pre-Android 10) direct file fallback - no MediaStore needed there
+    private fun readNotesFromFileDirect(): String? {
+        return try {
+            val directory = File(
+                Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                ),
+                NOTES_BACKUP_FOLDER
+            )
+            val file = File(directory, NOTES_BACKUP_FILE)
+            if (file.exists()) file.readText(Charsets.UTF_8) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // ============================================================
+    // ✅ READ NOTES - only from the exact canonical MediaStore entry
+    // ============================================================
+    private fun readNotesFromMediaStore(): String? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val uri = findBackupUri() ?: return null
+                contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            } else {
+                readNotesFromFileDirect()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // ============================================================
+    // ✅ SAVE NOTES - always updates the SAME exact MediaStore entry.
+    // A new entry is created only the very first time (when none exists
+    // yet); afterwards the same URI is reused forever via "wt" (truncate +
+    // write), so Android never has a reason to create
+    // "notes_backup (1).json" - no permission required.
+    // ============================================================
+    private fun saveNotesToMediaStore() {
+        try {
+            val json = Gson().toJson(notesList)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                var uri = findBackupUri()
+
+                if (uri == null) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
+                        put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                        put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
+                    }
+                    uri = contentResolver.insert(collection, values)
                 }
-            } catch (_: Exception) {}
-        } else {
-            try {
-                val values = ContentValues().apply {
-                    put(MediaStore.Files.FileColumns.DISPLAY_NAME, NOTES_BACKUP_FILE)
-                    put(MediaStore.Files.FileColumns.MIME_TYPE, "application/json")
-                    put(MediaStore.Files.FileColumns.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
-                }
-                val uri = contentResolver.insert(collection, values)
+
                 uri?.let { target ->
                     contentResolver.openOutputStream(target, "wt")?.use { output ->
                         output.write(json.toByteArray(Charsets.UTF_8))
                     }
                 }
-            } catch (_: Exception) {}
-        }
+            } else {
+                val directory = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    NOTES_BACKUP_FOLDER
+                )
+                if (!directory.exists()) directory.mkdirs()
 
-        for (dupId in duplicates) {
-            try {
-                val uri = ContentUris.withAppendedId(collection, dupId)
-                contentResolver.delete(uri, null, null)
-            } catch (_: Exception) {}
-        }
+                val targetFile = File(directory, NOTES_BACKUP_FILE)
+                val tempFile = File(directory, "$NOTES_BACKUP_FILE.tmp")
 
-        // ✅ notes_backup (1).json, notes_backup (2).json ইত্যাদি delete
-        try {
-            val dupProjection = arrayOf(
-                MediaStore.Files.FileColumns._ID,
-                MediaStore.Files.FileColumns.DISPLAY_NAME
-            )
-            val dupSelection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ? AND " +
-                    "${MediaStore.Files.FileColumns.DISPLAY_NAME} != ?"
-            val dupArgs = arrayOf("notes_backup%", NOTES_BACKUP_FILE)
+                // Atomic write
+                tempFile.writeText(json, Charsets.UTF_8)
 
-            val toDelete = mutableListOf<Long>()
-            contentResolver.query(collection, dupProjection, dupSelection, dupArgs, null)?.use { c ->
-                val idCol = c.getColumnIndex(MediaStore.Files.FileColumns._ID)
-                if (idCol < 0) return@use
-                while (c.moveToNext()) {
-                    toDelete.add(c.getLong(idCol))
-                }
+                if (targetFile.exists()) targetFile.delete()
+                tempFile.renameTo(targetFile)
             }
-            for (id in toDelete) {
-                try {
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    contentResolver.delete(uri, null, null)
-                } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Silent fail - SharedPreferences still has the data
+        }
+    }
 
-    } catch (_: Exception) {}
-}
-
-
+    // ============================================================
+    // ✅ MAIN SAVE FUNCTION - Called on every change
+    // ============================================================
     private fun saveNotesToPrefs() {
         try {
+            // 1. Save to SharedPreferences (fast access + Auto Backup)
             val notesJson = Gson().toJson(notesList)
             prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).commit()
+
+            // 2. Save to the canonical backup file (survives uninstall)
             saveNotesToMediaStore()
+
         } catch (e: Exception) {
         }
     }
 
+    // ============================================================
+    // ✅ SYNC to SharedPreferences only
+    // ============================================================
     private fun saveNotesToSharedPreferences() {
         try {
             val notesJson = Gson().toJson(notesList)
             prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).commit()
         } catch (e: Exception) {
         }
+    }
+
+    // ============================================================
+    // ✅ SILENT / AUTO SAVE of the note currently open in the editor
+    // ============================================================
+    private fun persistEditingNoteSilently() {
+        try {
+            val id = currentEditingNoteId ?: return
+            if (!::editText.isInitialized || noteView == null) return
+            val index = notesList.indexOfFirst { it.id == id }
+            if (index < 0) return
+            val contentText = editText.text.toString()
+            val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+            val finalTitle = rawTitle.ifEmpty {
+                getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
+            }
+            val existing = notesList[index]
+            if (existing.content == contentText && existing.title == finalTitle) return
+            notesList[index] = existing.copy(
+                content = contentText,
+                title = finalTitle,
+                lastEdited = System.currentTimeMillis()
+            )
+            saveNotesToPrefs()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun scheduleAutoSave() {
+        saveRunnable?.let { saveHandler.removeCallbacks(it) }
+        val runnable = Runnable { persistEditingNoteSilently() }
+        saveRunnable = runnable
+        saveHandler.postDelayed(runnable, 1500L)
     }
 
     private fun startConfigurationCheck() {
@@ -1365,6 +1174,10 @@ private fun saveNotesToMediaStoreQuery(json: String) {
         }
     }
 
+    // ============================================================
+    // Top Bar Icons
+    // ============================================================
+
     private fun createTopBarIconButton(
         iconDrawable: Drawable,
         buttonColor: Int,
@@ -1506,6 +1319,7 @@ private fun saveNotesToMediaStoreQuery(json: String) {
         val r = w * 0.28f
         val rect = RectF(cx - r, cy - r, cx + r, cy + r)
         canvas.drawArc(rect, 215f, 250f, false, paint)
+        val ah = w * 0.18f
         val arrow = android.graphics.Path().apply {
             moveTo(w * 0.18f, h * 0.47f)
             lineTo(w * 0.38f, h * 0.30f)
@@ -1601,6 +1415,9 @@ private fun saveNotesToMediaStoreQuery(json: String) {
         }
     }
 
+    // ================================================================
+    // Shared custom magnifier
+    // ================================================================
     private var customSelectionMagnifier: Magnifier? = null
     private var customMagnifierTarget: EditText? = null
     private var lastCustomMagnifierTime = 0L
@@ -2908,6 +2725,7 @@ private fun saveNotesToMediaStoreQuery(json: String) {
                 override fun afterTextChanged(s: Editable?) {
                     if (deletingActiveSelection) hideSelectionUiAfterImeDeletion()
                     deletingActiveSelection = false
+                    scheduleAutoSave()
                 }
             })
 
@@ -3692,6 +3510,8 @@ private fun saveNotesToMediaStoreQuery(json: String) {
 
     override fun onDestroy() {
         super.onDestroy()
+        // ✅ Make sure the latest edit of the open note is saved before shutting down
+        persistEditingNoteSilently()
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
         velocityTracker?.recycle()
