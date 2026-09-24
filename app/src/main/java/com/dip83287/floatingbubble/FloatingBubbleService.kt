@@ -8,8 +8,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.ClipboardManager
-import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -25,7 +23,6 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
-import android.provider.MediaStore
 import android.text.Editable
 import android.text.InputType
 import android.text.Layout
@@ -69,22 +66,6 @@ class FloatingBubbleService : Service() {
 
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
-
-    // ============================================================
-    // ✅ SINGLE-FILE BACKUP - MediaStore.Downloads, PLAY STORE COMPLIANT
-    // Canonical, exact location: /storage/emulated/0/Download/FloatingNotes/notes_backup.json
-    // MediaStore.Downloads (a "well-known" typed collection, like Images/
-    // Video/Audio) grants an app implicit read/write access to files it
-    // created there WITHOUT any runtime storage permission - this is a
-    // built-in Scoped Storage exception and is fully allowed by Google Play.
-    // Only ONE exact URI (matched by exact DISPLAY_NAME + RELATIVE_PATH) is
-    // ever read from or written to - no pattern matching, so Android never
-    // gets a reason to rename this into "notes_backup (1).json".
-    // ============================================================
-    private val NOTES_BACKUP_FILE = "notes_backup.json"
-    private val NOTES_BACKUP_FOLDER = "FloatingNotes"
-    private val NOTES_BACKUP_RELATIVE_PATH =
-        "${Environment.DIRECTORY_DOWNLOADS}/$NOTES_BACKUP_FOLDER/"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -241,11 +222,15 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ✅ STEP 1: Auto-cleanup old legacy files (one time)
-            cleanupLegacyFiles()
-
-            // ✅ STEP 2: Load notes (canonical backup file first, then SharedPreferences)
+            // ✅ Load notes purely from SharedPreferences. Android's Auto Backup
+            // (backed by the user's Google account) keeps bubble_prefs.xml in
+            // sync across uninstall/reinstall automatically - see
+            // data_extraction_rules.xml / backup_rules.xml.
             loadNotes()
+
+            // ✅ One-time cleanup of old external-storage backup folders used
+            // by earlier versions of this app (no longer used or needed).
+            cleanupLegacyFiles()
 
             createNotificationChannel()
             startForeground(1001, createNotification())
@@ -264,54 +249,34 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ CLEANUP - Remove old legacy files (one time on startup)
-    // NOTE: Download/FloatingNotes is now the CURRENT canonical backup
-    // location (MediaStore.Downloads, Play Store compliant), so it must
-    // never be deleted here. Documents/FloatingNotes was a temporary
-    // location used during earlier testing and is now legacy - clean it
-    // up here so it doesn't linger on disk.
+    // ✅ CLEANUP - Remove old external-storage backup folders from earlier
+    // versions of this app (Downloads/Documents based approaches). These are
+    // no longer read from or written to; SharedPreferences + Android Auto
+    // Backup is now the single source of truth.
     // ============================================================
     private fun cleanupLegacyFiles() {
         try {
-            // Delete very old /Download/Floating Notes (with a space) folder
-            try {
-                val oldDirSpace = File(
-                    Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS
-                    ),
-                    "Floating Notes"
-                )
-                if (oldDirSpace.exists()) oldDirSpace.deleteRecursively()
-            } catch (_: Exception) {}
-
-            // Delete the temporary Documents/FloatingNotes folder used during
-            // earlier testing (now legacy - canonical location is Downloads again)
-            try {
-                val oldDocsDir = File(
-                    Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOCUMENTS
-                    ),
-                    "FloatingNotes"
-                )
-                if (oldDocsDir.exists()) oldDocsDir.deleteRecursively()
-            } catch (_: Exception) {}
-
-            // Delete old /Download/FloatingBubbleBackup folder
-            try {
-                val oldDir3 = File(
-                    Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS
-                    ),
-                    "FloatingBubbleBackup"
-                )
-                if (oldDir3.exists()) oldDir3.deleteRecursively()
-            } catch (_: Exception) {}
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+            )
+            val documentsDir = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOCUMENTS
+            )
+            val legacyDirs = listOf(
+                File(downloadsDir, "Floating Notes"),
+                File(downloadsDir, "FloatingNotes"),
+                File(downloadsDir, "FloatingBubbleBackup"),
+                File(documentsDir, "FloatingNotes")
+            )
+            legacyDirs.forEach { dir ->
+                try {
+                    if (dir.exists()) dir.deleteRecursively()
+                } catch (_: Exception) {
+                }
+            }
 
             // Delete any legacy .pending-* files
             try {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOWNLOADS
-                )
                 downloadsDir.listFiles()?.forEach { file ->
                     if (file.name.startsWith(".pending-") ||
                         file.name.contains("floating_notes_backup") ||
@@ -328,30 +293,12 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ LOAD NOTES - Canonical backup file is authoritative, then SharedPreferences
+    // ✅ LOAD NOTES - SharedPreferences is the single source of truth.
+    // Android Auto Backup restores bubble_prefs.xml automatically on
+    // reinstall, so no external file access is needed at all.
     // ============================================================
     private fun loadNotes() {
         try {
-            // ✅ STEP 1: Try the canonical backup file first (uninstall-safe location)
-            val backupJson = readNotesFromMediaStore()
-            if (!backupJson.isNullOrEmpty()) {
-                try {
-                    val type = object : TypeToken<List<NoteItem>>() {}.type
-                    val loaded: List<NoteItem>? = Gson().fromJson(backupJson, type)
-                    if (loaded != null) {
-                        // Backup is the latest truth (even when it is an empty list)
-                        notesList.clear()
-                        notesList.addAll(loaded)
-                        // Sync to SharedPreferences
-                        saveNotesToSharedPreferences()
-                        return
-                    }
-                } catch (_: Exception) {
-                }
-            }
-
-            // ✅ STEP 2: Fallback to SharedPreferences (only when no backup readable)
-            var prefsHadData = false
             val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
             if (!sharedPrefsJson.isNullOrEmpty()) {
                 try {
@@ -359,20 +306,28 @@ class FloatingBubbleService : Service() {
                     val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
                     notesList.clear()
                     notesList.addAll(loaded)
-                    prefsHadData = true
+                    return
                 } catch (_: Exception) {
-                    notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+                    // fall through to migration / default note below
                 }
-            } else {
-                notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             }
 
-            // ✅ STEP 3: Save to the canonical backup file only when real data came
-            // from SharedPreferences. A blank placeholder note must never
-            // create/overwrite the backup file.
-            if (prefsHadData) {
-                saveNotesToMediaStore()
+            // No SharedPreferences data yet. Best-effort one-time migration
+            // from the old external-storage backup file used by earlier
+            // versions of this app, for people updating in place (this only
+            // works on an in-place update, not a fresh reinstall, since that
+            // storage grant is revoked on uninstall - which is exactly why
+            // we moved to Auto Backup).
+            val migrated = tryMigrateFromLegacyBackupFile()
+            if (!migrated.isNullOrEmpty()) {
+                notesList.clear()
+                notesList.addAll(migrated)
+                saveNotesToPrefs()
+                return
             }
+
+            notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
+            saveNotesToPrefs()
 
         } catch (e: Exception) {
             if (notesList.isEmpty()) {
@@ -382,147 +337,46 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ FIND THE EXACT CANONICAL BACKUP ENTRY (MediaStore.Downloads)
-    // Matches ONLY DISPLAY_NAME = "notes_backup.json" AND
-    // RELATIVE_PATH = "Download/FloatingNotes/". No pattern matching, no
-    // other file name/location is ever considered. MediaStore.Downloads is
-    // a "well-known" typed collection, so the app can query/read/write
-    // entries it created here WITHOUT any runtime storage permission -
-    // this is a built-in Scoped Storage exception and is Play Store safe.
+    // ✅ ONE-TIME MIGRATION - best-effort read of the old backup file from
+    // earlier versions of this app (Downloads or Documents based). Silently
+    // returns null on any failure; never required for normal operation.
     // ============================================================
-    private fun findBackupUri(): Uri? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+    private fun tryMigrateFromLegacyBackupFile(): List<NoteItem>? {
         return try {
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val projection = arrayOf(MediaStore.Downloads._ID)
-            val selection =
-                "${MediaStore.Downloads.DISPLAY_NAME}=? AND " +
-                "${MediaStore.Downloads.RELATIVE_PATH}=?"
-            val selectionArgs = arrayOf(NOTES_BACKUP_FILE, NOTES_BACKUP_RELATIVE_PATH)
-            contentResolver.query(
-                collection,
-                projection,
-                selection,
-                selectionArgs,
-                null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val id = cursor.getLong(
-                        cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
-                    )
-                    return ContentUris.withAppendedId(collection, id)
-                }
-            }
-            null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // Legacy (pre-Android 10) direct file fallback - no MediaStore needed there
-    private fun readNotesFromFileDirect(): String? {
-        return try {
-            val directory = File(
-                Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOWNLOADS
+            val legacyFileName = "notes_backup.json"
+            val candidates = listOf(
+                File(
+                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "FloatingNotes"),
+                    legacyFileName
                 ),
-                NOTES_BACKUP_FOLDER
-            )
-            val file = File(directory, NOTES_BACKUP_FILE)
-            if (file.exists()) file.readText(Charsets.UTF_8) else null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // ============================================================
-    // ✅ READ NOTES - only from the exact canonical MediaStore entry
-    // ============================================================
-    private fun readNotesFromMediaStore(): String? {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val uri = findBackupUri() ?: return null
-                contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-            } else {
-                readNotesFromFileDirect()
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // ============================================================
-    // ✅ SAVE NOTES - always updates the SAME exact MediaStore entry.
-    // A new entry is created only the very first time (when none exists
-    // yet); afterwards the same URI is reused forever via "wt" (truncate +
-    // write), so Android never has a reason to create
-    // "notes_backup (1).json" - no permission required.
-    // ============================================================
-    private fun saveNotesToMediaStore() {
-        try {
-            val json = Gson().toJson(notesList)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                var uri = findBackupUri()
-
-                if (uri == null) {
-                    val values = ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, NOTES_BACKUP_FILE)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                        put(MediaStore.Downloads.RELATIVE_PATH, NOTES_BACKUP_RELATIVE_PATH)
-                    }
-                    uri = contentResolver.insert(collection, values)
-                }
-
-                uri?.let { target ->
-                    contentResolver.openOutputStream(target, "wt")?.use { output ->
-                        output.write(json.toByteArray(Charsets.UTF_8))
-                    }
-                }
-            } else {
-                val directory = File(
-                    Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS
-                    ),
-                    NOTES_BACKUP_FOLDER
+                File(
+                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "FloatingNotes"),
+                    legacyFileName
                 )
-                if (!directory.exists()) directory.mkdirs()
-
-                val targetFile = File(directory, NOTES_BACKUP_FILE)
-                val tempFile = File(directory, "$NOTES_BACKUP_FILE.tmp")
-
-                // Atomic write
-                tempFile.writeText(json, Charsets.UTF_8)
-
-                if (targetFile.exists()) targetFile.delete()
-                tempFile.renameTo(targetFile)
+            )
+            for (file in candidates) {
+                if (file.exists()) {
+                    val json = file.readText(Charsets.UTF_8)
+                    if (json.isNotBlank()) {
+                        val type = object : TypeToken<List<NoteItem>>() {}.type
+                        val loaded: List<NoteItem>? = Gson().fromJson(json, type)
+                        if (loaded != null) return loaded
+                    }
+                }
             }
+            null
         } catch (e: Exception) {
-            // Silent fail - SharedPreferences still has the data
+            null
         }
     }
 
     // ============================================================
-    // ✅ MAIN SAVE FUNCTION - Called on every change
+    // ✅ MAIN SAVE FUNCTION - Called on every change. SharedPreferences is
+    // the only storage target; Android's Auto Backup mechanism takes care of
+    // persisting bubble_prefs.xml to the user's Google account periodically
+    // and restoring it automatically after a reinstall.
     // ============================================================
     private fun saveNotesToPrefs() {
-        try {
-            // 1. Save to SharedPreferences (fast access + Auto Backup)
-            val notesJson = Gson().toJson(notesList)
-            prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).commit()
-
-            // 2. Save to the canonical backup file (survives uninstall)
-            saveNotesToMediaStore()
-
-        } catch (e: Exception) {
-        }
-    }
-
-    // ============================================================
-    // ✅ SYNC to SharedPreferences only
-    // ============================================================
-    private fun saveNotesToSharedPreferences() {
         try {
             val notesJson = Gson().toJson(notesList)
             prefs.edit().putString(STORAGE_NOTES_LIST, notesJson).commit()
