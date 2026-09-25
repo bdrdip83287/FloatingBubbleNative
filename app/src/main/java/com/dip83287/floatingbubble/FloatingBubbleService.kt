@@ -46,7 +46,7 @@ class FloatingBubbleService : Service() {
     private val BUBBLE_COLOR = "#808080"
     private val NOTEPAD_BG_COLOR = "#FFF8DC"
     private val BUBBLE_ICON = "📝"
-    private val BUBBLE_SIZE = 110
+    private val BUBBLE_SIZE = 111
     private val DELETE_ZONE_SIZE = 110
     private val HIDDEN_WIDTH = (BUBBLE_SIZE * 0.1f).toInt()
 
@@ -180,17 +180,6 @@ class FloatingBubbleService : Service() {
         if (hasLiveSelection || hasRememberedSelection) {
             hideSelectionUiAfterImeDeletion()
         }
-    }
-
-    // ✅ NEW: When user types while a selection exists, hide handles and action bar
-    private fun hideSelectionUiAfterTyping() {
-        suppressSelectionUiUntil = android.os.SystemClock.uptimeMillis() + 600L
-        currentSelectedText = ""
-        lastNonEmptySelectionStart = -1
-        lastNonEmptySelectionEnd = -1
-        isActionBarTemporarilyHidden = false
-        hideSelectionHandles()
-        hideFloatingActionBar()
     }
 
     private val handleUpdateDebounceHandler = Handler(Looper.getMainLooper())
@@ -527,19 +516,15 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
-    // ============================================================
-    // ✅ CHANGE #1: Default bubble position on RIGHT side
-    // ============================================================
     private fun getInitialBubblePosition(): Pair<Int, Int> {
         val screenWidth = resources.displayMetrics.widthPixels
         val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
         return if (isFirstTime) {
-            // ✅ প্রথমবার: স্ক্রিনের ডান পাশে
             val defaultX = screenWidth - BUBBLE_SIZE - 20
             val defaultY = 150
             Pair(defaultX, defaultY)
         } else {
-            val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE - 20)
+            val savedX = prefs.getInt(KEY_BUBBLE_X, screenWidth - BUBBLE_SIZE + HIDDEN_WIDTH)
             val savedY = prefs.getInt(KEY_BUBBLE_Y, 150)
             Pair(savedX, savedY)
         }
@@ -1548,9 +1533,6 @@ class FloatingBubbleService : Service() {
             }
             background = shape
         }
-        // ============================================================
-        // ✅ CHANGE #2: Globe icon click → search + minimize
-        // ============================================================
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -1561,11 +1543,6 @@ class FloatingBubbleService : Service() {
                 searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(searchIntent)
                 hideFloatingActionBar()
-                hideSelectionHandles()
-                // ✅ Search খোলার সাথে সাথে নোটপ্যাড minimize
-                if (isExpanded) {
-                    collapseToBubble()
-                }
             }
         }
         actionBarView.addView(chromeBtn)
@@ -2393,7 +2370,6 @@ class FloatingBubbleService : Service() {
             })
             addTextChangedListener(object : TextWatcher {
                 private var deletingActiveSelection = false
-                private var typingOverSelection = false
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
                     val liveStart = this@FloatingBubbleService.editText.selectionStart
                     val liveEnd = this@FloatingBubbleService.editText.selectionEnd
@@ -2402,16 +2378,9 @@ class FloatingBubbleService : Service() {
                         lastNonEmptySelectionStart >= 0 &&
                         lastNonEmptySelectionEnd > lastNonEmptySelectionStart &&
                         lastNonEmptySelectionEnd <= (s?.length ?: this@FloatingBubbleService.editText.length())
-
-                    // ✅ CHANGE #3: Detect deletion of selection (backspace/forward-del)
                     deletingActiveSelection = count > 0 && after == 0 &&
                             (liveSelectionIsNonEmpty || rememberedSelectionIsNonEmpty) &&
                             (isActionBarVisible || areHandlesVisible || liveSelectionIsNonEmpty)
-
-                    // ✅ CHANGE #3: Detect typing over a selection (replace selection with new text)
-                    typingOverSelection = count > 0 && after > 0 &&
-                            (liveSelectionIsNonEmpty || rememberedSelectionIsNonEmpty)
-
                     if (suppressEditorHistory) return
                     val snapshot = captureEditorHistoryState(textOverride = s?.toString() ?: "")
                     if (editorUndoStack.isEmpty() || editorUndoStack.peekLast() != snapshot) {
@@ -2426,10 +2395,7 @@ class FloatingBubbleService : Service() {
                 }
                 override fun afterTextChanged(s: Editable?) {
                     if (deletingActiveSelection) hideSelectionUiAfterImeDeletion()
-                    // ✅ CHANGE #3: Hide handles + action bar when typing over selection
-                    if (typingOverSelection) hideSelectionUiAfterTyping()
                     deletingActiveSelection = false
-                    typingOverSelection = false
                 }
             })
 
@@ -2888,87 +2854,24 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {}
     }
 
-    // ============================================================
-    // ✅ CHANGE #4: Smooth scale transition when going Back from editor
-    // ============================================================
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
-        if (index == -1) return
-
-        val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
-        val contentText = editText.text.toString()
-        val finalTitle = rawTitle.ifEmpty { getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" } }
-        val updatedNote = notesList[index].copy(
-            title = finalTitle,
-            content = contentText,
-            lastEdited = System.currentTimeMillis()
-        )
-        notesList[index] = updatedNote
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        updateBubbleCount()
-        Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
-        hideSelectionHandles()
-        hideFloatingActionBar()
-        hideEditorKeyboard()
-
-        val oldNoteView = noteView
-
-        // ✅ Smooth scale transition — পুরনো note pad ছোট হয়ে fade আউট,
-        //    তারপর নতুন note list fade + scale ইন
-        if (oldNoteView != null) {
-            oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            oldNoteView.animate()
-                .alpha(0f)
-                .scaleX(0.92f)
-                .scaleY(0.92f)
-                .setDuration(140)
-                .setInterpolator(DecelerateInterpolator())
-                .withEndAction {
-                    try {
-                        windowManager.removeView(oldNoteView)
-                    } catch (_: Exception) {}
-                    oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
-                    noteView = null
-                    currentEditingNoteId = null
-                    restoreEditorStatePending = false
-
-                    // নতুন note list তৈরি ও scale ইন
-                    val container = createFullNotePad()
-                    noteView = container
-                    val params = WindowManager.LayoutParams(
-                        currentNotepadWidth, currentNotepadHeight,
-                        if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        else WindowManager.LayoutParams.TYPE_PHONE,
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-                        PixelFormat.TRANSLUCENT
-                    )
-                    params.gravity = Gravity.TOP or Gravity.START
-                    params.x = notepadPosX
-                    params.y = notepadPosY
-                    container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                    container.alpha = 0f
-                    container.scaleX = 0.92f
-                    container.scaleY = 0.92f
-                    windowManager.addView(container, params)
-                    container.doOnLayout {
-                        container.pivotX = (container.width / 2).toFloat()
-                        container.pivotY = (container.height / 2).toFloat()
-                        container.animate()
-                            .alpha(1f)
-                            .scaleX(1f)
-                            .scaleY(1f)
-                            .setDuration(200)
-                            .setInterpolator(AccelerateDecelerateInterpolator())
-                            .withEndAction {
-                                container.setLayerType(View.LAYER_TYPE_NONE, null)
-                            }
-                            .start()
-                    }
-                }
-                .start()
-        } else {
+        if (index != -1) {
+            val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+            val contentText = editText.text.toString()
+            val finalTitle = rawTitle.ifEmpty { getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" } }
+            val updatedNote = notesList[index].copy(
+                title = finalTitle,
+                content = contentText,
+                lastEdited = System.currentTimeMillis()
+            )
+            notesList[index] = updatedNote
+            saveNotesToPrefs()
+            notesAdapter.updateList(notesList)
+            updateBubbleCount()
+            Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+            hideSelectionHandles()
+            hideFloatingActionBar()
             showNoteList()
         }
     }
