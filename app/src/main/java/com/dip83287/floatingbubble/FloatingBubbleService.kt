@@ -11,7 +11,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Color
 import android.graphics.Rect
@@ -25,7 +24,6 @@ import android.os.*
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
-import android.text.Layout
 import android.text.TextWatcher
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -42,10 +40,6 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlin.math.abs
 import kotlin.math.sqrt
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class FloatingBubbleService : Service() {
 
@@ -64,6 +58,10 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_HEIGHT: Int
         get() = resources.displayMetrics.heightPixels
 
+    // ============================================================
+    // ✅ STORAGE: SharedPreferences only
+    // Google Drive Auto Backup handles persistence & restore
+    // ============================================================
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
@@ -222,15 +220,9 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ✅ Load notes purely from SharedPreferences. Android's Auto Backup
-            // (backed by the user's Google account) keeps bubble_prefs.xml in
-            // sync across uninstall/reinstall automatically - see
-            // data_extraction_rules.xml / backup_rules.xml.
+            // ✅ SharedPreferences থেকে নোট লোড করুন
+            // Google Drive Auto Backup স্বয়ংক্রিয়ভাবে restore করেছে (যদি থাকে)
             loadNotes()
-
-            // ✅ One-time cleanup of old external-storage backup folders used
-            // by earlier versions of this app (no longer used or needed).
-            cleanupLegacyFiles()
 
             createNotificationChannel()
             startForeground(1001, createNotification())
@@ -249,83 +241,25 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ CLEANUP - Remove old external-storage backup folders from earlier
-    // versions of this app (Downloads/Documents based approaches). These are
-    // no longer read from or written to; SharedPreferences + Android Auto
-    // Backup is now the single source of truth.
-    // ============================================================
-    private fun cleanupLegacyFiles() {
-        try {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS
-            )
-            val documentsDir = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOCUMENTS
-            )
-            val legacyDirs = listOf(
-                File(downloadsDir, "Floating Notes"),
-                File(downloadsDir, "FloatingNotes"),
-                File(downloadsDir, "FloatingBubbleBackup"),
-                File(documentsDir, "FloatingNotes")
-            )
-            legacyDirs.forEach { dir ->
-                try {
-                    if (dir.exists()) dir.deleteRecursively()
-                } catch (_: Exception) {
-                }
-            }
-
-            // Delete any legacy .pending-* files
-            try {
-                downloadsDir.listFiles()?.forEach { file ->
-                    if (file.name.startsWith(".pending-") ||
-                        file.name.contains("floating_notes_backup") ||
-                        file.name.contains("floatingnotes_backup")) {
-                        try {
-                            if (file.isDirectory) file.deleteRecursively()
-                            else file.delete()
-                        } catch (_: Exception) {}
-                    }
-                }
-            } catch (_: Exception) {}
-
-        } catch (_: Exception) {}
-    }
-
-    // ============================================================
-    // ✅ LOAD NOTES - SharedPreferences is the single source of truth.
-    // Android Auto Backup restores bubble_prefs.xml automatically on
-    // reinstall, so no external file access is needed at all.
+    // ✅ LOAD NOTES - SharedPreferences only
     // ============================================================
     private fun loadNotes() {
         try {
-            val sharedPrefsJson = prefs.getString(STORAGE_NOTES_LIST, "")
-            if (!sharedPrefsJson.isNullOrEmpty()) {
+            val prefsJson = prefs.getString(STORAGE_NOTES_LIST, null)
+            if (!prefsJson.isNullOrEmpty()) {
                 try {
                     val type = object : TypeToken<List<NoteItem>>() {}.type
-                    val loaded: List<NoteItem> = Gson().fromJson(sharedPrefsJson, type)
-                    notesList.clear()
-                    notesList.addAll(loaded)
-                    return
-                } catch (_: Exception) {
-                    // fall through to migration / default note below
-                }
+                    val loaded: List<NoteItem> = Gson().fromJson(prefsJson, type)
+                    if (loaded != null && loaded.isNotEmpty()) {
+                        notesList.clear()
+                        notesList.addAll(loaded)
+                        return
+                    }
+                } catch (_: Exception) {}
             }
 
-            // No SharedPreferences data yet. Best-effort one-time migration
-            // from the old external-storage backup file used by earlier
-            // versions of this app, for people updating in place (this only
-            // works on an in-place update, not a fresh reinstall, since that
-            // storage grant is revoked on uninstall - which is exactly why
-            // we moved to Auto Backup).
-            val migrated = tryMigrateFromLegacyBackupFile()
-            if (!migrated.isNullOrEmpty()) {
-                notesList.clear()
-                notesList.addAll(migrated)
-                saveNotesToPrefs()
-                return
-            }
-
+            // ✅ প্রথমবার ইনস্টল → নতুন নোট তৈরি
+            notesList.clear()
             notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             saveNotesToPrefs()
 
@@ -337,44 +271,8 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ ONE-TIME MIGRATION - best-effort read of the old backup file from
-    // earlier versions of this app (Downloads or Documents based). Silently
-    // returns null on any failure; never required for normal operation.
-    // ============================================================
-    private fun tryMigrateFromLegacyBackupFile(): List<NoteItem>? {
-        return try {
-            val legacyFileName = "notes_backup.json"
-            val candidates = listOf(
-                File(
-                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "FloatingNotes"),
-                    legacyFileName
-                ),
-                File(
-                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "FloatingNotes"),
-                    legacyFileName
-                )
-            )
-            for (file in candidates) {
-                if (file.exists()) {
-                    val json = file.readText(Charsets.UTF_8)
-                    if (json.isNotBlank()) {
-                        val type = object : TypeToken<List<NoteItem>>() {}.type
-                        val loaded: List<NoteItem>? = Gson().fromJson(json, type)
-                        if (loaded != null) return loaded
-                    }
-                }
-            }
-            null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // ============================================================
-    // ✅ MAIN SAVE FUNCTION - Called on every change. SharedPreferences is
-    // the only storage target; Android's Auto Backup mechanism takes care of
-    // persisting bubble_prefs.xml to the user's Google account periodically
-    // and restoring it automatically after a reinstall.
+    // ✅ SAVE NOTES - SharedPreferences only
+    // Google Drive Auto Backup handles cloud backup
     // ============================================================
     private fun saveNotesToPrefs() {
         try {
@@ -384,37 +282,8 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // ✅ SILENT / AUTO SAVE of the note currently open in the editor
-    // ============================================================
-    private fun persistEditingNoteSilently() {
-        try {
-            val id = currentEditingNoteId ?: return
-            if (!::editText.isInitialized || noteView == null) return
-            val index = notesList.indexOfFirst { it.id == id }
-            if (index < 0) return
-            val contentText = editText.text.toString()
-            val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
-            val finalTitle = rawTitle.ifEmpty {
-                getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" }
-            }
-            val existing = notesList[index]
-            if (existing.content == contentText && existing.title == finalTitle) return
-            notesList[index] = existing.copy(
-                content = contentText,
-                title = finalTitle,
-                lastEdited = System.currentTimeMillis()
-            )
-            saveNotesToPrefs()
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun scheduleAutoSave() {
-        saveRunnable?.let { saveHandler.removeCallbacks(it) }
-        val runnable = Runnable { persistEditingNoteSilently() }
-        saveRunnable = runnable
-        saveHandler.postDelayed(runnable, 1500L)
+    private fun saveNotesToSharedPreferences() {
+        saveNotesToPrefs()
     }
 
     private fun startConfigurationCheck() {
@@ -1167,13 +1036,11 @@ class FloatingBubbleService : Service() {
     }
 
     private fun createTopBarUndoDrawable(): Drawable = createStrokePathDrawable { canvas, w, h, paint ->
-        val path = android.graphics.Path()
         val cx = w * 0.50f
         val cy = h * 0.50f
         val r = w * 0.28f
         val rect = RectF(cx - r, cy - r, cx + r, cy + r)
         canvas.drawArc(rect, 215f, 250f, false, paint)
-        val ah = w * 0.18f
         val arrow = android.graphics.Path().apply {
             moveTo(w * 0.18f, h * 0.47f)
             lineTo(w * 0.38f, h * 0.30f)
@@ -1903,16 +1770,6 @@ class FloatingBubbleService : Service() {
         return Pair(editText.selectionStart, editText.selectionEnd)
     }
 
-    private fun getOffsetAtPosition(editText: EditText, x: Float, y: Float): Int {
-        try {
-            val currentLayout = editText.layout ?: return -1
-            val line = currentLayout.getLineForVertical(editText.scrollY + y.toInt())
-            return currentLayout.getOffsetForHorizontal(line, x).coerceIn(0, editText.text.length)
-        } catch (e: Exception) {
-            return -1
-        }
-    }
-
     private fun createFullNotePad(): View {
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -2188,46 +2045,6 @@ class FloatingBubbleService : Service() {
                 char == '*' || char == '+' || char == '=' || char == '~' ||
                 char == ':' || char == '/' || char == '\\'
         return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
-    }
-
-    private fun handleDragSelection(editText: EditText, event: MotionEvent) {
-        try {
-            val currentLayout = editText.layout ?: return
-            val editLocation = IntArray(2)
-            editText.getLocationOnScreen(editLocation)
-            val textX = event.rawX - editLocation[0] + editText.scrollX
-            val textY = event.rawY - editLocation[1] + editText.scrollY
-            val line = currentLayout.getLineForVertical(textY.toInt().coerceIn(0, currentLayout.height - 1))
-            val offset = currentLayout.getOffsetForHorizontal(line, textX)
-            val newOffset = offset.coerceIn(0, editText.text.length)
-            if (editText.hasSelection()) {
-                val currentStart = editText.selectionStart
-                val currentEnd = editText.selectionEnd
-                if (newOffset < currentStart) {
-                    editText.setSelection(newOffset, currentEnd)
-                } else if (newOffset > currentEnd) {
-                    editText.setSelection(currentStart, newOffset)
-                } else {
-                    val distanceToStart = abs(newOffset - currentStart)
-                    val distanceToEnd = abs(newOffset - currentEnd)
-                    if (distanceToStart < distanceToEnd) {
-                        editText.setSelection(newOffset, currentEnd)
-                    } else {
-                        editText.setSelection(currentStart, newOffset)
-                    }
-                }
-            }
-            if (!isScrolling) updateHandlePositionsSafe()
-            val (start, end) = getSelection()
-            if (start != end && start >= 0 && end <= editText.text.length) {
-                val selected = editText.text.substring(start, end)
-                if (selected.isNotEmpty()) {
-                    currentSelectedText = selected
-                    showFloatingActionBar(selected)
-                }
-            }
-        } catch (e: Exception) {
-        }
     }
 
     private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
@@ -2579,7 +2396,6 @@ class FloatingBubbleService : Service() {
                 override fun afterTextChanged(s: Editable?) {
                     if (deletingActiveSelection) hideSelectionUiAfterImeDeletion()
                     deletingActiveSelection = false
-                    scheduleAutoSave()
                 }
             })
 
@@ -3364,8 +3180,6 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // ✅ Make sure the latest edit of the open note is saved before shutting down
-        persistEditingNoteSilently()
         saveRunnable?.let { saveHandler.removeCallbacks(it) }
         flingAnimator?.cancel()
         velocityTracker?.recycle()

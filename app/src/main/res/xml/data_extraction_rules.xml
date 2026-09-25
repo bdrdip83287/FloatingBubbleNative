@@ -1,11 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Google Drive Auto Backup Rules (Android 12+)
+    Docs: https://developer.android.com/about/versions/12/backup-restore
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- ✅ Only backup SharedPreferences -->
-        <include domain="sharedpref" path="bubble_prefs.xml" />
+        <!-- ✅ সম্পূর্ণ shared_prefs ফোল্ডার Google Drive-এ ব্যাকআপ করুন -->
+        <include domain="sharedpref" path="." />
+
+        <!-- ❌ বাদ দেওয়া হলো:
+             - file domain
+             - database domain
+             - external domain
+             - device_root domain
+        -->
     </cloud-backup>
+
     <device-transfer>
-        <!-- ✅ Only transfer SharedPreferences -->
-        <include domain="sharedpref" path="bubble_prefs.xml" />
+        <!-- ✅ ডিভাইস ট্রান্সফারেও সব SharedPreferences যাবে -->
+        <include domain="sharedpref" path="." />
     </device-transfer>
 </data-extraction-rules>

@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Google Drive Auto Backup Rules (Android 11 and below)
+    Docs: https://developer.android.com/guide/topics/data/autobackup
+-->
 <full-backup-content>
-    <!-- ✅ Only backup SharedPreferences for Google Drive Auto Backup -->
-    <include domain="sharedpref" path="bubble_prefs.xml" />
+    <!-- ✅ সম্পূর্ণ shared_prefs ফোল্ডার ব্যাকআপ করুন -->
+    <!-- bubble_prefs.xml সহ যেকোনো SharedPreferences ফাইল স্বয়ংক্রিয়ভাবে backup হবে -->
+    <include domain="sharedpref" path="." />
+
+    <!-- ❌ বাদ দেওয়া হলো:
+         - file domain (কোনো external file নেই)
+         - database domain (কোনো database নেই)
+         - external domain (MediaStore/File পদ্ধতি সরানো হয়েছে)
+    -->
 </full-backup-content>
