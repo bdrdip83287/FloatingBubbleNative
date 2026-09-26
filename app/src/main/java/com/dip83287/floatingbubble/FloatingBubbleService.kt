@@ -58,10 +58,6 @@ class FloatingBubbleService : Service() {
     private val NOTEPAD_MAX_HEIGHT: Int
         get() = resources.displayMetrics.heightPixels
 
-    // ============================================================
-    // ✅ STORAGE: SharedPreferences only
-    // Google Drive Auto Backup handles persistence & restore
-    // ============================================================
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
@@ -107,19 +103,15 @@ class FloatingBubbleService : Service() {
     private var savedEditorEditTextScrollY = 0
     private var savedEditorEditTextScrollX = 0
 
+    // ✅ NEW: Selection state persistence across minimize/restore
+    private var savedEditorHadSelection: Boolean = false
+    private var savedEditorHadActionBarVisible: Boolean = false
+
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
     private var notepadPosY = 0
-        private var savedEditorSelectionStart = 0
-    private var savedEditorSelectionEnd = 0
-    private var savedEditorScrollY = 0
-    private var savedEditorScrollX = 0
-    private var savedEditorEditTextScrollY = 0
-    private var savedEditorEditTextScrollX = 0
-    private var savedEditorHadSelection: Boolean = false           // ✅ NEW
-    private var savedEditorHadActionBarVisible: Boolean = false    // ✅ NEW
 
     private var isResizing = false
     private var resizeStartX = 0
@@ -190,7 +182,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ NEW: When user types while a selection exists, hide handles and action bar
+    // ✅ When user types while a selection exists, hide handles and action bar
     private fun hideSelectionUiAfterTyping() {
         suppressSelectionUiUntil = android.os.SystemClock.uptimeMillis() + 600L
         currentSelectedText = ""
@@ -239,8 +231,6 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ✅ SharedPreferences থেকে নোট লোড করুন
-            // Google Drive Auto Backup স্বয়ংক্রিয়ভাবে restore করেছে (যদি থাকে)
             loadNotes()
 
             createNotificationChannel()
@@ -259,9 +249,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // ✅ LOAD NOTES - SharedPreferences only
-    // ============================================================
     private fun loadNotes() {
         try {
             val prefsJson = prefs.getString(STORAGE_NOTES_LIST, null)
@@ -277,7 +264,6 @@ class FloatingBubbleService : Service() {
                 } catch (_: Exception) {}
             }
 
-            // ✅ প্রথমবার ইনস্টল → নতুন নোট তৈরি
             notesList.clear()
             notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             saveNotesToPrefs()
@@ -289,10 +275,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // ✅ SAVE NOTES - SharedPreferences only
-    // Google Drive Auto Backup handles cloud backup
-    // ============================================================
     private fun saveNotesToPrefs() {
         try {
             val notesJson = Gson().toJson(notesList)
@@ -535,14 +517,10 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
-    // ============================================================
-    // ✅ CHANGE #1: Default bubble position on RIGHT side
-    // ============================================================
     private fun getInitialBubblePosition(): Pair<Int, Int> {
         val screenWidth = resources.displayMetrics.widthPixels
         val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
         return if (isFirstTime) {
-            // ✅ প্রথমবার: স্ক্রিনের ডান পাশে
             val defaultX = screenWidth - BUBBLE_SIZE - 20
             val defaultY = 150
             Pair(defaultX, defaultY)
@@ -846,10 +824,9 @@ class FloatingBubbleService : Service() {
         wereHandlesVisibleBeforeScroll = false
     }
 
-        private fun collapseToBubble() {
+    private fun collapseToBubble() {
         if (!isExpanded) return
         if (::editText.isInitialized && currentEditingNoteId != null) {
-            // ✅ Selection state সংরক্ষণ
             savedEditorSelectionStart = editText.selectionStart.coerceAtLeast(0)
             savedEditorSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
             savedEditorScrollY = scrollView.scrollY.coerceAtLeast(0)
@@ -857,7 +834,7 @@ class FloatingBubbleService : Service() {
             savedEditorEditTextScrollY = editText.scrollY.coerceAtLeast(0)
             savedEditorEditTextScrollX = editText.scrollX.coerceAtLeast(0)
 
-            // ✅ NEW: Selection ও action bar state সংরক্ষণ
+            // ✅ NEW: Selection state ও action bar state সংরক্ষণ
             savedEditorHadSelection = editText.hasSelection()
             savedEditorHadActionBarVisible = isActionBarVisible
 
@@ -925,10 +902,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {
         }
     }
-
-    // ============================================================
-    // Top Bar Icons
-    // ============================================================
 
     private fun createTopBarIconButton(
         iconDrawable: Drawable,
@@ -1165,9 +1138,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ================================================================
-    // Shared custom magnifier
-    // ================================================================
     private var customSelectionMagnifier: Magnifier? = null
     private var customMagnifierTarget: EditText? = null
     private var lastCustomMagnifierTime = 0L
@@ -1562,9 +1532,6 @@ class FloatingBubbleService : Service() {
             }
             background = shape
         }
-        // ============================================================
-        // ✅ CHANGE #2: Globe icon click → search + minimize
-        // ============================================================
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -1576,7 +1543,6 @@ class FloatingBubbleService : Service() {
                 startActivity(searchIntent)
                 hideFloatingActionBar()
                 hideSelectionHandles()
-                // ✅ Search খোলার সাথে সাথে নোটপ্যাড minimize
                 if (isExpanded) {
                     collapseToBubble()
                 }
@@ -2124,12 +2090,17 @@ class FloatingBubbleService : Service() {
         }
     }
 
-        private fun openEditorForNote(note: NoteItem) {
+    // ============================================================
+    // ✅ CHANGE #1: Smooth scale transition when opening a note
+    // ✅ CHANGE #2: Restore selection + handles + action bar
+    // ============================================================
+    private fun openEditorForNote(note: NoteItem) {
         currentEditingNoteId = note.id
 
-        // ✅ NEW: Detect if we're coming from note list (smooth transition)
+        // ✅ Detect if we're coming from the note list (not from bubble expand)
         val oldNoteView = noteView
-        val isFromNoteList = oldNoteView != null && !restoreEditorStatePending
+        val isFromNoteList = oldNoteView != null && !restoreEditorStatePending &&
+                currentEditingNoteId != null
 
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -2694,8 +2665,9 @@ class FloatingBubbleService : Service() {
         container.addView(handleContainer)
 
         // ============================================================
-        // ✅ NEW: Smooth transition from note list to editor
+        // ✅ CHANGED: Note list → Editor smooth scale transition
         // ============================================================
+        val previousNoteView = noteView
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -2708,13 +2680,12 @@ class FloatingBubbleService : Service() {
         params.x = notepadPosX
         params.y = notepadPosY
 
-        if (isFromNoteList && oldNoteView != null) {
-            // ✅ Smooth scale transition (note list → editor)
+        if (isFromNoteList && previousNoteView != null) {
+            // ✅ Smooth scale transition: note list → editor
             container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             container.alpha = 0f
             container.scaleX = 0.92f
             container.scaleY = 0.92f
-
             noteView = container
             windowManager.addView(container, params)
 
@@ -2722,8 +2693,8 @@ class FloatingBubbleService : Service() {
                 container.pivotX = (container.width / 2).toFloat()
                 container.pivotY = (container.height / 2).toFloat()
 
-                oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                oldNoteView.animate()
+                previousNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                previousNoteView.animate()
                     .alpha(0f)
                     .scaleX(0.92f)
                     .scaleY(0.92f)
@@ -2731,9 +2702,9 @@ class FloatingBubbleService : Service() {
                     .setInterpolator(DecelerateInterpolator())
                     .withEndAction {
                         try {
-                            windowManager.removeView(oldNoteView)
+                            windowManager.removeView(previousNoteView)
                         } catch (_: Exception) {}
-                        oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
+                        previousNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
                     }
                     .start()
 
@@ -2749,6 +2720,7 @@ class FloatingBubbleService : Service() {
                     .start()
             }
         } else {
+            // ✅ সাধারণ পথ: bubble expand বা restore থেকে
             noteView?.let {
                 try { windowManager.removeView(it) } catch (_: Exception) {}
             }
@@ -2757,7 +2729,7 @@ class FloatingBubbleService : Service() {
         }
 
         // ============================================================
-        // ✅ Restore editor state if minimized with selection
+        // ✅ CHANGED: Restore selection + handles + action bar
         // ============================================================
         if (restoreEditorStatePending) {
             val restoreStart = savedEditorSelectionStart
@@ -2766,6 +2738,7 @@ class FloatingBubbleService : Service() {
             val restoreX = savedEditorScrollX
             val restoreEditY = savedEditorEditTextScrollY
             val restoreEditX = savedEditorEditTextScrollX
+            val hadSelection = savedEditorHadSelection
             editText.post {
                 try {
                     val len = editText.length()
@@ -2784,7 +2757,8 @@ class FloatingBubbleService : Service() {
                         restoreExactViewport()
                         editText.post {
                             restoreExactViewport()
-                            if (start != end) {
+                            // ✅ Selection থাকলে handle + action bar দেখান
+                            if (hadSelection && start != end) {
                                 currentSelectedText = editText.text.substring(start, end)
                                 showSelectionHandles()
                                 updateHandlePositionsImmediate()
@@ -2796,11 +2770,15 @@ class FloatingBubbleService : Service() {
                             editText.postOnAnimation {
                                 restoreExactViewport()
                                 restoreEditorStatePending = false
+                                savedEditorHadSelection = false
+                                savedEditorHadActionBarVisible = false
                             }
                         }
                     }
                 } catch (e: Exception) {
                     restoreEditorStatePending = false
+                    savedEditorHadSelection = false
+                    savedEditorHadActionBarVisible = false
                 }
             }
         } else {
@@ -2947,12 +2925,17 @@ class FloatingBubbleService : Service() {
             isExpanded = false
             currentEditingNoteId = null
             restoreEditorStatePending = false
+            savedEditorHadSelection = false
+            savedEditorHadActionBarVisible = false
             resetHandleReferences()
             deleteBubble()
         } catch (e: Exception) {}
     }
 
-private fun saveCurrentNote(noteId: Long) {
+    // ============================================================
+    // ✅ CHANGE #2: Editor → Note list smooth scale transition
+    // ============================================================
+    private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index == -1) return
 
@@ -2973,13 +2956,12 @@ private fun saveCurrentNote(noteId: Long) {
         hideFloatingActionBar()
         hideEditorKeyboard()
 
-        // ✅ IMPORTANT: selection restore নিষ্ক্রিয় করুন
+        // ✅ Restore flags reset
         currentEditingNoteId = null
         restoreEditorStatePending = false
         savedEditorHadSelection = false
         savedEditorHadActionBarVisible = false
 
-        // ✅ Smooth scale transition: editor → note list
         val oldNoteView = noteView
         if (oldNoteView != null) {
             oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -3003,8 +2985,9 @@ private fun saveCurrentNote(noteId: Long) {
         }
     }
 
-
-    // ✅ NEW: Smooth scale-in helper for note list
+    // ============================================================
+    // ✅ NEW: Note list smooth scale-in helper
+    // ============================================================
     private fun showNoteListWithTransition() {
         val container = createFullNotePad()
         noteView = container
@@ -3038,6 +3021,30 @@ private fun saveCurrentNote(noteId: Long) {
                 }
                 .start()
         }
+    }
+
+    private fun showNoteList() {
+        currentEditingNoteId = null
+        restoreEditorStatePending = false
+        savedEditorHadSelection = false
+        savedEditorHadActionBarVisible = false
+        hideSelectionHandles()
+        hideFloatingActionBar()
+        val container = createFullNotePad()
+        noteView?.let { windowManager.removeView(it) }
+        noteView = container
+        val params = WindowManager.LayoutParams(
+            currentNotepadWidth, currentNotepadHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = notepadPosX
+        params.y = notepadPosY
+        windowManager.addView(noteView, params)
     }
 
     private fun updateBubbleCount() {
