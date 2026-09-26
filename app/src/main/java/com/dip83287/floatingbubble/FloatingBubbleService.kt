@@ -112,6 +112,14 @@ class FloatingBubbleService : Service() {
     private var currentNotepadHeight = NOTEPAD_MIN_HEIGHT
     private var notepadPosX = 0
     private var notepadPosY = 0
+        private var savedEditorSelectionStart = 0
+    private var savedEditorSelectionEnd = 0
+    private var savedEditorScrollY = 0
+    private var savedEditorScrollX = 0
+    private var savedEditorEditTextScrollY = 0
+    private var savedEditorEditTextScrollX = 0
+    private var savedEditorHadSelection: Boolean = false           // ✅ NEW
+    private var savedEditorHadActionBarVisible: Boolean = false    // ✅ NEW
 
     private var isResizing = false
     private var resizeStartX = 0
@@ -838,15 +846,21 @@ class FloatingBubbleService : Service() {
         wereHandlesVisibleBeforeScroll = false
     }
 
-    private fun collapseToBubble() {
+        private fun collapseToBubble() {
         if (!isExpanded) return
         if (::editText.isInitialized && currentEditingNoteId != null) {
+            // ✅ Selection state সংরক্ষণ
             savedEditorSelectionStart = editText.selectionStart.coerceAtLeast(0)
             savedEditorSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
             savedEditorScrollY = scrollView.scrollY.coerceAtLeast(0)
             savedEditorScrollX = scrollView.scrollX.coerceAtLeast(0)
             savedEditorEditTextScrollY = editText.scrollY.coerceAtLeast(0)
             savedEditorEditTextScrollX = editText.scrollX.coerceAtLeast(0)
+
+            // ✅ NEW: Selection ও action bar state সংরক্ষণ
+            savedEditorHadSelection = editText.hasSelection()
+            savedEditorHadActionBarVisible = isActionBarVisible
+
             restoreEditorStatePending = true
             val activeId = currentEditingNoteId!!
             val index = notesList.indexOfFirst { it.id == activeId }
@@ -2110,8 +2124,13 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun openEditorForNote(note: NoteItem) {
+        private fun openEditorForNote(note: NoteItem) {
         currentEditingNoteId = note.id
+
+        // ✅ NEW: Detect if we're coming from note list (smooth transition)
+        val oldNoteView = noteView
+        val isFromNoteList = oldNoteView != null && !restoreEditorStatePending
+
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -2402,16 +2421,11 @@ class FloatingBubbleService : Service() {
                         lastNonEmptySelectionStart >= 0 &&
                         lastNonEmptySelectionEnd > lastNonEmptySelectionStart &&
                         lastNonEmptySelectionEnd <= (s?.length ?: this@FloatingBubbleService.editText.length())
-
-                    // ✅ CHANGE #3: Detect deletion of selection (backspace/forward-del)
                     deletingActiveSelection = count > 0 && after == 0 &&
                             (liveSelectionIsNonEmpty || rememberedSelectionIsNonEmpty) &&
                             (isActionBarVisible || areHandlesVisible || liveSelectionIsNonEmpty)
-
-                    // ✅ CHANGE #3: Detect typing over a selection (replace selection with new text)
                     typingOverSelection = count > 0 && after > 0 &&
                             (liveSelectionIsNonEmpty || rememberedSelectionIsNonEmpty)
-
                     if (suppressEditorHistory) return
                     val snapshot = captureEditorHistoryState(textOverride = s?.toString() ?: "")
                     if (editorUndoStack.isEmpty() || editorUndoStack.peekLast() != snapshot) {
@@ -2426,7 +2440,6 @@ class FloatingBubbleService : Service() {
                 }
                 override fun afterTextChanged(s: Editable?) {
                     if (deletingActiveSelection) hideSelectionUiAfterImeDeletion()
-                    // ✅ CHANGE #3: Hide handles + action bar when typing over selection
                     if (typingOverSelection) hideSelectionUiAfterTyping()
                     deletingActiveSelection = false
                     typingOverSelection = false
@@ -2680,8 +2693,9 @@ class FloatingBubbleService : Service() {
         }
         container.addView(handleContainer)
 
-        noteView?.let { windowManager.removeView(it) }
-        noteView = container
+        // ============================================================
+        // ✅ NEW: Smooth transition from note list to editor
+        // ============================================================
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -2693,8 +2707,58 @@ class FloatingBubbleService : Service() {
         params.gravity = Gravity.TOP or Gravity.START
         params.x = notepadPosX
         params.y = notepadPosY
-        windowManager.addView(noteView, params)
 
+        if (isFromNoteList && oldNoteView != null) {
+            // ✅ Smooth scale transition (note list → editor)
+            container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            container.alpha = 0f
+            container.scaleX = 0.92f
+            container.scaleY = 0.92f
+
+            noteView = container
+            windowManager.addView(container, params)
+
+            container.doOnLayout {
+                container.pivotX = (container.width / 2).toFloat()
+                container.pivotY = (container.height / 2).toFloat()
+
+                oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                oldNoteView.animate()
+                    .alpha(0f)
+                    .scaleX(0.92f)
+                    .scaleY(0.92f)
+                    .setDuration(140)
+                    .setInterpolator(DecelerateInterpolator())
+                    .withEndAction {
+                        try {
+                            windowManager.removeView(oldNoteView)
+                        } catch (_: Exception) {}
+                        oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
+
+                container.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(200)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .withEndAction {
+                        container.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
+            }
+        } else {
+            noteView?.let {
+                try { windowManager.removeView(it) } catch (_: Exception) {}
+            }
+            noteView = container
+            windowManager.addView(container, params)
+        }
+
+        // ============================================================
+        // ✅ Restore editor state if minimized with selection
+        // ============================================================
         if (restoreEditorStatePending) {
             val restoreStart = savedEditorSelectionStart
             val restoreEnd = savedEditorSelectionEnd
@@ -2888,10 +2952,7 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {}
     }
 
-    // ============================================================
-    // ✅ CHANGE #4: Smooth scale transition when going Back from editor
-    // ============================================================
-    private fun saveCurrentNote(noteId: Long) {
+private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index == -1) return
 
@@ -2912,10 +2973,14 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         hideEditorKeyboard()
 
-        val oldNoteView = noteView
+        // ✅ IMPORTANT: selection restore নিষ্ক্রিয় করুন
+        currentEditingNoteId = null
+        restoreEditorStatePending = false
+        savedEditorHadSelection = false
+        savedEditorHadActionBarVisible = false
 
-        // ✅ Smooth scale transition — পুরনো note pad ছোট হয়ে fade আউট,
-        //    তারপর নতুন note list fade + scale ইন
+        // ✅ Smooth scale transition: editor → note list
+        val oldNoteView = noteView
         if (oldNoteView != null) {
             oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             oldNoteView.animate()
@@ -2930,56 +2995,18 @@ class FloatingBubbleService : Service() {
                     } catch (_: Exception) {}
                     oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
                     noteView = null
-                    currentEditingNoteId = null
-                    restoreEditorStatePending = false
-
-                    // নতুন note list তৈরি ও scale ইন
-                    val container = createFullNotePad()
-                    noteView = container
-                    val params = WindowManager.LayoutParams(
-                        currentNotepadWidth, currentNotepadHeight,
-                        if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        else WindowManager.LayoutParams.TYPE_PHONE,
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-                        PixelFormat.TRANSLUCENT
-                    )
-                    params.gravity = Gravity.TOP or Gravity.START
-                    params.x = notepadPosX
-                    params.y = notepadPosY
-                    container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                    container.alpha = 0f
-                    container.scaleX = 0.92f
-                    container.scaleY = 0.92f
-                    windowManager.addView(container, params)
-                    container.doOnLayout {
-                        container.pivotX = (container.width / 2).toFloat()
-                        container.pivotY = (container.height / 2).toFloat()
-                        container.animate()
-                            .alpha(1f)
-                            .scaleX(1f)
-                            .scaleY(1f)
-                            .setDuration(200)
-                            .setInterpolator(AccelerateDecelerateInterpolator())
-                            .withEndAction {
-                                container.setLayerType(View.LAYER_TYPE_NONE, null)
-                            }
-                            .start()
-                    }
+                    showNoteListWithTransition()
                 }
                 .start()
         } else {
-            showNoteList()
+            showNoteListWithTransition()
         }
     }
 
-    private fun showNoteList() {
-        currentEditingNoteId = null
-        restoreEditorStatePending = false
-        hideSelectionHandles()
-        hideFloatingActionBar()
+
+    // ✅ NEW: Smooth scale-in helper for note list
+    private fun showNoteListWithTransition() {
         val container = createFullNotePad()
-        noteView?.let { windowManager.removeView(it) }
         noteView = container
         val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
@@ -2992,7 +3019,25 @@ class FloatingBubbleService : Service() {
         params.gravity = Gravity.TOP or Gravity.START
         params.x = notepadPosX
         params.y = notepadPosY
-        windowManager.addView(noteView, params)
+        container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        container.alpha = 0f
+        container.scaleX = 0.92f
+        container.scaleY = 0.92f
+        windowManager.addView(container, params)
+        container.doOnLayout {
+            container.pivotX = (container.width / 2).toFloat()
+            container.pivotY = (container.height / 2).toFloat()
+            container.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(200)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .withEndAction {
+                    container.setLayerType(View.LAYER_TYPE_NONE, null)
+                }
+                .start()
+        }
     }
 
     private fun updateBubbleCount() {
