@@ -2671,7 +2671,9 @@ class FloatingBubbleService : Service() {
         params.y = notepadPosY
         windowManager.addView(container, params)
 
-        val contentContainer = container.getChildAt(0) as? LinearLayout
+        val contentContainer = if (container is android.view.ViewGroup) {
+    container.getChildAt(0) as? LinearLayout
+} else null
         val oldContentArea = if (contentContainer != null && contentContainer.childCount > 2) {
             contentContainer.getChildAt(2)
         } else null
