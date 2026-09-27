@@ -2664,71 +2664,75 @@ class FloatingBubbleService : Service() {
         }
         container.addView(handleContainer)
 
-        // ============================================================
-        // ✅ TRUE CROSS-FADE: পুরনো note list + নতুন editor একসাথে রাখা
-        //    কোনো blank frame নেই, তাই কোনো ঝটকা নেই
-        // ============================================================
-        val oldNoteView = noteView
+// ============================================================
+// ✅ MINIMIZE-STYLE TRANSITION (note list → editor)
+//    ঠিক যেমন minimize-এ note bubble-এ পরিণত হয়
+// ============================================================
+val oldNoteView = noteView
+noteView = container
+val newParams = WindowManager.LayoutParams(
+    currentNotepadWidth, currentNotepadHeight,
+    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    else WindowManager.LayoutParams.TYPE_PHONE,
+    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+    PixelFormat.TRANSLUCENT
+)
+newParams.gravity = Gravity.TOP or Gravity.START
+newParams.x = notepadPosX
+newParams.y = notepadPosY
 
-        noteView = container
-        val newParams = WindowManager.LayoutParams(
-            currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        )
-        newParams.gravity = Gravity.TOP or Gravity.START
-        newParams.x = notepadPosX
-        newParams.y = notepadPosY
+if (oldNoteView != null) {
+    // ✅ প্রথমে নতুন editor add করুন (same position-এ, ছোট scale + alpha 0 দিয়ে)
+    container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+    container.alpha = 0f
+    container.scaleX = 0.85f
+    container.scaleY = 0.85f
+    windowManager.addView(container, newParams)
 
-        if (oldNoteView != null) {
-            // ✅ প্রথমে নতুন editor add করুন (পুরনো view-এর উপরে, same position-এ)
-            container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            container.alpha = 0f
-            container.scaleX = 0.94f
-            container.scaleY = 0.94f
-            windowManager.addView(container, newParams)
+    container.doOnLayout {
+        // pivot: note list-এর কেন্দ্র (যেমন minimize-এ bubble-এর কেন্দ্র থেকে চুপসে যায়)
+        container.pivotX = (container.width / 2).toFloat()
+        container.pivotY = (container.height / 2).toFloat()
 
-            container.doOnLayout {
-                container.pivotX = (container.width / 2).toFloat()
-                container.pivotY = (container.height / 2).toFloat()
-                oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        oldNoteView.pivotX = (oldNoteView.width / 2).toFloat()
+        oldNoteView.pivotY = (oldNoteView.height / 2).toFloat()
 
-                // ✅ একসাথে cross-fade: পুরনো view fade-out, নতুন view fade-in
-                oldNoteView.animate()
-                    .alpha(0f)
-                    .scaleX(1.03f)
-                    .scaleY(1.03f)
-                    .setDuration(220)
-                    .setInterpolator(DecelerateInterpolator())
-                    .withEndAction {
-                        try {
-                            windowManager.removeView(oldNoteView)
-                        } catch (_: Exception) {}
-                        oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
-                    }
-                    .start()
-
-                container.animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(260)
-                    .setInterpolator(DecelerateInterpolator())
-                    .withEndAction {
-                        container.setLayerType(View.LAYER_TYPE_NONE, null)
-                        applyRestoreEditorStateIfNeeded()
-                    }
-                    .start()
+        // ✅ Minimize-এর ঠিক উল্টো:
+        //    পুরনো note list ছোট হয়ে চুপসে যায় (1.0 → 0.88) — যেমন bubble ছোট হয়
+        oldNoteView.animate()
+            .alpha(0f)
+            .scaleX(0.85f)
+            .scaleY(0.85f)
+            .setDuration(180)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                try {
+                    windowManager.removeView(oldNoteView)
+                } catch (_: Exception) {}
+                oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
             }
-        } else {
-            // কোনো পুরনো view নেই → সরাসরি editor যোগ
-            windowManager.addView(container, newParams)
-            applyRestoreEditorStateIfNeeded()
-        }
+            .start()
+
+        // ✅ নতুন editor ছোট থেকে বড় হয়ে ফুটে ওঠে (0.85 → 1.0)
+        //    যেমন minimize-এ bubble বড় হয়ে note pad হয়
+        container.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(240)
+            .setInterpolator(OvershootInterpolator(0.4f))
+            .withEndAction {
+                container.setLayerType(View.LAYER_TYPE_NONE, null)
+                applyRestoreEditorStateIfNeeded()
+            }
+            .start()
     }
+} else {
+    windowManager.addView(container, newParams)
+    applyRestoreEditorStateIfNeeded()
+}
 
     // ============================================================
     // ✅ Helper: Apply pending restore state (or focus + cursor at 0)
@@ -2928,91 +2932,92 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {}
     }
 
-    // ============================================================
-    // ✅ saveCurrentNote - WITH TRUE CROSS-FADE TRANSITION
-    //    Back button → editor scale-out, note list scale-in (একসাথে)
-    // ============================================================
-    private fun saveCurrentNote(noteId: Long) {
-        val index = notesList.indexOfFirst { it.id == noteId }
-        if (index == -1) return
+private fun saveCurrentNote(noteId: Long) {
+    val index = notesList.indexOfFirst { it.id == noteId }
+    if (index == -1) return
 
-        // ✅ আগে সব ডেটা save করুন
-        val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
-        val contentText = editText.text.toString()
-        val finalTitle = rawTitle.ifEmpty { getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" } }
-        val updatedNote = notesList[index].copy(
-            title = finalTitle,
-            content = contentText,
-            lastEdited = System.currentTimeMillis()
-        )
-        notesList[index] = updatedNote
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        updateBubbleCount()
-        Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
-        hideSelectionHandles()
-        hideFloatingActionBar()
-        hideEditorKeyboard()
+    // ✅ আগে সব ডেটা save করুন
+    val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+    val contentText = editText.text.toString()
+    val finalTitle = rawTitle.ifEmpty { getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" } }
+    val updatedNote = notesList[index].copy(
+        title = finalTitle,
+        content = contentText,
+        lastEdited = System.currentTimeMillis()
+    )
+    notesList[index] = updatedNote
+    saveNotesToPrefs()
+    notesAdapter.updateList(notesList)
+    updateBubbleCount()
+    Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+    hideSelectionHandles()
+    hideFloatingActionBar()
+    hideEditorKeyboard()
 
-        val oldNoteView = noteView ?: return
+    val oldNoteView = noteView ?: return
 
-        // ✅ নতুন note list তৈরি করুন (এখনো add করবেন না)
-        currentEditingNoteId = null
-        restoreEditorStatePending = false
-        val newContainer = createFullNotePad()
+    // ✅ নতুন note list তৈরি করুন (এখনো add করবেন না)
+    currentEditingNoteId = null
+    restoreEditorStatePending = false
+    val newContainer = createFullNotePad()
 
-        val newParams = WindowManager.LayoutParams(
-            currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        )
-        newParams.gravity = Gravity.TOP or Gravity.START
-        newParams.x = notepadPosX
-        newParams.y = notepadPosY
+    val newParams = WindowManager.LayoutParams(
+        currentNotepadWidth, currentNotepadHeight,
+        if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else WindowManager.LayoutParams.TYPE_PHONE,
+        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+        PixelFormat.TRANSLUCENT
+    )
+    newParams.gravity = Gravity.TOP or Gravity.START
+    newParams.x = notepadPosX
+    newParams.y = notepadPosY
 
-        // ✅ TRUE CROSS-FADE: নতুন note list আগে add, তারপর একসাথে fade
-        newContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        newContainer.alpha = 0f
-        newContainer.scaleX = 0.94f
-        newContainer.scaleY = 0.94f
-        windowManager.addView(newContainer, newParams)
-        noteView = newContainer
+    // ✅ MINIMIZE-STYLE TRANSITION (editor → note list)
+    //    editor ছোট হয়ে চুপসে যায় (0.85), note list ছোট থেকে বড় হয়ে ফুটে ওঠে (0.85 → 1.0)
+    newContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+    newContainer.alpha = 0f
+    newContainer.scaleX = 0.85f
+    newContainer.scaleY = 0.85f
+    windowManager.addView(newContainer, newParams)
+    noteView = newContainer
 
-        newContainer.doOnLayout {
-            newContainer.pivotX = (newContainer.width / 2).toFloat()
-            newContainer.pivotY = (newContainer.height / 2).toFloat()
-            oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+    newContainer.doOnLayout {
+        newContainer.pivotX = (newContainer.width / 2).toFloat()
+        newContainer.pivotY = (newContainer.height / 2).toFloat()
 
-            // ✅ একসাথে cross-fade
-            oldNoteView.animate()
-                .alpha(0f)
-                .scaleX(1.03f)
-                .scaleY(1.03f)
-                .setDuration(220)
-                .setInterpolator(DecelerateInterpolator())
-                .withEndAction {
-                    try {
-                        windowManager.removeView(oldNoteView)
-                    } catch (_: Exception) {}
-                    oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
-                }
-                .start()
+        oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        oldNoteView.pivotX = (oldNoteView.width / 2).toFloat()
+        oldNoteView.pivotY = (oldNoteView.height / 2).toFloat()
 
-            newContainer.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(260)
-                .setInterpolator(DecelerateInterpolator())
-                .withEndAction {
-                    newContainer.setLayerType(View.LAYER_TYPE_NONE, null)
-                }
-                .start()
-        }
+        // ✅ পুরনো editor ছোট হয়ে fade-out
+        oldNoteView.animate()
+            .alpha(0f)
+            .scaleX(0.85f)
+            .scaleY(0.85f)
+            .setDuration(180)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                try {
+                    windowManager.removeView(oldNoteView)
+                } catch (_: Exception) {}
+                oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
+            }
+            .start()
+
+        // ✅ নতুন note list ছোট থেকে বড় হয়ে fade-in
+        newContainer.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(240)
+            .setInterpolator(OvershootInterpolator(0.4f))
+            .withEndAction {
+                newContainer.setLayerType(View.LAYER_TYPE_NONE, null)
+            }
+            .start()
     }
+}
 
     private fun showNoteList() {
         currentEditingNoteId = null
