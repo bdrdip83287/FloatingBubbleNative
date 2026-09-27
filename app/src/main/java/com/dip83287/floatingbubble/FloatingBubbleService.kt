@@ -82,10 +82,9 @@ class FloatingBubbleService : Service() {
     private var currentContentMode: ContentMode = ContentMode.LIST  // ✅ কোন content দেখানো হচ্ছে
     private var isExpanded = false
     private lateinit var editText: EditText
-    private lateinit var titleInput: editText
+    
     private enum class ContentMode { LIST, EDITOR }
-    private var isExpanded = false
-    private lateinit var editText: EditText
+    
     private lateinit var titleInput: EditText
 
     private data class EditorHistoryState(
