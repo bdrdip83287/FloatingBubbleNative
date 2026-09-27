@@ -112,6 +112,7 @@ class FloatingBubbleService : Service() {
     private var savedEditorScrollX = 0
     private var savedEditorEditTextScrollY = 0
     private var savedEditorEditTextScrollX = 0
+    private var titleWasEditedManually = false
 
     private lateinit var scrollView: ScrollView
     private var currentNotepadWidth = NOTEPAD_MIN_WIDTH
@@ -2337,6 +2338,7 @@ class FloatingBubbleService : Service() {
     // ============================================================
     private fun openEditorForNote(note: NoteItem) {
         currentEditingNoteId = note.id
+        titleWasEditedManually = false
         val host = contentHost ?: return
         val titleBar = titleBarView ?: return
 
@@ -2363,7 +2365,7 @@ class FloatingBubbleService : Service() {
             } else {
                 initialAutoTitle
             }
-            var titleWasEditedManually = false
+           
 
             titleInput = EditText(this).apply {
                 setText(initialTitle)
