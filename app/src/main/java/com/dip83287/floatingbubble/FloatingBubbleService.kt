@@ -782,24 +782,8 @@ class FloatingBubbleService : Service() {
     private fun createAndShowNotePad() {
         if (noteView != null) return
         try {
-            currentEditingNoteId?.let { id ->
-                val activeNote = notesList.firstOrNull { it.id == id }
-                if (activeNote != null) {
-                    openEditorForNote(activeNote)
-                    return
-                }
-            }
             val container = createFullNotePad()
             noteView = container
-            handleContainer = FrameLayout(this).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                isClickable = false
-                isFocusable = false
-            }
-            (noteView as? ViewGroup)?.addView(handleContainer)
             val params = WindowManager.LayoutParams(
                 currentNotepadWidth, currentNotepadHeight,
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -1767,6 +1751,10 @@ class FloatingBubbleService : Service() {
         return Pair(editText.selectionStart, editText.selectionEnd)
     }
 
+    // ============================================================
+    // ✅ createFullNotePad - Only outer frame + topbar + content area
+    //    The content area (index 2) will be swapped later
+    // ============================================================
     private fun createFullNotePad(): View {
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -1853,9 +1841,59 @@ class FloatingBubbleService : Service() {
             isFocusable = false
         }
         contentContainer.addView(topBarBottomShadow)
-        recyclerView = RecyclerView(this).apply {
+
+        // ✅ Content area — this will be swapped between note list & editor
+        val contentArea = createNoteListContentView()
+        contentContainer.addView(contentArea)
+
+        container.addView(contentContainer)
+        val resizeHandleView = TextView(this).apply {
+            text = "◢"
+            textSize = 18f
+            setTextColor(Color.parseColor("#F28B82"))
+            gravity = Gravity.END or Gravity.BOTTOM
+            includeFontPadding = false
+            setPadding(0, 0, 0, 0)
+            background = null
+            layoutParams = FrameLayout.LayoutParams(dpToPx(18), dpToPx(18), Gravity.END or Gravity.BOTTOM).apply {
+                rightMargin = 0
+                bottomMargin = 0
+            }
+            translationY = dpToPx(4).toFloat()
+            setOnTouchListener(ResizeTouchListener())
+            bringToFront()
+        }
+        container.addView(resizeHandleView)
+
+        // ✅ handle container created once (used by editor)
+        handleContainer = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            isClickable = false
+            isFocusable = false
+            bringToFront()
+        }
+        container.addView(handleContainer)
+
+        return container
+    }
+
+    // ============================================================
+    // ✅ Inner content: Note List (only RecyclerView)
+    // ============================================================
+    private fun createNoteListContentView(): View {
+        val listWrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        recyclerView = RecyclerView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT
             )
             layoutManager = LinearLayoutManager(this@FloatingBubbleService)
             setPadding(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6))
@@ -1879,281 +1917,21 @@ class FloatingBubbleService : Service() {
             onDeleteClick = { note -> deleteNoteFromList(note.id) }
         )
         recyclerView.adapter = notesAdapter
-        contentContainer.addView(recyclerView)
-        container.addView(contentContainer)
-        val resizeHandleView = TextView(this).apply {
-            text = "◢"
-            textSize = 18f
-            setTextColor(Color.parseColor("#F28B82"))
-            gravity = Gravity.END or Gravity.BOTTOM
-            includeFontPadding = false
-            setPadding(0, 0, 0, 0)
-            background = null
-            layoutParams = FrameLayout.LayoutParams(dpToPx(18), dpToPx(18), Gravity.END or Gravity.BOTTOM).apply {
-                rightMargin = 0
-                bottomMargin = 0
-            }
-            translationY = dpToPx(4).toFloat()
-            setOnTouchListener(ResizeTouchListener())
-            bringToFront()
-        }
-        container.addView(resizeHandleView)
-        handleContainer = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            isClickable = false
-            isFocusable = false
-            bringToFront()
-        }
-        container.addView(handleContainer)
-        return container
-    }
-
-    private fun createTopBarSettingsDrawable(): Drawable =
-        createStrokePathDrawable { canvas, w, h, paint ->
-            val cx = w * 0.50f
-            val cy = h * 0.50f
-            val outerR = w * 0.29f
-            val innerR = w * 0.11f
-            canvas.drawCircle(cx, cy, outerR, paint)
-            canvas.drawCircle(cx, cy, innerR, paint)
-            for (i in 0 until 6) {
-                canvas.save()
-                canvas.rotate(i * 60f, cx, cy)
-                canvas.drawLine(cx, cy - outerR, cx, cy - w * 0.39f, paint)
-                canvas.restore()
-            }
-        }
-
-    private fun createTopBarPlusDrawable(): Drawable =
-        createStrokePathDrawable { canvas, w, h, paint ->
-            val cx = w * 0.50f
-            val cy = h * 0.50f
-            val half = w * 0.27f
-            canvas.drawLine(cx - half, cy, cx + half, cy, paint)
-            canvas.drawLine(cx, cy - half, cx, cy + half, paint)
-        }
-
-    private fun createTopBarArrowDrawable(up: Boolean, iconColor: Int = Color.BLACK): Drawable =
-        createStrokePathDrawable(iconColor) { canvas, w, h, paint ->
-            val cx = w * 0.50f
-            val cy = h * 0.50f
-            val half = w * 0.22f
-            val tipY = if (up) h * 0.24f else h * 0.76f
-            val baseY = if (up) h * 0.66f else h * 0.34f
-            val path = android.graphics.Path().apply {
-                moveTo(cx, tipY)
-                lineTo(cx - half, baseY)
-                moveTo(cx, tipY)
-                lineTo(cx + half, baseY)
-                moveTo(cx, tipY)
-                lineTo(cx, if (up) h * 0.84f else h * 0.16f)
-            }
-            canvas.drawPath(path, paint)
-        }
-
-    private fun createTopBarListLockDrawable(locked: Boolean, iconColor: Int = Color.BLACK): Drawable =
-        createStrokePathDrawable(iconColor) { canvas, w, h, paint ->
-            val body = RectF(w * 0.25f, h * 0.42f, w * 0.75f, h * 0.82f)
-            canvas.drawRoundRect(body, w * 0.06f, w * 0.06f, paint)
-            val arc = RectF(w * 0.34f, h * 0.16f, w * 0.66f, h * 0.58f)
-            if (locked) {
-                canvas.drawArc(arc, 180f, 180f, false, paint)
-            } else {
-                canvas.drawArc(arc, 205f, 145f, false, paint)
-                canvas.drawLine(w * 0.66f, h * 0.38f, w * 0.72f, h * 0.28f, paint)
-            }
-            canvas.drawCircle(w * 0.50f, h * 0.61f, w * 0.045f, paint)
-        }
-
-    private fun formatNoteCreatedDate(note: NoteItem): String {
-        val timestamp = if (note.createdAt > 0L) note.createdAt else note.lastEdited
-        return try {
-            java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
-        } catch (_: Exception) { "" }
-    }
-
-    private fun moveNote(noteId: Long, direction: Int) {
-        val from = notesList.indexOfFirst { it.id == noteId }
-        if (from < 0) return
-        val to = (from + direction).coerceIn(0, notesList.lastIndex)
-        if (from == to) return
-        val moved = notesList.removeAt(from)
-        notesList.add(to, moved)
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        updateBubbleCount()
-        recyclerView.post { recyclerView.smoothScrollToPosition(to) }
-    }
-
-    private fun toggleNoteLock(noteId: Long) {
-        val index = notesList.indexOfFirst { it.id == noteId }
-        if (index < 0) return
-        val note = notesList[index]
-        notesList[index] = note.copy(isLocked = !note.isLocked)
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        Toast.makeText(this, if (notesList[index].isLocked) "Note locked" else "Note unlocked", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun deleteNoteFromList(noteId: Long) {
-        val index = notesList.indexOfFirst { it.id == noteId }
-        if (index < 0) return
-        if (currentEditingNoteId == noteId) {
-            currentEditingNoteId = null
-            restoreEditorStatePending = false
-            hideSelectionHandles()
-            hideFloatingActionBar()
-        }
-        notesList.removeAt(index)
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        updateBubbleCount()
-        Toast.makeText(this, "Note deleted", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun createNewNote() {
-        val now = System.currentTimeMillis()
-        val newNote = NoteItem(
-            id = now,
-            title = "Untitled Note",
-            content = "",
-            lastEdited = now,
-            createdAt = now,
-            isLocked = false
-        )
-        notesList.add(0, newNote)
-        saveNotesToPrefs()
-        notesAdapter.updateList(notesList)
-        updateBubbleCount()
-        openEditorForNote(newNote)
-    }
-
-    private fun isWordChar(char: Char): Boolean {
-        val isBengali = char in '\u0980'..'\u09FF'
-        val isHindi = char in '\u0900'..'\u097F'
-        val isArabic = char in '\u0600'..'\u06FF'
-        val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
-        val isLetterOrDigit = Character.isLetterOrDigit(char)
-        val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' ||
-                char == '#' || char == '$' || char == '%' || char == '&' ||
-                char == '*' || char == '+' || char == '=' || char == '~' ||
-                char == ':' || char == '/' || char == '\\'
-        return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
-    }
-
-    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
-        try {
-            val currentLayout = editText.layout
-            if (currentLayout != null) {
-                val line = currentLayout.getLineForVertical(editText.scrollY + y.toInt())
-                val offset = currentLayout.getOffsetForHorizontal(line, x)
-                val text = editText.text.toString()
-                if (offset >= 0 && offset <= text.length) {
-                    var wordStart = offset
-                    var wordEnd = offset
-                    while (wordStart > 0 && isWordChar(text[wordStart - 1])) wordStart--
-                    while (wordEnd < text.length && isWordChar(text[wordEnd])) wordEnd++
-                    if (wordStart == wordEnd) {
-                        var tempStart = offset - 1
-                        while (tempStart >= 0 && isWordChar(text[tempStart])) tempStart--
-                        wordStart = tempStart + 1
-                        var tempEnd = offset
-                        while (tempEnd < text.length && isWordChar(text[tempEnd])) tempEnd++
-                        wordEnd = tempEnd
-                    }
-                    if (wordStart < wordEnd) {
-                        editText.setSelection(wordStart, wordEnd)
-                        val selectedWord = text.substring(wordStart, wordEnd)
-                        currentSelectedText = selectedWord
-                        isActionBarTemporarilyHidden = false
-                        showFloatingActionBar(selectedWord)
-                        leftHandleView = null
-                        rightHandleView = null
-                        showSelectionHandles()
-                        updateHandlePositionsImmediate()
-                        Handler(Looper.getMainLooper()).postDelayed({ updateHandlePositionsImmediate() }, 50)
-                        Handler(Looper.getMainLooper()).postDelayed({ updateHandlePositionsImmediate() }, 150)
-                        Handler(Looper.getMainLooper()).postDelayed({ updateHandlePositionsImmediate() }, 300)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-        }
+        listWrapper.addView(recyclerView)
+        return listWrapper
     }
 
     // ============================================================
-    // ✅ openEditorForNote - WITH TOP-LEFT PIVOT TRANSITION
-    //    এক কিনারা থেকে চুপসে/ফুলে ওঠে, মাঝখান থেকে নয়
+    // ✅ Inner content: Editor (title bar + editText scroll)
     // ============================================================
-    private fun openEditorForNote(note: NoteItem) {
-        currentEditingNoteId = note.id
-        val container = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setColor(Color.parseColor(NOTEPAD_BG_COLOR))
-                cornerRadius = 5f
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                clipToOutline = true
-                elevation = dpToPx(14).toFloat()
-                translationZ = dpToPx(2).toFloat()
-            }
-        }
-        val contentContainer = LinearLayout(this).apply {
+    private fun createEditorContentView(note: NoteItem): View {
+        val wrapper = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 0, 0, 0)
-        }
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(35)
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
             )
-            setPadding(dpToPx(3), 0, dpToPx(3), 0)
-            setBackgroundColor(Color.parseColor("#F9E79F"))
-            setOnTouchListener(TitleBarDragListener())
         }
-        val backBtn = createTopBarIconButton(createTopBarBackDrawable(), Color.rgb(255, 220, 80)) {
-            saveCurrentNote(note.id)
-        }
-        topBar.addView(backBtn)
-        val emptyTitleSpace = Space(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
-        }
-        topBar.addView(emptyTitleSpace)
-        val undoBtn = createTopBarIconButton(createTopBarUndoDrawable(), Color.rgb(255, 220, 80)) { undoEditorChange() }
-        val redoBtn = createTopBarIconButton(createTopBarRedoDrawable(), Color.rgb(255, 220, 80)) { redoEditorChange() }
-        val pasteBtnTop = createTopBarIconButton(createTopBarPasteDrawable(), Color.rgb(255, 220, 80)) { pasteIntoEditor() }
-        val shareTopBtn = createTopBarIconButton(createTopBarShareDrawable(), Color.rgb(255, 220, 80)) {
-            hideFloatingActionBar()
-            hideSelectionHandles()
-            hideEditorKeyboard()
-            val title = getEditorAutoTitle(editText.text.toString())
-            shareLargeText(if (title.isEmpty()) editText.text.toString() else "$title\n\n${editText.text}")
-            Handler(Looper.getMainLooper()).postDelayed({
-                if (isExpanded) collapseToBubble()
-            }, 500)
-        }
-        val minimizeBtn = createTopBarIconButton(createTopBarMinimizeDrawable(), Color.rgb(255, 220, 80)) {
-            collapseToBubble()
-        }
-        val closeBtn = createTopBarIconButton(createTopBarCloseDrawable(), Color.rgb(255, 220, 80)) {
-            closeChildNotePad(note.id)
-        }
-        topBar.addView(undoBtn)
-        topBar.addView(redoBtn)
-        topBar.addView(pasteBtnTop)
-        topBar.addView(shareTopBtn)
-        topBar.addView(minimizeBtn)
-        topBar.addView(closeBtn)
-        contentContainer.addView(topBar)
 
         var titleWasEditedManually = false
         val titleBar = LinearLayout(this).apply {
@@ -2212,7 +1990,7 @@ class FloatingBubbleService : Service() {
             })
         }
         titleBar.addView(titleInput)
-        contentContainer.addView(titleBar)
+        wrapper.addView(titleBar)
 
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -2606,7 +2384,7 @@ class FloatingBubbleService : Service() {
         }
 
         scrollView.addView(editText)
-        contentContainer.addView(scrollView)
+        wrapper.addView(scrollView)
 
         isEditorLocked = note.isLocked
         if (note.isLocked) {
@@ -2623,42 +2401,264 @@ class FloatingBubbleService : Service() {
             titleInput.isEnabled = true
         }
 
-        container.addView(contentContainer)
-        val resizeHandleView = TextView(this).apply {
-            text = "◢"
-            textSize = 18f
-            setTextColor(Color.parseColor("#F28B82"))
-            gravity = Gravity.END or Gravity.BOTTOM
-            includeFontPadding = false
-            setPadding(0, 0, 0, 0)
-            background = null
-            layoutParams = FrameLayout.LayoutParams(dpToPx(18), dpToPx(18), Gravity.END or Gravity.BOTTOM).apply {
-                rightMargin = 0
-                bottomMargin = 0
-            }
-            translationY = dpToPx(4).toFloat()
-            setOnTouchListener(ResizeTouchListener())
-            bringToFront()
-        }
-        container.addView(resizeHandleView)
-        handleContainer = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            isClickable = false
-            isFocusable = false
-            bringToFront()
-        }
-        container.addView(handleContainer)
+        return wrapper
+    }
 
-        // ============================================================
-        // ✅ TOP-LEFT PIVOT TRANSITION (note list → editor)
-        //    এক কিনারা (উপরের-বাম) থেকে চুপসে/ফুলে ওঠে
-        // ============================================================
-        val oldNoteView = noteView
+    private fun createTopBarSettingsDrawable(): Drawable =
+        createStrokePathDrawable { canvas, w, h, paint ->
+            val cx = w * 0.50f
+            val cy = h * 0.50f
+            val outerR = w * 0.29f
+            val innerR = w * 0.11f
+            canvas.drawCircle(cx, cy, outerR, paint)
+            canvas.drawCircle(cx, cy, innerR, paint)
+            for (i in 0 until 6) {
+                canvas.save()
+                canvas.rotate(i * 60f, cx, cy)
+                canvas.drawLine(cx, cy - outerR, cx, cy - w * 0.39f, paint)
+                canvas.restore()
+            }
+        }
+
+    private fun createTopBarPlusDrawable(): Drawable =
+        createStrokePathDrawable { canvas, w, h, paint ->
+            val cx = w * 0.50f
+            val cy = h * 0.50f
+            val half = w * 0.27f
+            canvas.drawLine(cx - half, cy, cx + half, cy, paint)
+            canvas.drawLine(cx, cy - half, cx, cy + half, paint)
+        }
+
+    private fun createTopBarArrowDrawable(up: Boolean, iconColor: Int = Color.BLACK): Drawable =
+        createStrokePathDrawable(iconColor) { canvas, w, h, paint ->
+            val cx = w * 0.50f
+            val cy = h * 0.50f
+            val half = w * 0.22f
+            val tipY = if (up) h * 0.24f else h * 0.76f
+            val baseY = if (up) h * 0.66f else h * 0.34f
+            val path = android.graphics.Path().apply {
+                moveTo(cx, tipY)
+                lineTo(cx - half, baseY)
+                moveTo(cx, tipY)
+                lineTo(cx + half, baseY)
+                moveTo(cx, tipY)
+                lineTo(cx, if (up) h * 0.84f else h * 0.16f)
+            }
+            canvas.drawPath(path, paint)
+        }
+
+    private fun createTopBarListLockDrawable(locked: Boolean, iconColor: Int = Color.BLACK): Drawable =
+        createStrokePathDrawable(iconColor) { canvas, w, h, paint ->
+            val body = RectF(w * 0.25f, h * 0.42f, w * 0.75f, h * 0.82f)
+            canvas.drawRoundRect(body, w * 0.06f, w * 0.06f, paint)
+            val arc = RectF(w * 0.34f, h * 0.16f, w * 0.66f, h * 0.58f)
+            if (locked) {
+                canvas.drawArc(arc, 180f, 180f, false, paint)
+            } else {
+                canvas.drawArc(arc, 205f, 145f, false, paint)
+                canvas.drawLine(w * 0.66f, h * 0.38f, w * 0.72f, h * 0.28f, paint)
+            }
+            canvas.drawCircle(w * 0.50f, h * 0.61f, w * 0.045f, paint)
+        }
+
+    private fun formatNoteCreatedDate(note: NoteItem): String {
+        val timestamp = if (note.createdAt > 0L) note.createdAt else note.lastEdited
+        return try {
+            java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+        } catch (_: Exception) { "" }
+    }
+
+    private fun moveNote(noteId: Long, direction: Int) {
+        val from = notesList.indexOfFirst { it.id == noteId }
+        if (from < 0) return
+        val to = (from + direction).coerceIn(0, notesList.lastIndex)
+        if (from == to) return
+        val moved = notesList.removeAt(from)
+        notesList.add(to, moved)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+        recyclerView.post { recyclerView.smoothScrollToPosition(to) }
+    }
+
+    private fun toggleNoteLock(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index < 0) return
+        val note = notesList[index]
+        notesList[index] = note.copy(isLocked = !note.isLocked)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        Toast.makeText(this, if (notesList[index].isLocked) "Note locked" else "Note unlocked", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun deleteNoteFromList(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index < 0) return
+        if (currentEditingNoteId == noteId) {
+            currentEditingNoteId = null
+            restoreEditorStatePending = false
+            hideSelectionHandles()
+            hideFloatingActionBar()
+        }
+        notesList.removeAt(index)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+        Toast.makeText(this, "Note deleted", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun createNewNote() {
+        val now = System.currentTimeMillis()
+        val newNote = NoteItem(
+            id = now,
+            title = "Untitled Note",
+            content = "",
+            lastEdited = now,
+            createdAt = now,
+            isLocked = false
+        )
+        notesList.add(0, newNote)
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+        openEditorForNote(newNote)
+    }
+
+    private fun isWordChar(char: Char): Boolean {
+        val isBengali = char in '\u0980'..'\u09FF'
+        val isHindi = char in '\u0900'..'\u097F'
+        val isArabic = char in '\u0600'..'\u06FF'
+        val isUrdu = char in '\u0600'..'\u06FF' || char in '\u0750'..'\u077F'
+        val isLetterOrDigit = Character.isLetterOrDigit(char)
+        val isSpecial = char == '.' || char == '_' || char == '-' || char == '@' ||
+                char == '#' || char == '$' || char == '%' || char == '&' ||
+                char == '*' || char == '+' || char == '=' || char == '~' ||
+                char == ':' || char == '/' || char == '\\'
+        return isBengali || isHindi || isArabic || isUrdu || isLetterOrDigit || isSpecial
+    }
+
+    private fun selectWordAtPosition(editText: EditText, x: Float, y: Float, clearPrevious: Boolean = true) {
+        try {
+            val currentLayout = editText.layout
+            if (currentLayout != null) {
+                val line = currentLayout.getLineForVertical(editText.scrollY + y.toInt())
+                val offset = currentLayout.getOffsetForHorizontal(line, x)
+                val text = editText.text.toString()
+                if (offset >= 0 && offset <= text.length) {
+                    var wordStart = offset
+                    var wordEnd = offset
+                    while (wordStart > 0 && isWordChar(text[wordStart - 1])) wordStart--
+                    while (wordEnd < text.length && isWordChar(text[wordEnd])) wordEnd++
+                    if (wordStart == wordEnd) {
+                        var tempStart = offset - 1
+                        while (tempStart >= 0 && isWordChar(text[tempStart])) tempStart--
+                        wordStart = tempStart + 1
+                        var tempEnd = offset
+                        while (tempEnd < text.length && isWordChar(text[tempEnd])) tempEnd++
+                        wordEnd = tempEnd
+                    }
+                    if (wordStart < wordEnd) {
+                        editText.setSelection(wordStart, wordEnd)
+                        val selectedWord = text.substring(wordStart, wordEnd)
+                        currentSelectedText = selectedWord
+                        isActionBarTemporarilyHidden = false
+                        showFloatingActionBar(selectedWord)
+                        leftHandleView = null
+                        rightHandleView = null
+                        showSelectionHandles()
+                        updateHandlePositionsImmediate()
+                        Handler(Looper.getMainLooper()).postDelayed({ updateHandlePositionsImmediate() }, 50)
+                        Handler(Looper.getMainLooper()).postDelayed({ updateHandlePositionsImmediate() }, 150)
+                        Handler(Looper.getMainLooper()).postDelayed({ updateHandlePositionsImmediate() }, 300)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+        }
+    }
+
+    // ============================================================
+    // ✅ openEditorForNote - FIXED FRAME + inner content swap
+    // ============================================================
+    private fun openEditorForNote(note: NoteItem) {
+        currentEditingNoteId = note.id
+
+        val existingContainer = noteView as? FrameLayout
+        if (existingContainer == null) {
+            // কোনো notepad নেই → fallback
+            showEditorInNewFrame(note)
+            return
+        }
+
+        val contentContainer = existingContainer.getChildAt(0) as? LinearLayout ?: return
+
+        // Content area is index 2 (after topBar and topBarBottomShadow)
+        val oldContentArea = if (contentContainer.childCount > 2) contentContainer.getChildAt(2) else null
+
+        val newEditorContent = createEditorContentView(note)
+
+        if (oldContentArea != null) {
+            newEditorContent.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+            contentContainer.addView(newEditorContent, 2)
+
+            newEditorContent.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            newEditorContent.alpha = 0f
+            newEditorContent.scaleX = 0.85f
+            newEditorContent.scaleY = 0.85f
+
+            newEditorContent.doOnLayout {
+                newEditorContent.pivotX = 0f
+                newEditorContent.pivotY = 0f
+
+                oldContentArea.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                oldContentArea.pivotX = 0f
+                oldContentArea.pivotY = 0f
+
+                oldContentArea.animate()
+                    .alpha(0f)
+                    .scaleX(0.85f)
+                    .scaleY(0.85f)
+                    .setDuration(180)
+                    .setInterpolator(DecelerateInterpolator())
+                    .withEndAction {
+                        try {
+                            contentContainer.removeView(oldContentArea)
+                        } catch (_: Exception) {}
+                        oldContentArea.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
+
+                newEditorContent.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(240)
+                    .setInterpolator(OvershootInterpolator(0.4f))
+                    .withEndAction {
+                        newEditorContent.setLayerType(View.LAYER_TYPE_NONE, null)
+                        applyRestoreEditorStateIfNeeded()
+                    }
+                    .start()
+            }
+        } else {
+            newEditorContent.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+            contentContainer.addView(newEditorContent)
+            applyRestoreEditorStateIfNeeded()
+        }
+    }
+
+    // ============================================================
+    // ✅ showEditorInNewFrame - Fallback if no frame exists
+    // ============================================================
+    private fun showEditorInNewFrame(note: NoteItem) {
+        val container = createFullNotePad()
         noteView = container
-        val newParams = WindowManager.LayoutParams(
+
+        val params = WindowManager.LayoutParams(
             currentNotepadWidth, currentNotepadHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
@@ -2666,62 +2666,31 @@ class FloatingBubbleService : Service() {
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         )
-        newParams.gravity = Gravity.TOP or Gravity.START
-        newParams.x = notepadPosX
-        newParams.y = notepadPosY
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = notepadPosX
+        params.y = notepadPosY
+        windowManager.addView(container, params)
 
-        if (oldNoteView != null) {
-            container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            container.alpha = 0f
-            container.scaleX = 0.7f
-            container.scaleY = 0.7f
-            windowManager.addView(container, newParams)
+        val contentContainer = container.getChildAt(0) as? LinearLayout
+        val oldContentArea = if (contentContainer != null && contentContainer.childCount > 2) {
+            contentContainer.getChildAt(2)
+        } else null
 
-            container.doOnLayout {
-                // ✅ Pivot: উপরের-বাম কোণ — এক কিনারা থেকে scale হবে
-                container.pivotX = 0f
-                container.pivotY = 0f
-
-                oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                oldNoteView.pivotX = 0f
-                oldNoteView.pivotY = 0f
-
-                // ✅ পুরনো note list উপরের-বাম দিকে ছোট হয়ে মিলিয়ে যায়
-                oldNoteView.animate()
-                    .alpha(0f)
-                    .scaleX(0.7f)
-                    .scaleY(0.7f)
-                    .setDuration(180)
-                    .setInterpolator(DecelerateInterpolator())
-                    .withEndAction {
-                        try {
-                            windowManager.removeView(oldNoteView)
-                        } catch (_: Exception) {}
-                        oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
-                    }
-                    .start()
-
-                // ✅ নতুন editor উপরের-বাম দিক থেকে বড় হয়ে ফুটে ওঠে
-                container.animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(240)
-                    .setInterpolator(OvershootInterpolator(0.4f))
-                    .withEndAction {
-                        container.setLayerType(View.LAYER_TYPE_NONE, null)
-                        applyRestoreEditorStateIfNeeded()
-                    }
-                    .start()
-            }
-        } else {
-            windowManager.addView(container, newParams)
-            applyRestoreEditorStateIfNeeded()
+        if (contentContainer != null && oldContentArea != null) {
+            contentContainer.removeView(oldContentArea)
         }
+
+        val editorContent = createEditorContentView(note)
+        editorContent.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        )
+        contentContainer?.addView(editorContent)
+
+        applyRestoreEditorStateIfNeeded()
     }
 
     // ============================================================
-    // ✅ Helper: Apply pending restore state (or focus + cursor at 0)
+    // ✅ Helper: Apply pending restore state
     // ============================================================
     private fun applyRestoreEditorStateIfNeeded() {
         if (!::editText.isInitialized) return
@@ -2919,7 +2888,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ saveCurrentNote - WITH TOP-LEFT PIVOT TRANSITION
+    // ✅ saveCurrentNote - FIXED FRAME + inner content swap (back to list)
     // ============================================================
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
@@ -2928,12 +2897,11 @@ class FloatingBubbleService : Service() {
         val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
         val contentText = editText.text.toString()
         val finalTitle = rawTitle.ifEmpty { getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" } }
-        val updatedNote = notesList[index].copy(
+        notesList[index] = notesList[index].copy(
             title = finalTitle,
             content = contentText,
             lastEdited = System.currentTimeMillis()
         )
-        notesList[index] = updatedNote
         saveNotesToPrefs()
         notesAdapter.updateList(notesList)
         updateBubbleCount()
@@ -2942,66 +2910,65 @@ class FloatingBubbleService : Service() {
         hideFloatingActionBar()
         hideEditorKeyboard()
 
-        val oldNoteView = noteView ?: return
+        val existingContainer = noteView as? FrameLayout ?: return
+        val contentContainer = existingContainer.getChildAt(0) as? LinearLayout ?: return
 
         currentEditingNoteId = null
         restoreEditorStatePending = false
-        val newContainer = createFullNotePad()
 
-        val newParams = WindowManager.LayoutParams(
-            currentNotepadWidth, currentNotepadHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        )
-        newParams.gravity = Gravity.TOP or Gravity.START
-        newParams.x = notepadPosX
-        newParams.y = notepadPosY
+        val oldContentArea = if (contentContainer.childCount > 2) contentContainer.getChildAt(2) else null
 
-        newContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        newContainer.alpha = 0f
-        newContainer.scaleX = 0.7f
-        newContainer.scaleY = 0.7f
-        windowManager.addView(newContainer, newParams)
-        noteView = newContainer
+        val newListContent = createNoteListContentView()
 
-        newContainer.doOnLayout {
-            // ✅ Pivot: উপরের-বাম কোণ
-            newContainer.pivotX = 0f
-            newContainer.pivotY = 0f
+        if (oldContentArea != null) {
+            newListContent.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+            contentContainer.addView(newListContent, 2)
 
-            oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            oldNoteView.pivotX = 0f
-            oldNoteView.pivotY = 0f
+            newListContent.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            newListContent.alpha = 0f
+            newListContent.scaleX = 0.85f
+            newListContent.scaleY = 0.85f
 
-            // ✅ পুরনো editor উপরের-বাম দিকে ছোট হয়ে মিলিয়ে যায়
-            oldNoteView.animate()
-                .alpha(0f)
-                .scaleX(0.7f)
-                .scaleY(0.7f)
-                .setDuration(180)
-                .setInterpolator(DecelerateInterpolator())
-                .withEndAction {
-                    try {
-                        windowManager.removeView(oldNoteView)
-                    } catch (_: Exception) {}
-                    oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
-                }
-                .start()
+            newListContent.doOnLayout {
+                newListContent.pivotX = 0f
+                newListContent.pivotY = 0f
 
-            // ✅ নতুন note list উপরের-বাম দিক থেকে বড় হয়ে ফুটে ওঠে
-            newContainer.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(240)
-                .setInterpolator(OvershootInterpolator(0.4f))
-                .withEndAction {
-                    newContainer.setLayerType(View.LAYER_TYPE_NONE, null)
-                }
-                .start()
+                oldContentArea.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                oldContentArea.pivotX = 0f
+                oldContentArea.pivotY = 0f
+
+                oldContentArea.animate()
+                    .alpha(0f)
+                    .scaleX(0.85f)
+                    .scaleY(0.85f)
+                    .setDuration(180)
+                    .setInterpolator(DecelerateInterpolator())
+                    .withEndAction {
+                        try {
+                            contentContainer.removeView(oldContentArea)
+                        } catch (_: Exception) {}
+                        oldContentArea.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
+
+                newListContent.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(240)
+                    .setInterpolator(OvershootInterpolator(0.4f))
+                    .withEndAction {
+                        newListContent.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
+            }
+        } else {
+            newListContent.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+            contentContainer.addView(newListContent)
         }
     }
 
