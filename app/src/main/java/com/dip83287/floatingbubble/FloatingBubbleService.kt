@@ -86,6 +86,7 @@ class FloatingBubbleService : Service() {
     private enum class ContentMode { LIST, EDITOR }
     
     private lateinit var titleInput: EditText
+    private var titleWasEditedManually = false
 
     private data class EditorHistoryState(
         val text: String,
@@ -2340,6 +2341,7 @@ private fun openEditorForNote(note: NoteItem) {
     currentEditingNoteId = note.id
     val host = contentHost ?: return
     val titleBar = titleBarView ?: return
+    titleWasEditedManually = false
 
     // ============================================================
     // ✅ STEP 1: TitleBar পরিবর্তন — Note Number + Title Input দেখান
@@ -2364,7 +2366,7 @@ private fun openEditorForNote(note: NoteItem) {
         } else {
             initialAutoTitle
         }
-        var titleWasEditedManually = false
+       
 
         titleInput = EditText(this).apply {
             setText(initialTitle)
