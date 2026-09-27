@@ -182,7 +182,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ✅ When user types while a selection exists, hide handles and action bar
     private fun hideSelectionUiAfterTyping() {
         suppressSelectionUiUntil = android.os.SystemClock.uptimeMillis() + 600L
         currentSelectedText = ""
@@ -231,8 +230,6 @@ class FloatingBubbleService : Service() {
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             loadSavedPositions()
 
-            // ✅ SharedPreferences থেকে নোট লোড করুন
-            // Google Drive Auto Backup স্বয়ংক্রিয়ভাবে restore করেছে (যদি থাকে)
             loadNotes()
 
             createNotificationChannel()
@@ -251,9 +248,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // ✅ LOAD NOTES - SharedPreferences only
-    // ============================================================
     private fun loadNotes() {
         try {
             val prefsJson = prefs.getString(STORAGE_NOTES_LIST, null)
@@ -269,7 +263,6 @@ class FloatingBubbleService : Service() {
                 } catch (_: Exception) {}
             }
 
-            // ✅ প্রথমবার ইনস্টল → নতুন নোট তৈরি
             notesList.clear()
             notesList.add(NoteItem(System.currentTimeMillis(), "Untitled Note", ""))
             saveNotesToPrefs()
@@ -281,9 +274,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // ✅ SAVE NOTES - SharedPreferences only
-    // ============================================================
     private fun saveNotesToPrefs() {
         try {
             val notesJson = Gson().toJson(notesList)
@@ -526,9 +516,6 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
-    // ============================================================
-    // ✅ Default bubble position on RIGHT side
-    // ============================================================
     private fun getInitialBubblePosition(): Pair<Int, Int> {
         val screenWidth = resources.displayMetrics.widthPixels
         val isFirstTime = prefs.getBoolean(KEY_FIRST_TIME_BUBBLE, true)
@@ -917,7 +904,8 @@ class FloatingBubbleService : Service() {
     private fun createTopBarIconButton(
         iconDrawable: Drawable,
         buttonColor: Int,
-        clickAction: () -> Unit    ): ImageButton {
+        clickAction: () -> Unit
+    ): ImageButton {
         val size = dpToPx(24)
         return ImageButton(this).apply {
             layoutParams = LinearLayout.LayoutParams(size, size).apply {
@@ -1545,7 +1533,6 @@ class FloatingBubbleService : Service() {
             }
             background = shape
         }
-        // ✅ Globe icon click → search + minimize
         val chromeBtn = TextView(this).apply {
             text = "🌐"
             textSize = 18f
@@ -2098,7 +2085,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ openEditorForNote - WITH TRUE CROSS-FADE TRANSITION
+    // ✅ openEditorForNote - WITH MINIMIZE-STYLE TRANSITION
     // ============================================================
     private fun openEditorForNote(note: NoteItem) {
         currentEditingNoteId = note.id
@@ -2664,75 +2651,70 @@ class FloatingBubbleService : Service() {
         }
         container.addView(handleContainer)
 
-// ============================================================
-// ✅ MINIMIZE-STYLE TRANSITION (note list → editor)
-//    ঠিক যেমন minimize-এ note bubble-এ পরিণত হয়
-// ============================================================
-val oldNoteView = noteView
-noteView = container
-val newParams = WindowManager.LayoutParams(
-    currentNotepadWidth, currentNotepadHeight,
-    if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-    else WindowManager.LayoutParams.TYPE_PHONE,
-    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-    PixelFormat.TRANSLUCENT
-)
-newParams.gravity = Gravity.TOP or Gravity.START
-newParams.x = notepadPosX
-newParams.y = notepadPosY
+        // ============================================================
+        // ✅ MINIMIZE-STYLE TRANSITION (note list → editor)
+        //    ঠিক যেমন minimize-এ note bubble-এ পরিণত হয়
+        // ============================================================
+        val oldNoteView = noteView
+        noteView = container
+        val newParams = WindowManager.LayoutParams(
+            currentNotepadWidth, currentNotepadHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+        newParams.gravity = Gravity.TOP or Gravity.START
+        newParams.x = notepadPosX
+        newParams.y = notepadPosY
 
-if (oldNoteView != null) {
-    // ✅ প্রথমে নতুন editor add করুন (same position-এ, ছোট scale + alpha 0 দিয়ে)
-    container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-    container.alpha = 0f
-    container.scaleX = 0.85f
-    container.scaleY = 0.85f
-    windowManager.addView(container, newParams)
+        if (oldNoteView != null) {
+            container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            container.alpha = 0f
+            container.scaleX = 0.85f
+            container.scaleY = 0.85f
+            windowManager.addView(container, newParams)
 
-    container.doOnLayout {
-        // pivot: note list-এর কেন্দ্র (যেমন minimize-এ bubble-এর কেন্দ্র থেকে চুপসে যায়)
-        container.pivotX = (container.width / 2).toFloat()
-        container.pivotY = (container.height / 2).toFloat()
+            container.doOnLayout {
+                container.pivotX = (container.width / 2).toFloat()
+                container.pivotY = (container.height / 2).toFloat()
 
-        oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        oldNoteView.pivotX = (oldNoteView.width / 2).toFloat()
-        oldNoteView.pivotY = (oldNoteView.height / 2).toFloat()
+                oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                oldNoteView.pivotX = (oldNoteView.width / 2).toFloat()
+                oldNoteView.pivotY = (oldNoteView.height / 2).toFloat()
 
-        // ✅ Minimize-এর ঠিক উল্টো:
-        //    পুরনো note list ছোট হয়ে চুপসে যায় (1.0 → 0.88) — যেমন bubble ছোট হয়
-        oldNoteView.animate()
-            .alpha(0f)
-            .scaleX(0.85f)
-            .scaleY(0.85f)
-            .setDuration(180)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                try {
-                    windowManager.removeView(oldNoteView)
-                } catch (_: Exception) {}
-                oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
+                oldNoteView.animate()
+                    .alpha(0f)
+                    .scaleX(0.85f)
+                    .scaleY(0.85f)
+                    .setDuration(180)
+                    .setInterpolator(DecelerateInterpolator())
+                    .withEndAction {
+                        try {
+                            windowManager.removeView(oldNoteView)
+                        } catch (_: Exception) {}
+                        oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
+                    .start()
+
+                container.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(240)
+                    .setInterpolator(OvershootInterpolator(0.4f))
+                    .withEndAction {
+                        container.setLayerType(View.LAYER_TYPE_NONE, null)
+                        applyRestoreEditorStateIfNeeded()
+                    }
+                    .start()
             }
-            .start()
-
-        // ✅ নতুন editor ছোট থেকে বড় হয়ে ফুটে ওঠে (0.85 → 1.0)
-        //    যেমন minimize-এ bubble বড় হয়ে note pad হয়
-        container.animate()
-            .alpha(1f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .setDuration(240)
-            .setInterpolator(OvershootInterpolator(0.4f))
-            .withEndAction {
-                container.setLayerType(View.LAYER_TYPE_NONE, null)
-                applyRestoreEditorStateIfNeeded()
-            }
-            .start()
+        } else {
+            windowManager.addView(container, newParams)
+            applyRestoreEditorStateIfNeeded()
+        }
     }
-} else {
-    windowManager.addView(container, newParams)
-    applyRestoreEditorStateIfNeeded()
-}
 
     // ============================================================
     // ✅ Helper: Apply pending restore state (or focus + cursor at 0)
@@ -2932,92 +2914,89 @@ if (oldNoteView != null) {
         } catch (e: Exception) {}
     }
 
-private fun saveCurrentNote(noteId: Long) {
-    val index = notesList.indexOfFirst { it.id == noteId }
-    if (index == -1) return
+    // ============================================================
+    // ✅ saveCurrentNote - WITH MINIMIZE-STYLE TRANSITION
+    // ============================================================
+    private fun saveCurrentNote(noteId: Long) {
+        val index = notesList.indexOfFirst { it.id == noteId }
+        if (index == -1) return
 
-    // ✅ আগে সব ডেটা save করুন
-    val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
-    val contentText = editText.text.toString()
-    val finalTitle = rawTitle.ifEmpty { getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" } }
-    val updatedNote = notesList[index].copy(
-        title = finalTitle,
-        content = contentText,
-        lastEdited = System.currentTimeMillis()
-    )
-    notesList[index] = updatedNote
-    saveNotesToPrefs()
-    notesAdapter.updateList(notesList)
-    updateBubbleCount()
-    Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
-    hideSelectionHandles()
-    hideFloatingActionBar()
-    hideEditorKeyboard()
+        val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
+        val contentText = editText.text.toString()
+        val finalTitle = rawTitle.ifEmpty { getEditorAutoTitle(contentText).ifEmpty { "Untitled Note" } }
+        val updatedNote = notesList[index].copy(
+            title = finalTitle,
+            content = contentText,
+            lastEdited = System.currentTimeMillis()
+        )
+        notesList[index] = updatedNote
+        saveNotesToPrefs()
+        notesAdapter.updateList(notesList)
+        updateBubbleCount()
+        Toast.makeText(this, "Note saved", Toast.LENGTH_SHORT).show()
+        hideSelectionHandles()
+        hideFloatingActionBar()
+        hideEditorKeyboard()
 
-    val oldNoteView = noteView ?: return
+        val oldNoteView = noteView ?: return
 
-    // ✅ নতুন note list তৈরি করুন (এখনো add করবেন না)
-    currentEditingNoteId = null
-    restoreEditorStatePending = false
-    val newContainer = createFullNotePad()
+        currentEditingNoteId = null
+        restoreEditorStatePending = false
+        val newContainer = createFullNotePad()
 
-    val newParams = WindowManager.LayoutParams(
-        currentNotepadWidth, currentNotepadHeight,
-        if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else WindowManager.LayoutParams.TYPE_PHONE,
-        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-        PixelFormat.TRANSLUCENT
-    )
-    newParams.gravity = Gravity.TOP or Gravity.START
-    newParams.x = notepadPosX
-    newParams.y = notepadPosY
+        val newParams = WindowManager.LayoutParams(
+            currentNotepadWidth, currentNotepadHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+        newParams.gravity = Gravity.TOP or Gravity.START
+        newParams.x = notepadPosX
+        newParams.y = notepadPosY
 
-    // ✅ MINIMIZE-STYLE TRANSITION (editor → note list)
-    //    editor ছোট হয়ে চুপসে যায় (0.85), note list ছোট থেকে বড় হয়ে ফুটে ওঠে (0.85 → 1.0)
-    newContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-    newContainer.alpha = 0f
-    newContainer.scaleX = 0.85f
-    newContainer.scaleY = 0.85f
-    windowManager.addView(newContainer, newParams)
-    noteView = newContainer
+        newContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        newContainer.alpha = 0f
+        newContainer.scaleX = 0.85f
+        newContainer.scaleY = 0.85f
+        windowManager.addView(newContainer, newParams)
+        noteView = newContainer
 
-    newContainer.doOnLayout {
-        newContainer.pivotX = (newContainer.width / 2).toFloat()
-        newContainer.pivotY = (newContainer.height / 2).toFloat()
+        newContainer.doOnLayout {
+            newContainer.pivotX = (newContainer.width / 2).toFloat()
+            newContainer.pivotY = (newContainer.height / 2).toFloat()
 
-        oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        oldNoteView.pivotX = (oldNoteView.width / 2).toFloat()
-        oldNoteView.pivotY = (oldNoteView.height / 2).toFloat()
+            oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            oldNoteView.pivotX = (oldNoteView.width / 2).toFloat()
+            oldNoteView.pivotY = (oldNoteView.height / 2).toFloat()
 
-        // ✅ পুরনো editor ছোট হয়ে fade-out
-        oldNoteView.animate()
-            .alpha(0f)
-            .scaleX(0.85f)
-            .scaleY(0.85f)
-            .setDuration(180)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                try {
-                    windowManager.removeView(oldNoteView)
-                } catch (_: Exception) {}
-                oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
-            }
-            .start()
+            oldNoteView.animate()
+                .alpha(0f)
+                .scaleX(0.85f)
+                .scaleY(0.85f)
+                .setDuration(180)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    try {
+                        windowManager.removeView(oldNoteView)
+                    } catch (_: Exception) {}
+                    oldNoteView.setLayerType(View.LAYER_TYPE_NONE, null)
+                }
+                .start()
 
-        // ✅ নতুন note list ছোট থেকে বড় হয়ে fade-in
-        newContainer.animate()
-            .alpha(1f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .setDuration(240)
-            .setInterpolator(OvershootInterpolator(0.4f))
-            .withEndAction {
-                newContainer.setLayerType(View.LAYER_TYPE_NONE, null)
-            }
-            .start()
+            newContainer.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(240)
+                .setInterpolator(OvershootInterpolator(0.4f))
+                .withEndAction {
+                    newContainer.setLayerType(View.LAYER_TYPE_NONE, null)
+                }
+                .start()
+        }
     }
-}
 
     private fun showNoteList() {
         currentEditingNoteId = null
