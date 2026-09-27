@@ -2085,7 +2085,8 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ openEditorForNote - WITH MINIMIZE-STYLE TRANSITION
+    // ✅ openEditorForNote - WITH TOP-LEFT PIVOT TRANSITION
+    //    এক কিনারা থেকে চুপসে/ফুলে ওঠে, মাঝখান থেকে নয়
     // ============================================================
     private fun openEditorForNote(note: NoteItem) {
         currentEditingNoteId = note.id
@@ -2652,8 +2653,8 @@ class FloatingBubbleService : Service() {
         container.addView(handleContainer)
 
         // ============================================================
-        // ✅ MINIMIZE-STYLE TRANSITION (note list → editor)
-        //    ঠিক যেমন minimize-এ note bubble-এ পরিণত হয়
+        // ✅ TOP-LEFT PIVOT TRANSITION (note list → editor)
+        //    এক কিনারা (উপরের-বাম) থেকে চুপসে/ফুলে ওঠে
         // ============================================================
         val oldNoteView = noteView
         noteView = container
@@ -2672,25 +2673,24 @@ class FloatingBubbleService : Service() {
         if (oldNoteView != null) {
             container.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             container.alpha = 0f
-            container.scaleX = 0.85f
-            container.scaleY = 0.85f
+            container.scaleX = 0.7f
+            container.scaleY = 0.7f
             windowManager.addView(container, newParams)
 
             container.doOnLayout {
-    // ✅ নতুন editor উপরের-বাম কোণ থেকে ফুটে উঠবে (যেমন minimize-এ note pad উপরে থেকে চুপসে যায়)
-    container.pivotX = 0f
-    container.pivotY = 0f
+                // ✅ Pivot: উপরের-বাম কোণ — এক কিনারা থেকে scale হবে
+                container.pivotX = 0f
+                container.pivotY = 0f
 
-    oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-    // ✅ পুরনো note list উপরের-বাম কোণ থেকে চুপসে মিলিয়ে যাবে
-    oldNoteView.pivotX = 0f
-    oldNoteView.pivotY = 0f
-    ...
+                oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                oldNoteView.pivotX = 0f
+                oldNoteView.pivotY = 0f
 
+                // ✅ পুরনো note list উপরের-বাম দিকে ছোট হয়ে মিলিয়ে যায়
                 oldNoteView.animate()
                     .alpha(0f)
-                    .scaleX(0.85f)
-                    .scaleY(0.85f)
+                    .scaleX(0.7f)
+                    .scaleY(0.7f)
                     .setDuration(180)
                     .setInterpolator(DecelerateInterpolator())
                     .withEndAction {
@@ -2701,6 +2701,7 @@ class FloatingBubbleService : Service() {
                     }
                     .start()
 
+                // ✅ নতুন editor উপরের-বাম দিক থেকে বড় হয়ে ফুটে ওঠে
                 container.animate()
                     .alpha(1f)
                     .scaleX(1f)
@@ -2918,7 +2919,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ saveCurrentNote - WITH MINIMIZE-STYLE TRANSITION
+    // ✅ saveCurrentNote - WITH TOP-LEFT PIVOT TRANSITION
     // ============================================================
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
@@ -2961,26 +2962,25 @@ class FloatingBubbleService : Service() {
 
         newContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         newContainer.alpha = 0f
-        newContainer.scaleX = 0.85f
-        newContainer.scaleY = 0.85f
+        newContainer.scaleX = 0.7f
+        newContainer.scaleY = 0.7f
         windowManager.addView(newContainer, newParams)
         noteView = newContainer
 
         newContainer.doOnLayout {
-    // ✅ নতুন note list উপরের-বাম কোণ থেকে ফুটে উঠবে
-    newContainer.pivotX = 0f
-    newContainer.pivotY = 0f
+            // ✅ Pivot: উপরের-বাম কোণ
+            newContainer.pivotX = 0f
+            newContainer.pivotY = 0f
 
-    oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-    // ✅ পুরনো editor উপরের-বাম কোণ থেকে চুপসে মিলিয়ে যাবে
-    oldNoteView.pivotX = 0f
-    oldNoteView.pivotY = 0f
-    ...
+            oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            oldNoteView.pivotX = 0f
+            oldNoteView.pivotY = 0f
 
+            // ✅ পুরনো editor উপরের-বাম দিকে ছোট হয়ে মিলিয়ে যায়
             oldNoteView.animate()
                 .alpha(0f)
-                .scaleX(0.85f)
-                .scaleY(0.85f)
+                .scaleX(0.7f)
+                .scaleY(0.7f)
                 .setDuration(180)
                 .setInterpolator(DecelerateInterpolator())
                 .withEndAction {
@@ -2991,6 +2991,7 @@ class FloatingBubbleService : Service() {
                 }
                 .start()
 
+            // ✅ নতুন note list উপরের-বাম দিক থেকে বড় হয়ে ফুটে ওঠে
             newContainer.animate()
                 .alpha(1f)
                 .scaleX(1f)
