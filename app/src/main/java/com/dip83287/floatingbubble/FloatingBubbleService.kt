@@ -2060,6 +2060,7 @@ class FloatingBubbleService : Service() {
         root.alpha = 0f
         root.scaleX = 0.7f
         root.scaleY = 0.7f
+        root.visibility = View.VISIBLE
         windowManager.addView(root, params)
         settingsView = root
 
@@ -2083,27 +2084,29 @@ class FloatingBubbleService : Service() {
     // closeSettingsScreen — top-left pivot scale-out (like minimize)
     // ============================================================
     private fun closeSettingsScreen() {
-        if (!isSettingsOpen) return
-        isSettingsOpen = false
-        val sv = settingsView ?: return
-        sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        sv.pivotX = 0f
-        sv.pivotY = 0f
-        sv.animate()
-            .alpha(0f)
-            .scaleX(0.7f)
-            .scaleY(0.7f)
-            .setDuration(220)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                try {
-                    windowManager.removeView(sv)
-                } catch (_: Exception) {}
-                sv.setLayerType(View.LAYER_TYPE_NONE, null)
-                settingsView = null
-            }
-            .start()
-    }
+    if (!isSettingsOpen) return
+    isSettingsOpen = false
+    val sv = settingsView ?: return
+    sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+    sv.pivotX = 0f
+    sv.pivotY = 0f
+    sv.animate()
+        .alpha(0f)
+        .scaleX(0.7f)
+        .scaleY(0.7f)
+        .setDuration(220)
+        .setInterpolator(DecelerateInterpolator())
+        .withEndAction {
+            // ✅ FIX: remove করার আগে view-কে invisible করি — কোনো flash/blank frame হবে না
+            sv.visibility = View.INVISIBLE
+            sv.setLayerType(View.LAYER_TYPE_NONE, null)
+            try {
+                windowManager.removeView(sv)
+            } catch (_: Exception) {}
+            settingsView = null
+        }
+        .start()
+}
 
     private fun createSectionHeader(text: String): TextView {
         return TextView(this).apply {
