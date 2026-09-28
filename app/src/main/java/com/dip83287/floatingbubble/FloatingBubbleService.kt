@@ -155,6 +155,8 @@ class FloatingBubbleService : Service() {
 
     private var handleContainer: FrameLayout? = null
     private val HANDLE_SIZE = 44
+    private val MAGNIFIER_EXTRA_OFFSET_PX = 8      // ✅ 8px extra up
+private val MAGNIFIER_AVOID_BAR_PX = 90        // ✅ action bar-এর height + margin
 
     private var scrollHideHandler: Handler? = null
     private var scrollHideRunnable: Runnable? = null
@@ -1256,39 +1258,47 @@ class FloatingBubbleService : Service() {
     private val customMagnifierFrameInterval = 16L
 
     private fun createCustomSelectionMagnifier() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        if (customMagnifierTarget !== editText) {
-            try {
-                customSelectionMagnifier?.dismiss()
-            } catch (_: Exception) {
-            }
-            customSelectionMagnifier = null
-            customMagnifierTarget = editText
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    if (customMagnifierTarget !== editText) {
+        try {
+            customSelectionMagnifier?.dismiss()
+        } catch (_: Exception) {
         }
-        if (customSelectionMagnifier == null) {
-            val density = resources.displayMetrics.density
-            customSelectionMagnifier = Magnifier.Builder(editText)
-                .setSize((130f * density).toInt(), (50f * density).toInt())
-                .setCornerRadius(15f * density)
-                .build()
-        }
+        customSelectionMagnifier = null
+        customMagnifierTarget = editText
     }
+    if (customSelectionMagnifier == null) {
+        val density = resources.displayMetrics.density
+        customSelectionMagnifier = Magnifier.Builder(editText)
+            .setSize((140f * density).toInt(), (54f * density).toInt())
+            .setCornerRadius(16f * density)
+            .setInitialZoom(1.4f)
+            .build()
+    }
+}
 
     private fun showCustomSelectionMagnifier(rawX: Float, rawY: Float, force: Boolean = false) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val now = System.currentTimeMillis()
-        if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
-        lastCustomMagnifierTime = now
-        try {
-            createCustomSelectionMagnifier()
-            val location = IntArray(2)
-            editText.getLocationOnScreen(location)
-            val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
-            val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
-            customSelectionMagnifier?.show(localX, localY)
-        } catch (e: Exception) {
-        }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    val now = System.currentTimeMillis()
+    if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
+    lastCustomMagnifierTime = now
+    try {
+        createCustomSelectionMagnifier()
+        val location = IntArray(2)
+        editText.getLocationOnScreen(location)
+        val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
+        val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
+
+        // ✅ Magnifier কে 8px + action bar-এর উচ্চতা পরিমাণ উপরে shift করি
+        // Android নিজে magnifier কে source-এর উপরে দেখায়;
+        // source point-কে উপরে shift করলে magnifier তার উপরে চলে যায়
+        val extraUpPx = MAGNIFIER_EXTRA_OFFSET_PX + MAGNIFIER_AVOID_BAR_PX
+        val shiftedLocalY = (localY - extraUpPx).coerceAtLeast(0f)
+
+        customSelectionMagnifier?.show(localX, shiftedLocalY)
+    } catch (e: Exception) {
     }
+}
 
     private fun hideCustomSelectionMagnifier() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
