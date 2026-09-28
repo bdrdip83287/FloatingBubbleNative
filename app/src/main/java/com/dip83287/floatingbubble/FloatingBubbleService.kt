@@ -303,6 +303,36 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
+    // ✅ FOCUS FLAG HELPERS
+    // Note pad/settings window কে focusable/non-focusable toggle করে
+    // ============================================================
+    private fun setNoteWindowFocusable(focusable: Boolean) {
+        val nv = noteView ?: return
+        try {
+            val params = nv.layoutParams as? WindowManager.LayoutParams ?: return
+            if (focusable) {
+                params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            } else {
+                params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            }
+            windowManager.updateViewLayout(nv, params)
+        } catch (_: Exception) {}
+    }
+
+    private fun setSettingsWindowFocusable(focusable: Boolean) {
+        val sv = settingsView ?: return
+        try {
+            val params = sv.layoutParams as? WindowManager.LayoutParams ?: return
+            if (focusable) {
+                params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            } else {
+                params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            }
+            windowManager.updateViewLayout(sv, params)
+        } catch (_: Exception) {}
+    }
+
+    // ============================================================
     // Notes persistence (SharedPreferences only)
     // ============================================================
     private fun loadNotes() {
@@ -868,7 +898,8 @@ class FloatingBubbleService : Service() {
                 if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
             )
             params.gravity = Gravity.TOP or Gravity.START
@@ -888,6 +919,7 @@ class FloatingBubbleService : Service() {
 
     private fun collapseToBubble() {
         if (!isExpanded) return
+        setNoteWindowFocusable(false)
         if (::editText.isInitialized && currentEditingNoteId != null) {
             savedEditorSelectionStart = editText.selectionStart.coerceAtLeast(0)
             savedEditorSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
@@ -1824,7 +1856,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // SETTINGS SCREEN — fullscreen UI with top-left pivot transition
+    // SETTINGS SCREEN
     // ============================================================
     private fun openSettingsScreen() {
         if (isSettingsOpen) return
@@ -2048,14 +2080,14 @@ class FloatingBubbleService : Service() {
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
         params.x = 0
         params.y = 0
 
-        // ✅ Smooth top-left pivot transition (like minimize)
         root.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         root.alpha = 0f
         root.scaleX = 0.7f
@@ -2080,33 +2112,30 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // closeSettingsScreen — top-left pivot scale-out (like minimize)
-    // ============================================================
     private fun closeSettingsScreen() {
-    if (!isSettingsOpen) return
-    isSettingsOpen = false
-    val sv = settingsView ?: return
-    sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-    sv.pivotX = 0f
-    sv.pivotY = 0f
-    sv.animate()
-        .alpha(0f)
-        .scaleX(0.7f)
-        .scaleY(0.7f)
-        .setDuration(220)
-        .setInterpolator(DecelerateInterpolator())
-        .withEndAction {
-            // ✅ FIX: remove করার আগে view-কে invisible করি — কোনো flash/blank frame হবে না
-            sv.visibility = View.INVISIBLE
-            sv.setLayerType(View.LAYER_TYPE_NONE, null)
-            try {
-                windowManager.removeView(sv)
-            } catch (_: Exception) {}
-            settingsView = null
-        }
-        .start()
-}
+        if (!isSettingsOpen) return
+        isSettingsOpen = false
+        setSettingsWindowFocusable(false)
+        val sv = settingsView ?: return
+        sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        sv.pivotX = 0f
+        sv.pivotY = 0f
+        sv.animate()
+            .alpha(0f)
+            .scaleX(0.7f)
+            .scaleY(0.7f)
+            .setDuration(220)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                sv.visibility = View.INVISIBLE
+                sv.setLayerType(View.LAYER_TYPE_NONE, null)
+                try {
+                    windowManager.removeView(sv)
+                } catch (_: Exception) {}
+                settingsView = null
+            }
+            .start()
+    }
 
     private fun createSectionHeader(text: String): TextView {
         return TextView(this).apply {
@@ -2216,7 +2245,6 @@ class FloatingBubbleService : Service() {
                 isClickable = true
                 setOnClickListener {
                     onPick(hex)
-                    // Re-render settings screen to update selection ring
                     closeSettingsScreen()
                     Handler(Looper.getMainLooper()).postDelayed({
                         openSettingsScreen()
@@ -2630,7 +2658,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // openEditorForNote - top-left pivot transition
+    // openEditorForNote - WITH FOCUSABLE FLAG
     // ============================================================
     private fun openEditorForNote(note: NoteItem) {
         currentEditingNoteId = note.id
@@ -2754,6 +2782,13 @@ class FloatingBubbleService : Service() {
                 }
                 override fun afterTextChanged(s: Editable?) {}
             })
+            // ✅ FIX: title-এ touch করলে window focusable হবে
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) setNoteWindowFocusable(true)
+            }
+            setOnClickListener {
+                setNoteWindowFocusable(true)
+            }
         }
         titleBar.addView(titleInput)
         contentContainer.addView(titleBar)
@@ -3019,6 +3054,8 @@ class FloatingBubbleService : Service() {
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
                             if (isEditorLocked) return true
+                            // ✅ FIX: editor-এ touch করলে window focusable হবে
+                            setNoteWindowFocusable(true)
                             cancelPendingLongPress()
                             touchStartX = event.x
                             touchStartY = event.y
@@ -3203,7 +3240,8 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
         newParams.gravity = Gravity.TOP or Gravity.START
@@ -3423,6 +3461,7 @@ class FloatingBubbleService : Service() {
     private fun closeChildNotePad(noteId: Long) {
         if (currentEditingNoteId != noteId || noteView == null) return
         try {
+            setNoteWindowFocusable(false)
             val index = notesList.indexOfFirst { it.id == noteId }
             if (index >= 0 && ::editText.isInitialized) {
                 val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
@@ -3456,11 +3495,13 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // saveCurrentNote - top-left pivot transition
+    // saveCurrentNote - top-left pivot transition + focus reset
     // ============================================================
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index == -1) return
+
+        setNoteWindowFocusable(false)
 
         val rawTitle = if (::titleInput.isInitialized) titleInput.text.toString().trim() else ""
         val contentText = editText.text.toString()
@@ -3490,7 +3531,8 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
         newParams.gravity = Gravity.TOP or Gravity.START
@@ -3542,6 +3584,7 @@ class FloatingBubbleService : Service() {
     private fun showNoteList() {
         currentEditingNoteId = null
         restoreEditorStatePending = false
+        setNoteWindowFocusable(false)
         hideSelectionHandles()
         hideFloatingActionBar()
         val container = createFullNotePad()
@@ -3552,7 +3595,8 @@ class FloatingBubbleService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
