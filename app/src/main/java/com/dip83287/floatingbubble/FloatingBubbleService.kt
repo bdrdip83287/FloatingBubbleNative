@@ -89,7 +89,7 @@ class FloatingBubbleService : Service() {
     private var settingsView: View? = null
     private var isExpanded = false
     private var isSettingsOpen = false
-    private var settingsResetInProgress = false   // ✅ NEW: re-entry guard
+    private var settingsResetInProgress = false
 
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
@@ -305,7 +305,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // ✅ FOCUS FLAG HELPERS
+    // FOCUS FLAG HELPERS
     // ============================================================
     private fun setNoteWindowFocusable(focusable: Boolean) {
         val nv = noteView ?: return
@@ -918,17 +918,39 @@ class FloatingBubbleService : Service() {
         wereHandlesVisibleBeforeScroll = false
     }
 
+    // ============================================================
+    // collapseToBubble — selection captured BEFORE hiding anything
+    // ============================================================
     private fun collapseToBubble() {
         if (!isExpanded) return
         setNoteWindowFocusable(false)
+
         if (::editText.isInitialized && currentEditingNoteId != null) {
-            savedEditorSelectionStart = editText.selectionStart.coerceAtLeast(0)
-            savedEditorSelectionEnd = editText.selectionEnd.coerceAtLeast(0)
+            // ✅ CRITICAL: capture selection BEFORE hiding anything
+            try {
+                val sStart = editText.selectionStart
+                val sEnd = editText.selectionEnd
+                savedEditorSelectionStart = if (sStart >= 0) sStart else 0
+                savedEditorSelectionEnd = if (sEnd >= 0) sEnd else 0
+            } catch (_: Exception) {
+                savedEditorSelectionStart = 0
+                savedEditorSelectionEnd = 0
+            }
             savedEditorScrollY = scrollView.scrollY.coerceAtLeast(0)
             savedEditorScrollX = scrollView.scrollX.coerceAtLeast(0)
             savedEditorEditTextScrollY = editText.scrollY.coerceAtLeast(0)
             savedEditorEditTextScrollX = editText.scrollX.coerceAtLeast(0)
             restoreEditorStatePending = true
+
+            // ✅ Also capture currentSelectedText for restoration
+            try {
+                if (savedEditorSelectionEnd > savedEditorSelectionStart) {
+                    currentSelectedText = editText.text.substring(
+                        savedEditorSelectionStart, savedEditorSelectionEnd
+                    )
+                }
+            } catch (_: Exception) {}
+
             val activeId = currentEditingNoteId!!
             val index = notesList.indexOfFirst { it.id == activeId }
             if (index >= 0) {
@@ -1857,10 +1879,9 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // SETTINGS SCREEN — with re-entry guard & freeze fix
+    // SETTINGS SCREEN
     // ============================================================
     private fun openSettingsScreen() {
-        // ✅ FIX: re-entry guard — reset চলমান থাকলে বা already open থাকলে return
         if (isSettingsOpen || settingsResetInProgress) return
         if (settingsView != null) return
 
@@ -2116,9 +2137,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // closeSettingsScreen — with reset flag & try/finally cleanup
-    // ============================================================
     private fun closeSettingsScreen() {
         if (!isSettingsOpen) return
         isSettingsOpen = false
@@ -2129,7 +2147,6 @@ class FloatingBubbleService : Service() {
             settingsResetInProgress = false
             return
         }
-        // ✅ mark reset in progress to prevent any re-entry
         settingsResetInProgress = true
         try {
             sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -2155,7 +2172,6 @@ class FloatingBubbleService : Service() {
                 }
                 .start()
         } catch (_: Exception) {
-            // যদি animation fail করে, nonetheless cleanup
             try {
                 windowManager.removeView(sv)
             } catch (_: Exception) {}
@@ -2251,9 +2267,6 @@ class FloatingBubbleService : Service() {
         updateSubtitleRecursive(sv, cardTitle, newSubtitle)
     }
 
-    // ============================================================
-    // ✅ createColorPickerRow — IN-PLACE ring update (no close/reopen)
-    // ============================================================
     private fun createColorPickerRow(
         colors: List<Pair<String, String>>,
         selectedHex: String,
@@ -2278,14 +2291,11 @@ class FloatingBubbleService : Service() {
                     }
                 }
                 isClickable = true
-                tag = hex   // ✅ store hex so we can find siblings
+                tag = hex
             }
             swatch.setOnClickListener {
-                // ✅ FIX: কোনো close/reopen হবে না। শুধু color save + ring আপডেট।
                 try {
                     onPick(hex)
-
-                    // update sibling swatches' selection rings (in-place)
                     val parent = swatch.parent as? LinearLayout
                     parent?.let { container ->
                         for (i in 0 until container.childCount) {
@@ -2322,9 +2332,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // Password dialogs — NO close/reopen, in-place subtitle update
-    // ============================================================
     private fun showSetPasswordDialog() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2345,7 +2352,6 @@ class FloatingBubbleService : Service() {
                 if (pw.isNotEmpty()) {
                     setPassword(pw)
                     Toast.makeText(this, "Password saved", Toast.LENGTH_SHORT).show()
-                    // ✅ FIX: settings UI close/reopen না করে subtitle update
                     updateSubtitleRecursiveFromRoot("Password", "Password is set")
                 } else {
                     Toast.makeText(this, "Password cannot be empty", Toast.LENGTH_SHORT).show()
@@ -2372,7 +2378,6 @@ class FloatingBubbleService : Service() {
             .setPositiveButton("Remove") { _, _ ->
                 clearPassword()
                 Toast.makeText(this, "Password removed", Toast.LENGTH_SHORT).show()
-                // ✅ FIX: settings UI close/reopen না করে subtitle update
                 updateSubtitleRecursiveFromRoot("Password", "No password set")
             }
             .setNegativeButton("Cancel", null)
@@ -2834,7 +2839,6 @@ class FloatingBubbleService : Service() {
                 }
                 override fun afterTextChanged(s: Editable?) {}
             })
-            // ✅ FIX: title-এ touch করলে window focusable হবে
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) setNoteWindowFocusable(true)
             }
@@ -3346,8 +3350,32 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ============================================================
+    // ✅ Force native selection highlight redraw
+    // ============================================================
+    private fun refreshTextSelectionHighlight() {
+        if (!::editText.isInitialized) return
+        try {
+            val start = editText.selectionStart
+            val end = editText.selectionEnd
+            if (start < 0 || end < 0 || start == end) return
+            editText.isCursorVisible = true
+            editText.invalidate()
+            editText.requestLayout()
+            editText.postOnAnimation {
+                try {
+                    editText.invalidate()
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
+    // ============================================================
+    // applyRestoreEditorStateIfNeeded — 3-stage restore
+    // ============================================================
     private fun applyRestoreEditorStateIfNeeded() {
         if (!::editText.isInitialized) return
+
         if (restoreEditorStatePending) {
             val restoreStart = savedEditorSelectionStart
             val restoreEnd = savedEditorSelectionEnd
@@ -3355,13 +3383,25 @@ class FloatingBubbleService : Service() {
             val restoreX = savedEditorScrollX
             val restoreEditY = savedEditorEditTextScrollY
             val restoreEditX = savedEditorEditTextScrollX
+
+            // ✅ Reset suppression states so selection UI can show
+            suppressSelectionUiUntil = 0L
+            isActionBarTemporarilyHidden = false
+
+            // ✅ CRITICAL: request focus FIRST
+            editText.requestFocus()
+            editText.isCursorVisible = true
+
             editText.post {
                 try {
                     val len = editText.length()
                     val start = restoreStart.coerceIn(0, len)
                     val end = restoreEnd.coerceIn(0, len)
-                    editText.isCursorVisible = true
+
+                    // Step 1: restore selection coordinates
                     editText.setSelection(start, end)
+                    editText.invalidate()
+
                     fun restoreExactViewport() {
                         try {
                             editText.scrollTo(restoreEditX, restoreEditY)
@@ -3369,12 +3409,29 @@ class FloatingBubbleService : Service() {
                         } catch (_: Exception) {}
                     }
                     restoreExactViewport()
+
+                    // Step 2: wait one full layout pass
                     scrollView.post {
                         restoreExactViewport()
                         editText.post {
                             restoreExactViewport()
+
+                            // Re-assert selection
+                            val currentStart = editText.selectionStart
+                            val currentEnd = editText.selectionEnd
+                            if (currentStart != start || currentEnd != end) {
+                                editText.setSelection(start, end)
+                            }
+
+                            // Force native highlight repaint
+                            refreshTextSelectionHighlight()
+
                             if (start != end) {
-                                currentSelectedText = editText.text.substring(start, end)
+                                try {
+                                    currentSelectedText = editText.text.substring(start, end)
+                                } catch (_: Exception) {
+                                    currentSelectedText = ""
+                                }
                                 showSelectionHandles()
                                 updateHandlePositionsImmediate()
                                 showFloatingActionBar(currentSelectedText)
@@ -3382,8 +3439,27 @@ class FloatingBubbleService : Service() {
                                 hideSelectionHandles()
                                 hideFloatingActionBar()
                             }
+
+                            // Step 3: one more frame guarantee
                             editText.postOnAnimation {
                                 restoreExactViewport()
+
+                                if (editText.selectionStart != start || editText.selectionEnd != end) {
+                                    editText.setSelection(start, end)
+                                }
+                                refreshTextSelectionHighlight()
+
+                                if (start != end) {
+                                    showSelectionHandles()
+                                    updateHandlePositionsImmediate()
+                                    try {
+                                        currentSelectedText = editText.text.substring(start, end)
+                                    } catch (_: Exception) {}
+                                    if (!isActionBarVisible) {
+                                        showFloatingActionBar(currentSelectedText)
+                                    }
+                                }
+
                                 restoreEditorStatePending = false
                             }
                         }
@@ -3395,6 +3471,7 @@ class FloatingBubbleService : Service() {
         } else {
             editText.post {
                 editText.requestFocus()
+                editText.isCursorVisible = true
                 editText.setSelection(0, 0)
                 scrollView.post { scrollView.scrollTo(0, 0) }
             }
