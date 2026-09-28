@@ -1286,7 +1286,7 @@ class FloatingBubbleService : Service() {
 
         // ✅ FIX: density-নির্ভর gap — সব ডিভাইসে একই দৃশ্যমান দূরত্ব
         // 4dp → density অনুযায়ী px (low-density এ ~4px, high-density এ ~12px)
-        val offsetPx = 8f * resources.displayMetrics.density
+        val offsetPx = 11f * resources.displayMetrics.density
         val adjustedRawY = rawY - offsetPx
 
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
