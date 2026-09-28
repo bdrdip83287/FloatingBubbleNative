@@ -64,7 +64,6 @@ class FloatingBubbleService : Service() {
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
 
-    // Settings keys
     private val KEY_FONT_SIZE = "font_size"
     private val KEY_THEME_COLOR = "theme_color"
     private val KEY_BUBBLE_COLOR_SETTING = "bubble_color_setting"
@@ -80,7 +79,6 @@ class FloatingBubbleService : Service() {
     private val KEY_NOTEPAD_X = "notepad_x"
     private val KEY_NOTEPAD_Y = "notepad_y"
 
-    // Current settings cache
     private var currentFontSize = 15f
     private var currentThemeColor = DEFAULT_NOTEPAD_BG_COLOR
     private var currentBubbleColor = DEFAULT_BUBBLE_COLOR
@@ -287,7 +285,6 @@ class FloatingBubbleService : Service() {
     private fun saveBubbleColor(colorHex: String) {
         currentBubbleColor = colorHex
         prefs.edit().putString(KEY_BUBBLE_COLOR_SETTING, colorHex).apply()
-        // Live update bubble
         bubbleView?.let { bv ->
             (bv.background as? GradientDrawable)?.setColor(Color.parseColor(colorHex))
             bv.invalidate()
@@ -1827,7 +1824,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // SETTINGS SCREEN — fullscreen UI with animations
+    // SETTINGS SCREEN — fullscreen UI with top-left pivot transition
     // ============================================================
     private fun openSettingsScreen() {
         if (isSettingsOpen) return
@@ -1846,7 +1843,6 @@ class FloatingBubbleService : Service() {
             )
         }
 
-        // ---- Top bar ----
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1861,10 +1857,9 @@ class FloatingBubbleService : Service() {
             background = null
             setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8))
             layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40))
+            setColorFilter(Color.WHITE)
             setOnClickListener { closeSettingsScreen() }
         }
-        // Tint back icon to white
-        backBtn.setColorFilter(Color.WHITE)
         topBar.addView(backBtn)
         val title = TextView(this).apply {
             text = "Settings"
@@ -1879,7 +1874,6 @@ class FloatingBubbleService : Service() {
         topBar.addView(title)
         content.addView(topBar)
 
-        // ---- Scrollable content ----
         val scroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
@@ -1891,10 +1885,8 @@ class FloatingBubbleService : Service() {
             orientation = LinearLayout.VERTICAL
         }
 
-        // ---- Section: Appearance ----
         body.addView(createSectionHeader("Appearance"))
 
-        // Font size
         body.addView(createSettingCard(
             title = "Font Size",
             subtitle = "Note editor text size (${currentFontSize.toInt()}sp)",
@@ -1956,7 +1948,6 @@ class FloatingBubbleService : Service() {
             }
         ))
 
-        // Theme color
         body.addView(createSettingCard(
             title = "Theme Color",
             subtitle = "Note pad background",
@@ -1976,7 +1967,6 @@ class FloatingBubbleService : Service() {
             )
         ))
 
-        // Bubble color
         body.addView(createSettingCard(
             title = "Bubble Color",
             subtitle = "Floating bubble appearance",
@@ -1995,10 +1985,8 @@ class FloatingBubbleService : Service() {
             )
         ))
 
-        // ---- Section: Security ----
         body.addView(createSectionHeader("Security"))
 
-        // Password
         body.addView(createSettingCard(
             title = "Password",
             subtitle = if (isPasswordEnabled()) "Password is set" else "No password set",
@@ -2042,7 +2030,6 @@ class FloatingBubbleService : Service() {
             }
         ))
 
-        // ---- Section: About ----
         body.addView(createSectionHeader("About"))
         body.addView(createSettingCard(
             title = "Floating Notes",
@@ -2054,7 +2041,6 @@ class FloatingBubbleService : Service() {
         content.addView(scroll)
         root.addView(content)
 
-        // ---- Add window ----
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -2069,33 +2055,45 @@ class FloatingBubbleService : Service() {
         params.x = 0
         params.y = 0
 
+        // ✅ Smooth top-left pivot transition (like minimize)
         root.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         root.alpha = 0f
+        root.scaleX = 0.7f
+        root.scaleY = 0.7f
         windowManager.addView(root, params)
         settingsView = root
 
-        // Slide up + fade in
-        root.translationY = dpToPx(60).toFloat()
-        root.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(260)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                root.setLayerType(View.LAYER_TYPE_NONE, null)
-            }
-            .start()
+        root.doOnLayout {
+            root.pivotX = 0f
+            root.pivotY = 0f
+            root.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(260)
+                .setInterpolator(OvershootInterpolator(0.4f))
+                .withEndAction {
+                    root.setLayerType(View.LAYER_TYPE_NONE, null)
+                }
+                .start()
+        }
     }
 
+    // ============================================================
+    // closeSettingsScreen — top-left pivot scale-out (like minimize)
+    // ============================================================
     private fun closeSettingsScreen() {
         if (!isSettingsOpen) return
         isSettingsOpen = false
         val sv = settingsView ?: return
         sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        sv.pivotX = 0f
+        sv.pivotY = 0f
         sv.animate()
             .alpha(0f)
-            .translationY(dpToPx(60).toFloat())
-            .setDuration(200)
+            .scaleX(0.7f)
+            .scaleY(0.7f)
+            .setDuration(220)
             .setInterpolator(DecelerateInterpolator())
             .withEndAction {
                 try {
@@ -2172,7 +2170,6 @@ class FloatingBubbleService : Service() {
             for (i in 0 until root.childCount) {
                 val child = root.getChildAt(i)
                 if (child is TextView && child.text == cardTitle) {
-                    // Next sibling is subtitle if exists
                     if (i + 1 < root.childCount) {
                         val sub = root.getChildAt(i + 1)
                         if (sub is TextView && sub.tag == "subtitle") {
@@ -2220,7 +2217,7 @@ class FloatingBubbleService : Service() {
                     closeSettingsScreen()
                     Handler(Looper.getMainLooper()).postDelayed({
                         openSettingsScreen()
-                    }, 220)
+                    }, 240)
                 }
             }
             row.addView(swatch)
@@ -2235,7 +2232,6 @@ class FloatingBubbleService : Service() {
     }
 
     private fun refreshThemeColor() {
-        // If note pad is open, update its background
         noteView?.let { nv ->
             (nv.background as? GradientDrawable)?.setColor(Color.parseColor(currentThemeColor))
             nv.invalidate()
@@ -2265,7 +2261,7 @@ class FloatingBubbleService : Service() {
                     closeSettingsScreen()
                     Handler(Looper.getMainLooper()).postDelayed({
                         openSettingsScreen()
-                    }, 220)
+                    }, 240)
                 } else {
                     Toast.makeText(this, "Password cannot be empty", Toast.LENGTH_SHORT).show()
                 }
@@ -2294,7 +2290,7 @@ class FloatingBubbleService : Service() {
                 closeSettingsScreen()
                 Handler(Looper.getMainLooper()).postDelayed({
                     openSettingsScreen()
-                }, 220)
+                }, 240)
             }
             .setNegativeButton("Cancel", null)
             .create()
