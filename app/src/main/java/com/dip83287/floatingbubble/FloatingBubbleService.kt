@@ -89,6 +89,8 @@ class FloatingBubbleService : Service() {
     private var settingsView: View? = null
     private var isExpanded = false
     private var isSettingsOpen = false
+    private var settingsResetInProgress = false   // ✅ NEW: re-entry guard
+
     private lateinit var editText: EditText
     private lateinit var titleInput: EditText
 
@@ -304,7 +306,6 @@ class FloatingBubbleService : Service() {
 
     // ============================================================
     // ✅ FOCUS FLAG HELPERS
-    // Note pad/settings window কে focusable/non-focusable toggle করে
     // ============================================================
     private fun setNoteWindowFocusable(focusable: Boolean) {
         val nv = noteView ?: return
@@ -333,7 +334,7 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // Notes persistence (SharedPreferences only)
+    // Notes persistence
     // ============================================================
     private fun loadNotes() {
         try {
@@ -1856,10 +1857,13 @@ class FloatingBubbleService : Service() {
     }
 
     // ============================================================
-    // SETTINGS SCREEN
+    // SETTINGS SCREEN — with re-entry guard & freeze fix
     // ============================================================
     private fun openSettingsScreen() {
-        if (isSettingsOpen) return
+        // ✅ FIX: re-entry guard — reset চলমান থাকলে বা already open থাকলে return
+        if (isSettingsOpen || settingsResetInProgress) return
+        if (settingsView != null) return
+
         isSettingsOpen = true
 
         val root = FrameLayout(this).apply {
@@ -2112,29 +2116,52 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ============================================================
+    // closeSettingsScreen — with reset flag & try/finally cleanup
+    // ============================================================
     private fun closeSettingsScreen() {
         if (!isSettingsOpen) return
         isSettingsOpen = false
         setSettingsWindowFocusable(false)
-        val sv = settingsView ?: return
-        sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        sv.pivotX = 0f
-        sv.pivotY = 0f
-        sv.animate()
-            .alpha(0f)
-            .scaleX(0.7f)
-            .scaleY(0.7f)
-            .setDuration(220)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                sv.visibility = View.INVISIBLE
-                sv.setLayerType(View.LAYER_TYPE_NONE, null)
-                try {
-                    windowManager.removeView(sv)
-                } catch (_: Exception) {}
-                settingsView = null
-            }
-            .start()
+        val sv = settingsView
+        if (sv == null) {
+            settingsView = null
+            settingsResetInProgress = false
+            return
+        }
+        // ✅ mark reset in progress to prevent any re-entry
+        settingsResetInProgress = true
+        try {
+            sv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            sv.pivotX = 0f
+            sv.pivotY = 0f
+            sv.animate()
+                .alpha(0f)
+                .scaleX(0.7f)
+                .scaleY(0.7f)
+                .setDuration(220)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    try {
+                        sv.visibility = View.INVISIBLE
+                        sv.setLayerType(View.LAYER_TYPE_NONE, null)
+                        try {
+                            windowManager.removeView(sv)
+                        } catch (_: Exception) {}
+                    } finally {
+                        settingsView = null
+                        settingsResetInProgress = false
+                    }
+                }
+                .start()
+        } catch (_: Exception) {
+            // যদি animation fail করে, nonetheless cleanup
+            try {
+                windowManager.removeView(sv)
+            } catch (_: Exception) {}
+            settingsView = null
+            settingsResetInProgress = false
+        }
     }
 
     private fun createSectionHeader(text: String): TextView {
@@ -2219,6 +2246,14 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    private fun updateSubtitleRecursiveFromRoot(cardTitle: String, newSubtitle: String) {
+        val sv = settingsView ?: return
+        updateSubtitleRecursive(sv, cardTitle, newSubtitle)
+    }
+
+    // ============================================================
+    // ✅ createColorPickerRow — IN-PLACE ring update (no close/reopen)
+    // ============================================================
     private fun createColorPickerRow(
         colors: List<Pair<String, String>>,
         selectedHex: String,
@@ -2243,13 +2278,31 @@ class FloatingBubbleService : Service() {
                     }
                 }
                 isClickable = true
-                setOnClickListener {
+                tag = hex   // ✅ store hex so we can find siblings
+            }
+            swatch.setOnClickListener {
+                // ✅ FIX: কোনো close/reopen হবে না। শুধু color save + ring আপডেট।
+                try {
                     onPick(hex)
-                    closeSettingsScreen()
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        openSettingsScreen()
-                    }, 240)
-                }
+
+                    // update sibling swatches' selection rings (in-place)
+                    val parent = swatch.parent as? LinearLayout
+                    parent?.let { container ->
+                        for (i in 0 until container.childCount) {
+                            val sibling = container.getChildAt(i)
+                            val sibHex = sibling.tag as? String ?: continue
+                            val bg = sibling.background as? GradientDrawable
+                            bg?.let { g ->
+                                if (sibHex.equals(hex, ignoreCase = true)) {
+                                    g.setStroke(dpToPx(3), Color.parseColor("#333333"))
+                                } else {
+                                    g.setStroke(dpToPx(1), Color.parseColor("#CCCCCC"))
+                                }
+                                sibling.invalidate()
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
             }
             row.addView(swatch)
         }
@@ -2269,6 +2322,9 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    // ============================================================
+    // Password dialogs — NO close/reopen, in-place subtitle update
+    // ============================================================
     private fun showSetPasswordDialog() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2289,10 +2345,8 @@ class FloatingBubbleService : Service() {
                 if (pw.isNotEmpty()) {
                     setPassword(pw)
                     Toast.makeText(this, "Password saved", Toast.LENGTH_SHORT).show()
-                    closeSettingsScreen()
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        openSettingsScreen()
-                    }, 240)
+                    // ✅ FIX: settings UI close/reopen না করে subtitle update
+                    updateSubtitleRecursiveFromRoot("Password", "Password is set")
                 } else {
                     Toast.makeText(this, "Password cannot be empty", Toast.LENGTH_SHORT).show()
                 }
@@ -2318,10 +2372,8 @@ class FloatingBubbleService : Service() {
             .setPositiveButton("Remove") { _, _ ->
                 clearPassword()
                 Toast.makeText(this, "Password removed", Toast.LENGTH_SHORT).show()
-                closeSettingsScreen()
-                Handler(Looper.getMainLooper()).postDelayed({
-                    openSettingsScreen()
-                }, 240)
+                // ✅ FIX: settings UI close/reopen না করে subtitle update
+                updateSubtitleRecursiveFromRoot("Password", "No password set")
             }
             .setNegativeButton("Cancel", null)
             .create()
@@ -3054,7 +3106,6 @@ class FloatingBubbleService : Service() {
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
                             if (isEditorLocked) return true
-                            // ✅ FIX: editor-এ touch করলে window focusable হবে
                             setNoteWindowFocusable(true)
                             cancelPendingLongPress()
                             touchStartX = event.x
@@ -3295,9 +3346,6 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // Helper: Apply pending restore state (or focus + cursor at 0)
-    // ============================================================
     private fun applyRestoreEditorStateIfNeeded() {
         if (!::editText.isInitialized) return
         if (restoreEditorStatePending) {
@@ -3494,9 +3542,6 @@ class FloatingBubbleService : Service() {
         } catch (e: Exception) {}
     }
 
-    // ============================================================
-    // saveCurrentNote - top-left pivot transition + focus reset
-    // ============================================================
     private fun saveCurrentNote(noteId: Long) {
         val index = notesList.indexOfFirst { it.id == noteId }
         if (index == -1) return
