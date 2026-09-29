@@ -1274,7 +1274,7 @@ class FloatingBubbleService : Service() {
         customSelectionMagnifier = Magnifier.Builder(editText)
             .setSize(magWidth, magHeight)
             .setCornerRadius(15f * density)
-            .setInitialZoom(1.2f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
+            .setInitialZoom(1.7f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
             .build()
     }
 }
