@@ -1296,7 +1296,7 @@ class FloatingBubbleService : Service() {
 
         // ✅ (2) Magnifier-এর ভেতরে selection line-কে ঠিক আগের অবস্থানে রাখি
         //         (আগের liftUpPx মান এখানেই use করুন — আপনার আগের মান = 8f * density)
-        val innerLiftPx = 50f * density
+        val innerLiftPx = 0f * density
 
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
 
