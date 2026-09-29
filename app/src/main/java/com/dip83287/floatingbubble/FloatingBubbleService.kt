@@ -1273,8 +1273,8 @@ class FloatingBubbleService : Service() {
         val magHeight = (50f * density).toInt()   // আগে ছিল 50f, এখন 60f
         customSelectionMagnifier = Magnifier.Builder(editText)
             .setSize(magWidth, magHeight)
-            .setCornerRadius(15f * density)
-            .setInitialZoom(1.7f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
+            .setCornerRadius(16f * density)
+            .setInitialZoom(1.6f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
             .build()
     }
 }
@@ -1292,11 +1292,11 @@ class FloatingBubbleService : Service() {
         val density = resources.displayMetrics.density
 
         // ✅ (1) Magnifier window-কে handle থেকে 5dp অতিরিক্ত উপরে সরাই
-        val windowLiftPx = 35f * density
+        val windowLiftPx = 45f * density
 
         // ✅ (2) Magnifier-এর ভেতরে selection line-কে ঠিক আগের অবস্থানে রাখি
         //         (আগের liftUpPx মান এখানেই use করুন — আপনার আগের মান = 8f * density)
-        val innerLiftPx = 40f * density
+        val innerLiftPx = 50f * density
 
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
 
