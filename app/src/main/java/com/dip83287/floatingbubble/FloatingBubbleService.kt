@@ -1269,12 +1269,12 @@ class FloatingBubbleService : Service() {
         val density = resources.displayMetrics.density
         // ✅ Height একটু বাড়িয়ে দিলে selection line visual center-এ আসে
         //    (কেননা Magnifier সবসময় show(x,y) কে centroid ধরে)
-        val magWidth = (130f * density).toInt()
-        val magHeight = (60f * density).toInt()   // আগে ছিল 50f, এখন 60f
+        val magWidth = (110f * density).toInt()
+        val magHeight = (45f * density).toInt()   // আগে ছিল 50f, এখন 60f
         customSelectionMagnifier = Magnifier.Builder(editText)
             .setSize(magWidth, magHeight)
             .setCornerRadius(15f * density)
-            .setInitialZoom(1.4f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
+            .setInitialZoom(1.2f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
             .build()
     }
 }
