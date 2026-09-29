@@ -1275,34 +1275,20 @@ class FloatingBubbleService : Service() {
     }
 
     private fun showCustomSelectionMagnifier(rawX: Float, rawY: Float, force: Boolean = false) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-    val now = System.currentTimeMillis()
-    if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
-    lastCustomMagnifierTime = now
-    try {
-        createCustomSelectionMagnifier()
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
-
-        // ✅ FIX: Source coordinate-এ offset দেব না,
-        // কারণ এতে selection line কেন্দ্র থেকে সরে যায়।
-        // বরং show() কে rawX, rawY-তেই ডাকব — selection line কেন্দ্রে থাকবে।
-        val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
-        val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
-
-        customSelectionMagnifier?.show(localX, localY)
-
-        // ✅ তারপর magnifier-এর view-কে 4dp উপরে সরিয়ে দিই
-        // — এতে magnifier-এর window উপরে যাবে, কিন্তু selection line
-        //   magnifier-এর কেন্দ্রে থাকবে।
-        val offsetPx = 4f * resources.displayMetrics.density
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
+        lastCustomMagnifierTime = now
         try {
-            val magView = customSelectionMagnifier?.view
-            magView?.translationY = -offsetPx
-        } catch (_: Exception) {}
-    } catch (e: Exception) {
+            createCustomSelectionMagnifier()
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
+            val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
+            val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
+            customSelectionMagnifier?.show(localX, localY)
+        } catch (e: Exception) {
+        }
     }
-}
 
     private fun hideCustomSelectionMagnifier() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
