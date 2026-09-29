@@ -1270,7 +1270,7 @@ class FloatingBubbleService : Service() {
         // ✅ Height একটু বাড়িয়ে দিলে selection line visual center-এ আসে
         //    (কেননা Magnifier সবসময় show(x,y) কে centroid ধরে)
         val magWidth = (110f * density).toInt()
-        val magHeight = (45f * density).toInt()   // আগে ছিল 50f, এখন 60f
+        val magHeight = (50f * density).toInt()   // আগে ছিল 50f, এখন 60f
         customSelectionMagnifier = Magnifier.Builder(editText)
             .setSize(magWidth, magHeight)
             .setCornerRadius(15f * density)
@@ -1296,7 +1296,7 @@ class FloatingBubbleService : Service() {
 
         // ✅ (2) Magnifier-এর ভেতরে selection line-কে ঠিক আগের অবস্থানে রাখি
         //         (আগের liftUpPx মান এখানেই use করুন — আপনার আগের মান = 8f * density)
-        val innerLiftPx = 30f * density
+        val innerLiftPx = 35f * density
 
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
 
