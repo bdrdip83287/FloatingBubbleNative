@@ -1284,19 +1284,22 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
 
-        // ✅ Source = rawX, rawY (selection line যেখানে, সেটাই magnifier-এর কেন্দ্রে থাকবে)
+        // ✅ FIX: Source coordinate-এ offset দেব না,
+        // কারণ এতে selection line কেন্দ্র থেকে সরে যায়।
+        // বরং show() কে rawX, rawY-তেই ডাকব — selection line কেন্দ্রে থাকবে।
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
         val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
 
         customSelectionMagnifier?.show(localX, localY)
 
-        // ✅ কিন্তু magnifier-এর window-কে 4dp উপরে সরিয়ে দিচ্ছি
-        // যাতে magnifier-এর নিচের প্রান্ত handle-এর কাছে চলে যায়
-        val magView = customSelectionMagnifier?.view
-        if (magView != null) {
-            val offsetPx = 4f * resources.displayMetrics.density
-            magView.translationY = -offsetPx
-        }
+        // ✅ তারপর magnifier-এর view-কে 4dp উপরে সরিয়ে দিই
+        // — এতে magnifier-এর window উপরে যাবে, কিন্তু selection line
+        //   magnifier-এর কেন্দ্রে থাকবে।
+        val offsetPx = 4f * resources.displayMetrics.density
+        try {
+            val magView = customSelectionMagnifier?.view
+            magView?.translationY = -offsetPx
+        } catch (_: Exception) {}
     } catch (e: Exception) {
     }
 }
