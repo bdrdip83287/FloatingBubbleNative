@@ -1256,23 +1256,28 @@ class FloatingBubbleService : Service() {
     private val customMagnifierFrameInterval = 16L
 
     private fun createCustomSelectionMagnifier() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        if (customMagnifierTarget !== editText) {
-            try {
-                customSelectionMagnifier?.dismiss()
-            } catch (_: Exception) {
-            }
-            customSelectionMagnifier = null
-            customMagnifierTarget = editText
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    if (customMagnifierTarget !== editText) {
+        try {
+            customSelectionMagnifier?.dismiss()
+        } catch (_: Exception) {
         }
-        if (customSelectionMagnifier == null) {
-            val density = resources.displayMetrics.density
-            customSelectionMagnifier = Magnifier.Builder(editText)
-                .setSize((130f * density).toInt(), (50f * density).toInt())
-                .setCornerRadius(15f * density)
-                .build()
-        }
+        customSelectionMagnifier = null
+        customMagnifierTarget = editText
     }
+    if (customSelectionMagnifier == null) {
+        val density = resources.displayMetrics.density
+        // ✅ Height একটু বাড়িয়ে দিলে selection line visual center-এ আসে
+        //    (কেননা Magnifier সবসময় show(x,y) কে centroid ধরে)
+        val magWidth = (130f * density).toInt()
+        val magHeight = (60f * density).toInt()   // আগে ছিল 50f, এখন 60f
+        customSelectionMagnifier = Magnifier.Builder(editText)
+            .setSize(magWidth, magHeight)
+            .setCornerRadius(15f * density)
+            .setInitialZoom(1.4f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
+            .build()
+    }
+}
 
     private fun showCustomSelectionMagnifier(rawX: Float, rawY: Float, force: Boolean = false) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
@@ -1284,19 +1289,12 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
 
-        // ✅ Source = rawX, rawY (selection line যেখানে, সেটাই magnifier-এর কেন্দ্রে থাকবে)
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
         val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
 
+        // ✅ Source = rawX, rawY (selection line magnifier-এর কেন্দ্রে থাকবে)
+        //    gap-টা আসবে magnifier size/zoom এর সেটিং থেকে, translationY থেকে নয়
         customSelectionMagnifier?.show(localX, localY)
-
-        // ✅ কিন্তু magnifier-এর window-কে 4dp উপরে সরিয়ে দিচ্ছি
-        // যাতে magnifier-এর নিচের প্রান্ত handle-এর কাছে চলে যায়
-        val magView = customSelectionMagnifier?.view
-        if (magView != null) {
-            val offsetPx = 4f * resources.displayMetrics.density
-            magView.translationY = -offsetPx
-        }
     } catch (e: Exception) {
     }
 }
