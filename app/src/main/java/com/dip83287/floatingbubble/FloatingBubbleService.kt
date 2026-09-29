@@ -1275,20 +1275,27 @@ class FloatingBubbleService : Service() {
     }
 
     private fun showCustomSelectionMagnifier(rawX: Float, rawY: Float, force: Boolean = false) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val now = System.currentTimeMillis()
-        if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
-        lastCustomMagnifierTime = now
-        try {
-            createCustomSelectionMagnifier()
-            val location = IntArray(2)
-            editText.getLocationOnScreen(location)
-            val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
-            val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
-            customSelectionMagnifier?.show(localX, localY)
-        } catch (e: Exception) {
-        }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    val now = System.currentTimeMillis()
+    if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
+    lastCustomMagnifierTime = now
+    try {
+        createCustomSelectionMagnifier()
+        val location = IntArray(2)
+        editText.getLocationOnScreen(location)
+
+        // ✅ FIX: density-নির্ভর gap — সব ডিভাইসে একই দৃশ্যমান দূরত্ব
+        // 4dp → density অনুযায়ী px (low-density এ ~4px, high-density এ ~12px)
+        val offsetPx = 4f * resources.displayMetrics.density
+        val adjustedRawY = rawY - offsetPx
+
+        val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
+        val localY = (adjustedRawY - location[1]).coerceIn(0f, editText.height.toFloat())
+
+        customSelectionMagnifier?.show(localX, localY)
+    } catch (e: Exception) {
     }
+}
 
     private fun hideCustomSelectionMagnifier() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
