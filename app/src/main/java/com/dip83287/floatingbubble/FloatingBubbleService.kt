@@ -1284,15 +1284,19 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
 
-        // ✅ FIX: density-নির্ভর gap — সব ডিভাইসে একই দৃশ্যমান দূরত্ব
-        // 4dp → density অনুযায়ী px (low-density এ ~4px, high-density এ ~12px)
-        val offsetPx = 11f * resources.displayMetrics.density
-        val adjustedRawY = rawY - offsetPx
-
+        // ✅ Source = rawX, rawY (selection line যেখানে, সেটাই magnifier-এর কেন্দ্রে থাকবে)
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
-        val localY = (adjustedRawY - location[1]).coerceIn(0f, editText.height.toFloat())
+        val localY = (rawY - location[1]).coerceIn(0f, editText.height.toFloat())
 
         customSelectionMagnifier?.show(localX, localY)
+
+        // ✅ কিন্তু magnifier-এর window-কে 4dp উপরে সরিয়ে দিচ্ছি
+        // যাতে magnifier-এর নিচের প্রান্ত handle-এর কাছে চলে যায়
+        val magView = customSelectionMagnifier?.view
+        if (magView != null) {
+            val offsetPx = 4f * resources.displayMetrics.density
+            magView.translationY = -offsetPx
+        }
     } catch (e: Exception) {
     }
 }
