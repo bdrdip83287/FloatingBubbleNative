@@ -1289,13 +1289,21 @@ class FloatingBubbleService : Service() {
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
 
-        // ✅ Selection line কে magnifier-এর center থেকে আরও উপরে আনতে:
-        //    source point-কে কিছুটা নিচে পাঠাই → selection line উপরে দেখাবে।
         val density = resources.displayMetrics.density
-        val liftUpPx = 9f * density   // ← এই মান বাড়ালে selection line আরও উপরে যাবে
+
+        // ✅ (1) Magnifier window-কে handle থেকে 5dp অতিরিক্ত উপরে সরাই
+        val windowLiftPx = 10f * density
+
+        // ✅ (2) Magnifier-এর ভেতরে selection line-কে ঠিক আগের অবস্থানে রাখি
+        //         (আগের liftUpPx মান এখানেই use করুন — আপনার আগের মান = 8f * density)
+        val innerLiftPx = 8f * density
 
         val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
-        val localY = (rawY + liftUpPx - location[1])
+
+        // source Y = rawY + innerLiftPx - windowLiftPx
+        //   - innerLiftPx : ভেতরের line center থেকে উপরে
+        //   - windowLiftPx: পুরো window handle থেকে উপরে
+        val localY = (rawY + innerLiftPx - windowLiftPx - location[1])
             .coerceIn(0f, editText.height.toFloat())
 
         customSelectionMagnifier?.show(localX, localY)
