@@ -2944,30 +2944,58 @@ class FloatingBubbleService : Service() {
                         isActionBarTemporarilyHidden = true
                     }
                 }
-                scrollStopHandler?.removeCallbacksAndMessages(null)
                 scrollStopHandler?.postDelayed({
-                    if (lastScrollTime == currentTime) {
-                        isScrolling = false
-                        if (editText.hasSelection()) {
-                            updateHandlePositionsSafe()
-                            val (start, end) = getSelection()
-                            if (start != end) {
-                                val selected = editText.text.substring(start, end)
-                                if (selected.isNotEmpty()) {
-                                    currentSelectedText = selected
+    if (lastScrollTime == currentTime) {
+        isScrolling = false
+
+        // ✅ FIX: Scroll শেষে সব suppression state reset
+        isActionBarTemporarilyHidden = false
+        isLongPressDragging = false
+        suppressSelectionUiUntil = 0L
+
+        if (editText.hasSelection()) {
+            updateHandlePositionsSafe()
+            val (start, end) = getSelection()
+            if (start != end) {
+                val selected = editText.text.substring(start, end)
+                if (selected.isNotEmpty()) {
+                    currentSelectedText = selected
+
+                    // ✅ FIX: handle icon আগে restore, তারপর action bar
+                    showHandleIconAgain(leftHandleView)
+                    showHandleIconAgain(rightHandleView)
+                    areHandlesVisible = true
+
+                    // ✅ FIX: action bar-কে ৩০ms পরে দেখাই (handle position update-এর সুযোগ দিই)
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        if (isExpanded && editText.hasSelection()) {
+                            val s = editText.selectionStart
+                            val e = editText.selectionEnd
+                            if (s >= 0 && e > s && e <= editText.text.length) {
+                                val sel = editText.text.substring(s, e)
+                                if (sel.isNotEmpty()) {
+                                    currentSelectedText = sel
                                     isActionBarTemporarilyHidden = false
-                                    showFloatingActionBar(selected)
-                                    if (wereHandlesVisibleBeforeScroll) {
-                                        fadeInHandlesAfterScroll()
-                                    } else {
-                                        showSelectionHandles()
+                                    if (!isActionBarVisible) {
+                                        showFloatingActionBar(sel)
                                     }
                                 }
                             }
                         }
-                        wereHandlesVisibleBeforeScroll = false
+                    }, 30)
+
+                    // Handle position restore
+                    if (wereHandlesVisibleBeforeScroll) {
+                        fadeInHandlesAfterScroll()
+                    } else {
+                        showSelectionHandles()
                     }
-                }, SCROLL_STOP_DELAY)
+                }
+            }
+        }
+        wereHandlesVisibleBeforeScroll = false
+    }
+}, SCROLL_STOP_DELAY)
             }
         }
         editorUndoStack.clear()
