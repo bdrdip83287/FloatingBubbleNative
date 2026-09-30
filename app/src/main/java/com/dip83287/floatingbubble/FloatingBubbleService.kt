@@ -1705,163 +1705,169 @@ class FloatingBubbleService : Service() {
     }
 
     private fun showFloatingActionBar(selectedText: String) {
-        if (isSelectionUiSuppressed()) return
-        if (!isExpanded) return
-        if (isActionBarTemporarilyHidden) return
-        hideFloatingActionBar()
-        val actionBarView = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#333333"))
-            setPadding(8, 6, 8, 6)
-            val shape = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 40f
-                setColor(Color.parseColor("#333333"))
-            }
-            background = shape
+    if (isSelectionUiSuppressed()) return
+    if (!isExpanded) return
+    if (isActionBarTemporarilyHidden) return
+    hideFloatingActionBar()
+    val actionBarView = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setBackgroundColor(Color.parseColor("#333333"))
+        setPadding(8, 6, 8, 6)
+        val shape = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 40f
+            setColor(Color.parseColor("#333333"))
         }
-        val chromeBtn = TextView(this).apply {
-            text = "🌐"
-            textSize = 18f
-            setTextColor(Color.WHITE)
-            setPadding(16, 8, 16, 8)
-            setOnClickListener {
-                val searchIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=${Uri.encode(selectedText)}"))
-                searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(searchIntent)
-                hideFloatingActionBar()
-                hideSelectionHandles()
-                if (isExpanded) {
-                    collapseToBubble()
-                }
+        background = shape
+    }
+    val chromeBtn = TextView(this).apply {
+        text = "🌐"
+        textSize = 18f
+        setTextColor(Color.WHITE)
+        setPadding(16, 8, 16, 8)
+        setOnClickListener {
+            val searchIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=${Uri.encode(selectedText)}"))
+            searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(searchIntent)
+            hideFloatingActionBar()
+            hideSelectionHandles()
+            if (isExpanded) {
+                collapseToBubble()
             }
-        }
-        actionBarView.addView(chromeBtn)
-        actionBarView.addView(createDivider())
-        val cutBtn = TextView(this).apply {
-            text = "Cut"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                val (start, end) = getSelection()
-                if (start != end) {
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("text", selectedText)
-                    clipboard.setPrimaryClip(clip)
-                    editText.text.delete(start, end)
-                    hideFloatingActionBar()
-                    hideSelectionHandles()
-                    Toast.makeText(this@FloatingBubbleService, "Cut", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        actionBarView.addView(cutBtn)
-        actionBarView.addView(createDivider())
-        val copyBtn = TextView(this).apply {
-            text = "Copy"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                val (start, end) = getSelection()
-                if (start != end) {
-                    val selectedText = editText.text.substring(start, end)
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("text", selectedText)
-                    clipboard.setPrimaryClip(clip)
-                    editText.setSelection(start, start)
-                    hideSelectionHandles()
-                    hideFloatingActionBar()
-                    Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        actionBarView.addView(copyBtn)
-        actionBarView.addView(createDivider())
-        val pasteBtn = TextView(this).apply {
-            text = "Paste"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = clipboard.primaryClip
-                if (clip != null && clip.itemCount > 0) {
-                    val pastedText = clip.getItemAt(0).text.toString()
-                    val (start, end) = getSelection()
-                    editText.text.replace(start, end, pastedText)
-                    hideFloatingActionBar()
-                    Toast.makeText(this@FloatingBubbleService, "Pasted", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        actionBarView.addView(pasteBtn)
-        actionBarView.addView(createDivider())
-        val selectAllBtn = TextView(this).apply {
-            text = "Select all"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                editText.selectAll()
-                val allText = editText.text.toString()
-                currentSelectedText = allText
-                showFloatingActionBar(allText)
-                showSelectionHandles()
-            }
-        }
-        actionBarView.addView(selectAllBtn)
-        actionBarView.addView(createDivider())
-        val shareBtn = TextView(this).apply {
-            text = "Share"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setPadding(14, 8, 14, 8)
-            setOnClickListener {
-                hideFloatingActionBar()
-                hideSelectionHandles()
-                shareLargeText(selectedText)
-                Handler(Looper.getMainLooper()).postDelayed({
-                    if (isExpanded) collapseToBubble()
-                }, 500)
-            }
-        }
-        actionBarView.addView(shareBtn)
-        floatingActionBar = actionBarView
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
-        val currentLayout = editText.layout
-        if (currentLayout != null) {
-            val start = editText.selectionStart
-            val startLine = currentLayout.getLineForOffset(start)
-            val x = currentLayout.getPrimaryHorizontal(start) + location[0]
-            val y = currentLayout.getLineTop(startLine) + location[1]
-            val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
-            )
-            params.gravity = Gravity.TOP or Gravity.START
-            params.x = x.toInt() - 50
-            actionBarView.measure(
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-            )
-            val actionBarHeight = actionBarView.measuredHeight
-            val extraGap = (60f * resources.displayMetrics.density).toInt()
-            params.y = y.toInt() - actionBarHeight - extraGap
-            try {
-                actionBarWindowManager?.addView(floatingActionBar, params)
-                isActionBarVisible = true
-            } catch (e: Exception) { }
         }
     }
+    actionBarView.addView(chromeBtn)
+    actionBarView.addView(createDivider())
+    val cutBtn = TextView(this).apply {
+        text = "Cut"
+        textSize = 13f
+        setTextColor(Color.WHITE)
+        setPadding(14, 8, 14, 8)
+        setOnClickListener {
+            val (start, end) = getSelection()
+            if (start != end) {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = android.content.ClipData.newPlainText("text", selectedText)
+                clipboard.setPrimaryClip(clip)
+                editText.text.delete(start, end)
+                hideFloatingActionBar()
+                hideSelectionHandles()
+                Toast.makeText(this@FloatingBubbleService, "Cut", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    actionBarView.addView(cutBtn)
+    actionBarView.addView(createDivider())
+    val copyBtn = TextView(this).apply {
+        text = "Copy"
+        textSize = 13f
+        setTextColor(Color.WHITE)
+        setPadding(14, 8, 14, 8)
+        setOnClickListener {
+            val (start, end) = getSelection()
+            if (start != end) {
+                val selectedText = editText.text.substring(start, end)
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = android.content.ClipData.newPlainText("text", selectedText)
+                clipboard.setPrimaryClip(clip)
+                editText.setSelection(start, start)
+                hideSelectionHandles()
+                hideFloatingActionBar()
+                Toast.makeText(this@FloatingBubbleService, "Copied", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    actionBarView.addView(copyBtn)
+    actionBarView.addView(createDivider())
+    val pasteBtn = TextView(this).apply {
+        text = "Paste"
+        textSize = 13f
+        setTextColor(Color.WHITE)
+        setPadding(14, 8, 14, 8)
+        setOnClickListener {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = clipboard.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val pastedText = clip.getItemAt(0).text.toString()
+                val (start, end) = getSelection()
+                editText.text.replace(start, end, pastedText)
+                hideFloatingActionBar()
+                Toast.makeText(this@FloatingBubbleService, "Pasted", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    actionBarView.addView(pasteBtn)
+    actionBarView.addView(createDivider())
+    val selectAllBtn = TextView(this).apply {
+        text = "Select all"
+        textSize = 13f
+        setTextColor(Color.WHITE)
+        setPadding(14, 8, 14, 8)
+        setOnClickListener {
+            editText.selectAll()
+            val allText = editText.text.toString()
+            currentSelectedText = allText
+            showFloatingActionBar(allText)
+            showSelectionHandles()
+        }
+    }
+    actionBarView.addView(selectAllBtn)
+    actionBarView.addView(createDivider())
+    val shareBtn = TextView(this).apply {
+        text = "Share"
+        textSize = 13f
+        setTextColor(Color.WHITE)
+        setPadding(14, 8, 14, 8)
+        setOnClickListener {
+            hideFloatingActionBar()
+            hideSelectionHandles()
+            shareLargeText(selectedText)
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (isExpanded) collapseToBubble()
+            }, 500)
+        }
+    }
+    actionBarView.addView(shareBtn)
+    floatingActionBar = actionBarView
+    val location = IntArray(2)
+    editText.getLocationOnScreen(location)
+    val currentLayout = editText.layout
+    if (currentLayout != null) {
+        val start = editText.selectionStart
+        val startLine = currentLayout.getLineForOffset(start)
+
+        // ✅ FIX: scrollY হিসাব করে selection-এর screen Y বের করি
+        val x = currentLayout.getPrimaryHorizontal(start) + location[0]
+        val y = currentLayout.getLineTop(startLine) + location[1] - editText.scrollY
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = x.toInt() - 50
+        actionBarView.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val actionBarHeight = actionBarView.measuredHeight
+        val extraGap = (60f * resources.displayMetrics.density).toInt()
+
+        // ✅ FIX: y এর মান সঠিকভাবে হিসাব করি
+        params.y = y.toInt() - actionBarHeight - extraGap
+
+        try {
+            actionBarWindowManager?.addView(floatingActionBar, params)
+            isActionBarVisible = true
+        } catch (e: Exception) { }
+    }
+}
     
     // ============================================================
 // ✅ Forced action bar show (bypass all guard conditions)
