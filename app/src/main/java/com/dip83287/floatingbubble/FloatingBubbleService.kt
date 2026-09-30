@@ -1708,6 +1708,7 @@ class FloatingBubbleService : Service() {
     if (isSelectionUiSuppressed()) return
     if (!isExpanded) return
     if (isActionBarTemporarilyHidden) return
+    if (isScrolling) return
     hideFloatingActionBar()
     val actionBarView = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -1869,43 +1870,38 @@ class FloatingBubbleService : Service() {
     }
 }
     
-    // ============================================================
-// ✅ Forced action bar show (bypass all guard conditions)
-// Scroll শেষ হওয়ার পর action bar definitively দেখানোর জন্য
-// ============================================================
 private fun forceShowActionBarAfterScroll(selectedText: String) {
     if (!isExpanded) return
     if (selectedText.isEmpty()) return
 
-    // Reset ALL suppression states
+    // ✅ scroll state definitively off
+    isScrolling = false
     isActionBarTemporarilyHidden = false
     suppressSelectionUiUntil = 0L
 
-    // Remove old action bar (if any)
+    // পুরনো action bar remove (থাকলে)
     hideFloatingActionBar()
 
-    // Delay slightly so the old one is definitely detached
     Handler(Looper.getMainLooper()).postDelayed({
         try {
-            // Reset again in case something set them in between
+            if (!isExpanded || isScrolling) return@postDelayed
+
             isActionBarTemporarilyHidden = false
             suppressSelectionUiUntil = 0L
 
-            // Rebuild and show action bar
-            if (isExpanded && editText.hasSelection()) {
+            if (editText.hasSelection()) {
                 val s = editText.selectionStart
                 val e = editText.selectionEnd
                 if (s >= 0 && e > s && e <= editText.text.length) {
                     val sel = editText.text.substring(s, e)
                     if (sel.isNotEmpty()) {
                         currentSelectedText = sel
-                        // Call the real show method
                         showFloatingActionBar(sel)
                     }
                 }
             }
         } catch (_: Exception) {}
-    }, 100)
+    }, 50)
 }
 
     private fun hideEditorKeyboard() {
@@ -2982,20 +2978,19 @@ private fun forceShowActionBarAfterScroll(selectedText: String) {
                 val currentTime = System.currentTimeMillis()
                 lastScrollTime = currentTime
                 if (!isScrolling) {
-                    isScrolling = true
-                    wereHandlesVisibleBeforeScroll = areHandlesVisible
-                    if (areHandlesVisible) fadeOutHandlesDuringScroll()
-                    if (editText.hasSelection() && isActionBarVisible) {
-                        hideFloatingActionBar()
-                        isActionBarTemporarilyHidden = true
-                    }
-                }
+    isScrolling = true
+    wereHandlesVisibleBeforeScroll = areHandlesVisible
+    if (areHandlesVisible) fadeOutHandlesDuringScroll()
+    // ✅ scroll শুরুতে action bar hide (state flag সহ)
+    hideFloatingActionBar()
+    isActionBarTemporarilyHidden = true
+}
                 scrollStopHandler?.removeCallbacksAndMessages(null)
                 scrollStopHandler?.postDelayed({
     if (lastScrollTime == currentTime) {
         isScrolling = false
 
-        // ✅ সব state reset
+        // ✅ সব suppression state force reset
         isActionBarTemporarilyHidden = false
         isLongPressDragging = false
         suppressSelectionUiUntil = 0L
@@ -3019,7 +3014,7 @@ private fun forceShowActionBarAfterScroll(selectedText: String) {
                         showSelectionHandles()
                     }
 
-                    // ✅ FORCED action bar show — সব guard bypass
+                    // ✅ Action bar force show — guard-এ আটকাবে না
                     forceShowActionBarAfterScroll(selected)
                 }
             }
