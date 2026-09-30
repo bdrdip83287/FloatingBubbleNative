@@ -161,7 +161,7 @@ class FloatingBubbleService : Service() {
     private var isActionBarTemporarilyHidden = false
     private var currentSelectedText = ""
 
-    // ✅ NEW: long-press drag state
+    // ✅ long-press drag state
     private var isLongPressDragging = false
 
     private var lastNonEmptySelectionStart = -1
@@ -2923,6 +2923,7 @@ class FloatingBubbleService : Service() {
         titleBar.addView(titleInput)
         contentContainer.addView(titleBar)
 
+        // ✅ Scroll listener with proper state reset and action bar restore
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
@@ -2944,58 +2945,58 @@ class FloatingBubbleService : Service() {
                         isActionBarTemporarilyHidden = true
                     }
                 }
+                scrollStopHandler?.removeCallbacksAndMessages(null)
                 scrollStopHandler?.postDelayed({
-    if (lastScrollTime == currentTime) {
-        isScrolling = false
+                    if (lastScrollTime == currentTime) {
+                        isScrolling = false
 
-        // ✅ FIX: Scroll শেষে সব suppression state reset
-        isActionBarTemporarilyHidden = false
-        isLongPressDragging = false
-        suppressSelectionUiUntil = 0L
+                        // ✅ FIX: reset all suppression states
+                        isActionBarTemporarilyHidden = false
+                        isLongPressDragging = false
+                        suppressSelectionUiUntil = 0L
 
-        if (editText.hasSelection()) {
-            updateHandlePositionsSafe()
-            val (start, end) = getSelection()
-            if (start != end) {
-                val selected = editText.text.substring(start, end)
-                if (selected.isNotEmpty()) {
-                    currentSelectedText = selected
+                        if (editText.hasSelection()) {
+                            updateHandlePositionsSafe()
+                            val (start, end) = getSelection()
+                            if (start != end) {
+                                val selected = editText.text.substring(start, end)
+                                if (selected.isNotEmpty()) {
+                                    currentSelectedText = selected
 
-                    // ✅ FIX: handle icon আগে restore, তারপর action bar
-                    showHandleIconAgain(leftHandleView)
-                    showHandleIconAgain(rightHandleView)
-                    areHandlesVisible = true
+                                    // ✅ restore handle icons first
+                                    showHandleIconAgain(leftHandleView)
+                                    showHandleIconAgain(rightHandleView)
+                                    areHandlesVisible = true
 
-                    // ✅ FIX: action bar-কে ৩০ms পরে দেখাই (handle position update-এর সুযোগ দিই)
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        if (isExpanded && editText.hasSelection()) {
-                            val s = editText.selectionStart
-                            val e = editText.selectionEnd
-                            if (s >= 0 && e > s && e <= editText.text.length) {
-                                val sel = editText.text.substring(s, e)
-                                if (sel.isNotEmpty()) {
-                                    currentSelectedText = sel
-                                    isActionBarTemporarilyHidden = false
-                                    if (!isActionBarVisible) {
-                                        showFloatingActionBar(sel)
+                                    // ✅ then restore action bar after 30ms
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        if (isExpanded && editText.hasSelection()) {
+                                            val s = editText.selectionStart
+                                            val e = editText.selectionEnd
+                                            if (s >= 0 && e > s && e <= editText.text.length) {
+                                                val sel = editText.text.substring(s, e)
+                                                if (sel.isNotEmpty()) {
+                                                    currentSelectedText = sel
+                                                    isActionBarTemporarilyHidden = false
+                                                    if (!isActionBarVisible) {
+                                                        showFloatingActionBar(sel)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }, 30)
+
+                                    if (wereHandlesVisibleBeforeScroll) {
+                                        fadeInHandlesAfterScroll()
+                                    } else {
+                                        showSelectionHandles()
                                     }
                                 }
                             }
                         }
-                    }, 30)
-
-                    // Handle position restore
-                    if (wereHandlesVisibleBeforeScroll) {
-                        fadeInHandlesAfterScroll()
-                    } else {
-                        showSelectionHandles()
+                        wereHandlesVisibleBeforeScroll = false
                     }
-                }
-            }
-        }
-        wereHandlesVisibleBeforeScroll = false
-    }
-}, SCROLL_STOP_DELAY)
+                }, SCROLL_STOP_DELAY)
             }
         }
         editorUndoStack.clear()
@@ -3195,7 +3196,6 @@ class FloatingBubbleService : Service() {
                     if (start < 0 || end > this@apply.length() || start >= end) return
                     currentSelectedText = this@apply.text.substring(start, end)
 
-                    // ✅ long-press drag চলাকালীন handle & action bar দেখাব না
                     if (isLongPressDragging) return
 
                     showSelectionHandles()
@@ -3255,7 +3255,6 @@ class FloatingBubbleService : Service() {
                                 v.parent?.requestDisallowInterceptTouchEvent(true)
                                 if (selectionAnchor < 0) selectionAnchor = offsetAt(touchStartX, touchStartY)
                                 if (distance > touchSlopPx) {
-                                    // ✅ NEW: long-press drag শুরু হলে handle icon ও action bar hide
                                     isLongPressDragging = true
                                     hideFloatingActionBar()
                                     isActionBarTemporarilyHidden = true
@@ -3296,7 +3295,6 @@ class FloatingBubbleService : Service() {
                                 hideCustomSelectionMagnifier()
                                 isLongPressDragging = false
 
-                                // ✅ NEW: handle icon ফিরিয়ে আনি
                                 showHandleIconAgain(leftHandleView)
                                 showHandleIconAgain(rightHandleView)
                                 areHandlesVisible = true
@@ -3369,7 +3367,6 @@ class FloatingBubbleService : Service() {
                             hideCustomSelectionMagnifier()
                             v.parent?.requestDisallowInterceptTouchEvent(false)
 
-                            // ✅ NEW: cancel হলেও handle icon ও action bar ফিরিয়ে আনি
                             isLongPressDragging = false
                             showHandleIconAgain(leftHandleView)
                             showHandleIconAgain(rightHandleView)
