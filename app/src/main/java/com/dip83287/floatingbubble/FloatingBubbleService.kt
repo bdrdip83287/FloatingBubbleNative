@@ -1899,7 +1899,7 @@ private fun forceShowActionBarAfterScroll(selectedText: String) {
                 }
             }
         } catch (_: Exception) {}
-    }, 50)
+    }, 100)
 }
 
     private fun hideEditorKeyboard() {
