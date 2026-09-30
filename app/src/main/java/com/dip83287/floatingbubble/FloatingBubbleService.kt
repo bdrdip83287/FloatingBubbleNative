@@ -918,15 +918,11 @@ class FloatingBubbleService : Service() {
         wereHandlesVisibleBeforeScroll = false
     }
 
-    // ============================================================
-    // collapseToBubble — selection captured BEFORE hiding anything
-    // ============================================================
     private fun collapseToBubble() {
         if (!isExpanded) return
         setNoteWindowFocusable(false)
 
         if (::editText.isInitialized && currentEditingNoteId != null) {
-            // ✅ CRITICAL: capture selection BEFORE hiding anything
             try {
                 val sStart = editText.selectionStart
                 val sEnd = editText.selectionEnd
@@ -942,7 +938,6 @@ class FloatingBubbleService : Service() {
             savedEditorEditTextScrollX = editText.scrollX.coerceAtLeast(0)
             restoreEditorStatePending = true
 
-            // ✅ Also capture currentSelectedText for restoration
             try {
                 if (savedEditorSelectionEnd > savedEditorSelectionStart) {
                     currentSelectedText = editText.text.substring(
@@ -1256,57 +1251,53 @@ class FloatingBubbleService : Service() {
     private val customMagnifierFrameInterval = 16L
 
     private fun createCustomSelectionMagnifier() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-    if (customMagnifierTarget !== editText) {
-        try {
-            customSelectionMagnifier?.dismiss()
-        } catch (_: Exception) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        if (customMagnifierTarget !== editText) {
+            try {
+                customSelectionMagnifier?.dismiss()
+            } catch (_: Exception) {
+            }
+            customSelectionMagnifier = null
+            customMagnifierTarget = editText
         }
-        customSelectionMagnifier = null
-        customMagnifierTarget = editText
+        if (customSelectionMagnifier == null) {
+            val density = resources.displayMetrics.density
+            val magWidth = (110f * density).toInt()
+            val magHeight = (60f * density).toInt()
+            customSelectionMagnifier = Magnifier.Builder(editText)
+                .setSize(magWidth, magHeight)
+                .setCornerRadius(16f * density)
+                .setInitialZoom(1.4f)
+                .build()
+        }
     }
-    if (customSelectionMagnifier == null) {
-        val density = resources.displayMetrics.density
-        // ✅ Height একটু বাড়িয়ে দিলে selection line visual center-এ আসে
-        //    (কেননা Magnifier সবসময় show(x,y) কে centroid ধরে)
-        val magWidth = (110f * density).toInt()
-        val magHeight = (50f * density).toInt()   // আগে ছিল 50f, এখন 60f
-        customSelectionMagnifier = Magnifier.Builder(editText)
-            .setSize(magWidth, magHeight)
-            .setCornerRadius(16f * density)
-            .setInitialZoom(1.4f)   // ✅ zoom কমিয়ে দিলে selection line মাঝে ভালো দেখায়
-            .build()
-    }
-}
 
     private fun showCustomSelectionMagnifier(rawX: Float, rawY: Float, force: Boolean = false) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-    val now = System.currentTimeMillis()
-    if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
-    lastCustomMagnifierTime = now
-    try {
-        createCustomSelectionMagnifier()
-        val location = IntArray(2)
-        editText.getLocationOnScreen(location)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastCustomMagnifierTime < customMagnifierFrameInterval) return
+        lastCustomMagnifierTime = now
+        try {
+            createCustomSelectionMagnifier()
+            val location = IntArray(2)
+            editText.getLocationOnScreen(location)
 
-        val density = resources.displayMetrics.density
+            val density = resources.displayMetrics.density
 
-        // ✅ (1) Magnifier window-কে handle থেকে 5dp অতিরিক্ত উপরে সরাই
-        val windowLiftPx = 10f * density
+            // Magnifier window handle থেকে 10dp উপরে
+            val windowLiftPx = 10f * density
+            // Selection line magnifier-এর ভেতরে 15dp উপরে
+            val innerLiftPx = 15f * density
 
+            val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
 
-        val innerLiftPx = 15f * density
+            val localY = (rawY + innerLiftPx - windowLiftPx - location[1])
+                .coerceIn(0f, editText.height.toFloat())
 
-        val localX = (rawX - location[0]).coerceIn(0f, editText.width.toFloat())
-
-
-        val localY = (rawY + innerLiftPx - windowLiftPx - location[1])
-            .coerceIn(0f, editText.height.toFloat())
-
-        customSelectionMagnifier?.show(localX, localY)
-    } catch (e: Exception) {
+            customSelectionMagnifier?.show(localX, localY)
+        } catch (e: Exception) {
+        }
     }
-}
 
     private fun hideCustomSelectionMagnifier() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
@@ -1338,170 +1329,164 @@ class FloatingBubbleService : Service() {
         return Pair(leftHandle, rightHandle)
     }
 
+    // ============================================================
+    // ✅ Handle icon hide/show (touch target retained)
+    // ============================================================
+    private fun hideHandleIconKeepTouchTarget(handle: View?) {
+        if (handle == null) return
+        try {
+            val iv = handle as? ImageView ?: return
+            iv.animate().cancel()
+            iv.alpha = 1f
+            iv.visibility = View.VISIBLE
+            iv.setImageDrawable(null)
+            iv.setBackgroundColor(Color.TRANSPARENT)
+        } catch (_: Exception) {}
+    }
+
+    private fun showHandleIconAgain(handle: View?) {
+        if (handle == null) return
+        try {
+            val iv = handle as? ImageView ?: return
+            iv.animate().cancel()
+            iv.setImageDrawable(createCircleHandleDrawable())
+            iv.alpha = 1f
+            iv.visibility = View.VISIBLE
+        } catch (_: Exception) {}
+    }
+
+    // ============================================================
+    // HandleTouchListener — with hide/show on touch
+    // ============================================================
     inner class HandleTouchListener(private val isLeft: Boolean) : View.OnTouchListener {
-    private var initialSelectionStart = 0
-    private var initialSelectionEnd = 0
-    private var lastUpdateTime = 0L
-    private val frameInterval = 16L
+        private var initialSelectionStart = 0
+        private var initialSelectionEnd = 0
+        private var lastUpdateTime = 0L
+        private val frameInterval = 16L
 
-    override fun onTouch(v: View, event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                initialSelectionStart = editText.selectionStart
-                initialSelectionEnd = editText.selectionEnd
-                lastUpdateTime = 0L
-                if (isLeft) isDraggingLeftHandle = true else isDraggingRightHandle = true
-                editText.requestFocus()
-                showCustomSelectionMagnifier(event.rawX, event.rawY, true)
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialSelectionStart = editText.selectionStart
+                    initialSelectionEnd = editText.selectionEnd
+                    lastUpdateTime = 0L
+                    if (isLeft) isDraggingLeftHandle = true else isDraggingRightHandle = true
+                    editText.requestFocus()
+                    showCustomSelectionMagnifier(event.rawX, event.rawY, true)
 
-                // ✅ NEW: Action bar এবং উভয় handle hide করে দিই (alpha কমিয়ে)
-                hideActionBarAndHandlesForDragging()
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val now = System.currentTimeMillis()
-                if (now - lastUpdateTime < frameInterval) {
-                    showCustomSelectionMagnifier(event.rawX, event.rawY)
+                    // ✅ Action bar hide
+                    hideFloatingActionBar()
+                    isActionBarTemporarilyHidden = true
+
+                    // ✅ Handle-এর icon সরাই, কিন্তু touch target রাখি
+                    hideHandleIconKeepTouchTarget(leftHandleView)
+                    hideHandleIconKeepTouchTarget(rightHandleView)
+
+                    areHandlesVisible = false
                     return true
                 }
-                lastUpdateTime = now
-                val layout = editText.layout ?: return true
-                val location = IntArray(2)
-                editText.getLocationOnScreen(location)
-                val textX = event.rawX - location[0] + editText.scrollX
-                val textY = event.rawY - location[1] + editText.scrollY
-                val safeY = textY.toInt().coerceIn(0, (layout.height - 1).coerceAtLeast(0))
-                val line = layout.getLineForVertical(safeY)
-                val offset = layout.getOffsetForHorizontal(line, textX)
-                val newOffset = offset.coerceIn(0, editText.text.length)
-                if (isLeft) {
-                    if (newOffset < initialSelectionEnd) {
-                        editText.setSelection(newOffset, initialSelectionEnd)
-                    } else {
-                        editText.setSelection(initialSelectionEnd, newOffset)
+                MotionEvent.ACTION_MOVE -> {
+                    val now = System.currentTimeMillis()
+                    if (now - lastUpdateTime < frameInterval) {
+                        showCustomSelectionMagnifier(event.rawX, event.rawY)
+                        return true
                     }
-                } else {
-                    if (newOffset > initialSelectionStart) {
-                        editText.setSelection(initialSelectionStart, newOffset)
+                    lastUpdateTime = now
+                    val layout = editText.layout ?: return true
+                    val location = IntArray(2)
+                    editText.getLocationOnScreen(location)
+                    val textX = event.rawX - location[0] + editText.scrollX
+                    val textY = event.rawY - location[1] + editText.scrollY
+                    val safeY = textY.toInt().coerceIn(0, (layout.height - 1).coerceAtLeast(0))
+                    val line = layout.getLineForVertical(safeY)
+                    val offset = layout.getOffsetForHorizontal(line, textX)
+                    val newOffset = offset.coerceIn(0, editText.text.length)
+                    if (isLeft) {
+                        if (newOffset < initialSelectionEnd) {
+                            editText.setSelection(newOffset, initialSelectionEnd)
+                        } else {
+                            editText.setSelection(initialSelectionEnd, newOffset)
+                        }
                     } else {
-                        editText.setSelection(newOffset, initialSelectionStart)
+                        if (newOffset > initialSelectionStart) {
+                            editText.setSelection(initialSelectionStart, newOffset)
+                        } else {
+                            editText.setSelection(newOffset, initialSelectionStart)
+                        }
                     }
-                }
-                showCustomSelectionMagnifier(event.rawX, event.rawY)
-                if (!isScrolling) updateHandlePositionsSafe()
-                val start = editText.selectionStart
-                val end = editText.selectionEnd
-                if (start >= 0 && end > start && end <= editText.text.length) {
-                    currentSelectedText = editText.text.substring(start, end)
-                    isActionBarTemporarilyHidden = true
-                }
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                isDraggingLeftHandle = false
-                isDraggingRightHandle = false
-                hideCustomSelectionMagnifier()
-
-                // ✅ NEW: Action bar এবং উভয় handle আবার দেখাই
-                showActionBarAndHandlesAfterDragging()
-
-                if (editText.hasSelection()) {
+                    showCustomSelectionMagnifier(event.rawX, event.rawY)
+                    if (!isScrolling) updateHandlePositionsSafe()
                     val start = editText.selectionStart
                     val end = editText.selectionEnd
                     if (start >= 0 && end > start && end <= editText.text.length) {
-                        val selected = editText.text.substring(start, end)
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            isActionBarTemporarilyHidden = false
-                            updateHandlePositionsImmediate()
-                            // ✅ Action bar আবার দেখাই
-                            Handler(Looper.getMainLooper()).postDelayed({
-                                if (!isDraggingLeftHandle && !isDraggingRightHandle) {
-                                    showFloatingActionBar(selected)
-                                }
-                            }, 30)
+                        currentSelectedText = editText.text.substring(start, end)
+                        isActionBarTemporarilyHidden = true
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    hideCustomSelectionMagnifier()
+
+                    // ✅ Handle-এর icon ফিরিয়ে আনি
+                    showHandleIconAgain(leftHandleView)
+                    showHandleIconAgain(rightHandleView)
+                    areHandlesVisible = true
+
+                    if (editText.hasSelection()) {
+                        val start = editText.selectionStart
+                        val end = editText.selectionEnd
+                        if (start >= 0 && end > start && end <= editText.text.length) {
+                            val selected = editText.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                isActionBarTemporarilyHidden = false
+                                updateHandlePositionsImmediate()
+                                // ✅ Action bar 30ms পরে ফিরিয়ে আনি
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    if (!isDraggingLeftHandle && !isDraggingRightHandle) {
+                                        showFloatingActionBar(selected)
+                                    }
+                                }, 30)
+                            }
                         }
                     }
+                    return true
                 }
-                return true
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                isDraggingLeftHandle = false
-                isDraggingRightHandle = false
-                hideCustomSelectionMagnifier()
+                MotionEvent.ACTION_CANCEL -> {
+                    isDraggingLeftHandle = false
+                    isDraggingRightHandle = false
+                    hideCustomSelectionMagnifier()
 
-                // ✅ NEW: Action bar এবং উভয় handle আবার দেখাই
-                showActionBarAndHandlesAfterDragging()
+                    // ✅ Handle-এর icon ফিরিয়ে আনি
+                    showHandleIconAgain(leftHandleView)
+                    showHandleIconAgain(rightHandleView)
+                    areHandlesVisible = true
 
-                if (editText.hasSelection()) {
-                    val start = editText.selectionStart
-                    val end = editText.selectionEnd
-                    if (start >= 0 && end > start && end <= editText.text.length) {
-                        val selected = editText.text.substring(start, end)
-                        if (selected.isNotEmpty()) {
-                            currentSelectedText = selected
-                            isActionBarTemporarilyHidden = false
-                            updateHandlePositionsImmediate()
-                            Handler(Looper.getMainLooper()).postDelayed({
-                                if (!isDraggingLeftHandle && !isDraggingRightHandle) {
-                                    showFloatingActionBar(selected)
-                                }
-                            }, 30)
+                    if (editText.hasSelection()) {
+                        val start = editText.selectionStart
+                        val end = editText.selectionEnd
+                        if (start >= 0 && end > start && end <= editText.text.length) {
+                            val selected = editText.text.substring(start, end)
+                            if (selected.isNotEmpty()) {
+                                currentSelectedText = selected
+                                isActionBarTemporarilyHidden = false
+                                updateHandlePositionsImmediate()
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    if (!isDraggingLeftHandle && !isDraggingRightHandle) {
+                                        showFloatingActionBar(selected)
+                                    }
+                                }, 30)
+                            }
                         }
                     }
+                    return true
                 }
-                return true
             }
+            return false
         }
-        return false
     }
-}
-
-// ============================================================
-// ✅ Action bar + handles hide/show during handle drag
-// ============================================================
-private fun hideActionBarAndHandlesForDragging() {
-    try {
-        // Action bar সম্পূর্ণ সরিয়ে দিই (আলাদা window)
-        hideFloatingActionBar()
-
-        // Handle গুলো alpha 0.05f করে দিই — এতে touch পাবে কিন্তু চোখে দেখা যাবে না
-        // (alpha = 0f হলে Android touch-through করে ফেলে, তাই 0.05f দিলাম)
-        leftHandleView?.let { h ->
-            h.animate().cancel()
-            h.alpha = 0.05f
-            h.visibility = View.VISIBLE
-        }
-        rightHandleView?.let { h ->
-            h.animate().cancel()
-            h.alpha = 0.05f
-            h.visibility = View.VISIBLE
-        }
-        areHandlesVisible = false
-    } catch (_: Exception) {}
-}
-
-private fun showActionBarAndHandlesAfterDragging() {
-    try {
-        // Handle গুলো আবার opaque করি
-        leftHandleView?.let { h ->
-            h.animate().cancel()
-            h.alpha = 1f
-            h.visibility = View.VISIBLE
-        }
-        rightHandleView?.let { h ->
-            h.animate().cancel()
-            h.alpha = 1f
-            h.visibility = View.VISIBLE
-        }
-        areHandlesVisible = true
-
-        // Handle position update
-        if (editText.hasSelection()) {
-            updateHandlePositionsImmediate()
-        }
-    } catch (_: Exception) {}
-}
 
     private fun updateHandlePositionsSafe() {
         if (handleUpdatePending) return
@@ -1655,6 +1640,9 @@ private fun showActionBarAndHandlesAfterDragging() {
                 handleContainer?.addView(rightHandleView)
                 areHandlesVisible = true
             }
+            // ✅ Handle icon নিশ্চিত করি
+            (leftHandleView as? ImageView)?.setImageDrawable(createCircleHandleDrawable())
+            (rightHandleView as? ImageView)?.setImageDrawable(createCircleHandleDrawable())
             updateHandlePositionsImmediate()
         } catch (e: Exception) {
         }
@@ -2810,9 +2798,6 @@ private fun showActionBarAndHandlesAfterDragging() {
         }
     }
 
-    // ============================================================
-    // openEditorForNote - WITH FOCUSABLE FLAG
-    // ============================================================
     private fun openEditorForNote(note: NoteItem) {
         currentEditingNoteId = note.id
         val container = FrameLayout(this).apply {
@@ -3446,9 +3431,6 @@ private fun showActionBarAndHandlesAfterDragging() {
         }
     }
 
-    // ============================================================
-    // ✅ Force native selection highlight redraw
-    // ============================================================
     private fun refreshTextSelectionHighlight() {
         if (!::editText.isInitialized) return
         try {
@@ -3466,9 +3448,6 @@ private fun showActionBarAndHandlesAfterDragging() {
         } catch (_: Exception) {}
     }
 
-    // ============================================================
-    // applyRestoreEditorStateIfNeeded — 3-stage restore
-    // ============================================================
     private fun applyRestoreEditorStateIfNeeded() {
         if (!::editText.isInitialized) return
 
@@ -3480,11 +3459,9 @@ private fun showActionBarAndHandlesAfterDragging() {
             val restoreEditY = savedEditorEditTextScrollY
             val restoreEditX = savedEditorEditTextScrollX
 
-            // ✅ Reset suppression states so selection UI can show
             suppressSelectionUiUntil = 0L
             isActionBarTemporarilyHidden = false
 
-            // ✅ CRITICAL: request focus FIRST
             editText.requestFocus()
             editText.isCursorVisible = true
 
@@ -3494,7 +3471,6 @@ private fun showActionBarAndHandlesAfterDragging() {
                     val start = restoreStart.coerceIn(0, len)
                     val end = restoreEnd.coerceIn(0, len)
 
-                    // Step 1: restore selection coordinates
                     editText.setSelection(start, end)
                     editText.invalidate()
 
@@ -3506,20 +3482,16 @@ private fun showActionBarAndHandlesAfterDragging() {
                     }
                     restoreExactViewport()
 
-                    // Step 2: wait one full layout pass
                     scrollView.post {
                         restoreExactViewport()
                         editText.post {
                             restoreExactViewport()
 
-                            // Re-assert selection
                             val currentStart = editText.selectionStart
                             val currentEnd = editText.selectionEnd
                             if (currentStart != start || currentEnd != end) {
                                 editText.setSelection(start, end)
                             }
-
-                            // Force native highlight repaint
                             refreshTextSelectionHighlight()
 
                             if (start != end) {
@@ -3536,7 +3508,6 @@ private fun showActionBarAndHandlesAfterDragging() {
                                 hideFloatingActionBar()
                             }
 
-                            // Step 3: one more frame guarantee
                             editText.postOnAnimation {
                                 restoreExactViewport()
 
