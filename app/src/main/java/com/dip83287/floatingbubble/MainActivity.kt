@@ -28,12 +28,71 @@ class MainActivity : AppCompatActivity() {
                 startBubbleService()
                 finish()
             } else {
-                EmergencyLog.log("Opening app settings page")
+                EmergencyLog.log("Opening overlay settings page")
                 openOverlaySettings()
             }
         } else {
             startBubbleService()
             finish()
+        }
+    }
+
+    /**
+     * ✅ NEW: Called when activity comes to foreground.
+     * This handles the case where user tapped the notification while the
+     * activity was already in background (launchMode="singleTask").
+     *
+     * Also handles returning from overlay settings after granting permission.
+     */
+    override fun onResume() {
+        super.onResume()
+        EmergencyLog.logLifecycle("MainActivity", "onResume")
+
+        // ✅ If overlay permission is granted, start service and finish
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Settings.canDrawOverlays(this)) {
+                // Check if this onResume is due to notification tap
+                // (singleTask mode — MainActivity already running)
+                val isNotificationLaunch = intent?.getBooleanExtra(
+                    "from_notification", false
+                ) ?: false
+
+                if (isNotificationLaunch) {
+                    EmergencyLog.log("Launched from notification tap")
+                    startBubbleService()
+                    finish()
+                    return
+                }
+
+                // Also handle: user came back from settings after granting permission
+                // We check if service is running — if not, start it
+                if (!isServiceRunning()) {
+                    EmergencyLog.log("Service not running, starting it")
+                    startBubbleService()
+                    finish()
+                }
+            }
+        } else {
+            // Pre-Marshmallow
+            if (!isServiceRunning()) {
+                startBubbleService()
+                finish()
+            }
+        }
+    }
+
+    /**
+     * ✅ Check if FloatingBubbleService is currently running.
+     */
+    private fun isServiceRunning(): Boolean {
+        return try {
+            val manager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+            @Suppress("DEPRECATION")
+            manager.getRunningServices(Int.MAX_VALUE).any {
+                it.service.className == FloatingBubbleService::class.java.name
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 

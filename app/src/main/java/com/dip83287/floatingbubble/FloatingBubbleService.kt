@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
@@ -69,6 +70,7 @@ class FloatingBubbleService : Service() {
     private val KEY_BUBBLE_COLOR_SETTING = "bubble_color_setting"
     private val KEY_PASSWORD = "password"
     private val KEY_PASSWORD_ENABLED = "password_enabled"
+    private val KEY_SHOW_NOTIFICATION = "show_notification"
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "bubble_prefs"
@@ -253,7 +255,12 @@ class FloatingBubbleService : Service() {
             loadNotes()
 
             createNotificationChannel()
-            startForeground(1001, createNotification())
+            // ✅ Start foreground with either full or minimal notification based on user pref
+            if (isShowNotificationEnabled()) {
+                startForeground(1001, createNotification())
+            } else {
+                startForeground(1001, createMinimalNotification())
+            }
             createDeleteZone()
             scrollHideHandler = Handler(Looper.getMainLooper())
             scrollStopHandler = Handler(Looper.getMainLooper())
@@ -275,6 +282,41 @@ class FloatingBubbleService : Service() {
         currentFontSize = prefs.getFloat(KEY_FONT_SIZE, 15f)
         currentThemeColor = prefs.getString(KEY_THEME_COLOR, DEFAULT_NOTEPAD_BG_COLOR) ?: DEFAULT_NOTEPAD_BG_COLOR
         currentBubbleColor = prefs.getString(KEY_BUBBLE_COLOR_SETTING, DEFAULT_BUBBLE_COLOR) ?: DEFAULT_BUBBLE_COLOR
+    }
+
+    // ✅ Helper for notification toggle (default ON)
+    private fun isShowNotificationEnabled(): Boolean =
+        prefs.getBoolean(KEY_SHOW_NOTIFICATION, true)
+
+    private fun setShowNotificationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_NOTIFICATION, enabled).apply()
+    }
+
+    // ============================================================
+    // ✅ Update notification visibility based on user preference
+    // ============================================================
+    private fun updateNotificationVisibility() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (isShowNotificationEnabled()) {
+                nm.notify(1001, createNotification())
+            } else {
+                nm.notify(1001, createMinimalNotification())
+            }
+        } catch (_: Exception) {}
+    }
+
+    // ✅ Minimal silent notification (used when user turns off visible notification)
+    private fun createMinimalNotification(): Notification {
+        return NotificationCompat.Builder(this, "floating_bubble_channel")
+            .setContentTitle("Floating Notes")
+            .setContentText("Running in background")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setSilent(true)
+            .setOngoing(true)
+            .build()
     }
 
     private fun saveFontSize(size: Float) {
@@ -413,18 +455,54 @@ class FloatingBubbleService : Service() {
                 "Floating Bubble",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps floating bubble alive"
+                description = "Keeps floating bubble alive • Tap to open app"
+                setShowBadge(false)
+                enableVibration(false)
+                enableLights(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
+    // ============================================================
+    // ✅ Notification with tap-to-open intent
+    // ============================================================
     private fun createNotification(): Notification {
+        val contentIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("from_notification", true)
+        }
+        val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            1001,
+            contentIntent,
+            pendingFlags
+        )
+
+        val startIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val startPendingIntent = PendingIntent.getActivity(
+            this,
+            1002,
+            startIntent,
+            pendingFlags
+        )
+
         return NotificationCompat.Builder(this, "floating_bubble_channel")
             .setContentTitle("Floating Notes")
-            .setContentText("${notesList.size} notes available")
+            .setContentText("${notesList.size} notes available • Tap to open")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(pendingIntent)
+            .addAction(android.R.drawable.ic_menu_view, "Open", startPendingIntent)
+            .setOngoing(true)
+            .setAutoCancel(false)
             .build()
     }
 
@@ -607,6 +685,14 @@ class FloatingBubbleService : Service() {
         if (bubbleView == null) {
             Handler(Looper.getMainLooper()).post { createBubble() }
         }
+        // ✅ If service re-started via notification tap, refresh notification
+        try {
+            if (isShowNotificationEnabled()) {
+                startForeground(1001, createNotification())
+            } else {
+                startForeground(1001, createMinimalNotification())
+            }
+        } catch (_: Exception) {}
         return START_STICKY
     }
 
@@ -1630,7 +1716,6 @@ class FloatingBubbleService : Service() {
         try {
             val (start, end) = getSelection()
             if (start == end || start < 0 || end < 0) {
-                // ✅ নতুন: selection নেই → fully remove
                 fullyRemoveSelectionHandles()
                 hideFloatingActionBar()
                 return
@@ -1675,17 +1760,14 @@ class FloatingBubbleService : Service() {
 
     // ============================================================
     // ✅ FULLY remove selection handles — no residual rendering
-    // Use only after unselect/collapse to prevent blink on scroll
     // ============================================================
     private fun fullyRemoveSelectionHandles() {
         try {
-            // Reset all flags first so nothing re-creates them mid-removal
             areHandlesVisible = false
             isDraggingLeftHandle = false
             isDraggingRightHandle = false
             isLongPressDragging = false
 
-            // Remove handle views from container
             leftHandleView?.let { h ->
                 h.animate().cancel()
                 try {
@@ -1699,11 +1781,9 @@ class FloatingBubbleService : Service() {
                 } catch (_: Exception) {}
             }
 
-            // Null the references so next selection re-creates them fresh
             leftHandleView = null
             rightHandleView = null
 
-            // Clear any pending debounce updates
             handleUpdateDebounceHandler.removeCallbacksAndMessages(null)
             handleUpdatePending = false
         } catch (_: Exception) {}
@@ -2170,6 +2250,40 @@ class FloatingBubbleService : Service() {
                     saveBubbleColor(hex)
                 }
             )
+        ))
+
+        // ============================================================
+        // ✅ NOTIFICATIONS section with toggle
+        // ============================================================
+        body.addView(createSectionHeader("Notifications"))
+
+        body.addView(createSettingCard(
+            title = "Show Notification",
+            subtitle = if (isShowNotificationEnabled()) "Notification visible" else "Notification hidden",
+            customView = object : LinearLayout(this) {
+                init {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dpToPx(4), 0, dpToPx(4))
+
+                    val switch = Switch(context).apply {
+                        isChecked = isShowNotificationEnabled()
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                        setOnCheckedChangeListener { _, isChecked ->
+                            setShowNotificationEnabled(isChecked)
+                            updateNotificationVisibility()
+                            updateSubtitleRecursiveFromRoot(
+                                "Show Notification",
+                                if (isChecked) "Notification visible" else "Notification hidden"
+                            )
+                        }
+                    }
+                    addView(switch)
+                }
+            }
         ))
 
         body.addView(createSectionHeader("Security"))
@@ -3007,7 +3121,6 @@ class FloatingBubbleService : Service() {
                         isScrolling = false
 
                         if (!editText.hasSelection()) {
-                            // ✅ NEW: selection নেই → fully remove handle
                             fullyRemoveSelectionHandles()
                             hideFloatingActionBar()
                             return@postDelayed
@@ -3386,7 +3499,6 @@ class FloatingBubbleService : Service() {
                                     val offset = offsetAt(event.x, event.y)
                                     this@apply.setSelection(offset)
                                     hideFloatingActionBar()
-                                    // ✅ FULL cleanup — handle view সম্পূর্ণ remove
                                     fullyRemoveSelectionHandles()
                                     currentSelectedText = ""
                                 }
