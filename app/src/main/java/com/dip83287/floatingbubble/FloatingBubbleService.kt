@@ -1626,13 +1626,13 @@ class FloatingBubbleService : Service() {
 
     private fun showSelectionHandles() {
         if (isSelectionUiSuppressed()) return
-        // ✅ NEW: কোনো drag active থাকলে handle icon দেখাব না
-        // (handle touch target জীবিত থাকবে)
         if (isAnyDragActive()) return
         try {
             val (start, end) = getSelection()
             if (start == end || start < 0 || end < 0) {
-                hideSelectionHandles()
+                // ✅ নতুন: selection নেই → fully remove
+                fullyRemoveSelectionHandles()
+                hideFloatingActionBar()
                 return
             }
             if (leftHandleView == null || rightHandleView == null) {
@@ -1671,6 +1671,42 @@ class FloatingBubbleService : Service() {
             }
             areHandlesVisible = false
         } catch (e: Exception) { }
+    }
+
+    // ============================================================
+    // ✅ FULLY remove selection handles — no residual rendering
+    // Use only after unselect/collapse to prevent blink on scroll
+    // ============================================================
+    private fun fullyRemoveSelectionHandles() {
+        try {
+            // Reset all flags first so nothing re-creates them mid-removal
+            areHandlesVisible = false
+            isDraggingLeftHandle = false
+            isDraggingRightHandle = false
+            isLongPressDragging = false
+
+            // Remove handle views from container
+            leftHandleView?.let { h ->
+                h.animate().cancel()
+                try {
+                    handleContainer?.removeView(h)
+                } catch (_: Exception) {}
+            }
+            rightHandleView?.let { h ->
+                h.animate().cancel()
+                try {
+                    handleContainer?.removeView(h)
+                } catch (_: Exception) {}
+            }
+
+            // Null the references so next selection re-creates them fresh
+            leftHandleView = null
+            rightHandleView = null
+
+            // Clear any pending debounce updates
+            handleUpdateDebounceHandler.removeCallbacksAndMessages(null)
+            handleUpdatePending = false
+        } catch (_: Exception) {}
     }
 
     private fun fadeOutHandlesDuringScroll() {
@@ -1719,7 +1755,6 @@ class FloatingBubbleService : Service() {
         if (!isExpanded) return
         if (isActionBarTemporarilyHidden) return
         if (isScrolling) return
-        // ✅ NEW: কোনো drag active থাকলে action bar দেখাব না
         if (isAnyDragActive()) return
         hideFloatingActionBar()
         val actionBarView = LinearLayout(this).apply {
@@ -1850,7 +1885,6 @@ class FloatingBubbleService : Service() {
             val start = editText.selectionStart
             val startLine = currentLayout.getLineForOffset(start)
 
-            // ✅ scrollY হিসাব করে selection-এর screen Y বের করি
             val x = currentLayout.getPrimaryHorizontal(start) + location[0]
             val y = currentLayout.getLineTop(startLine) + location[1] - editText.scrollY
 
@@ -1951,7 +1985,6 @@ class FloatingBubbleService : Service() {
                 hideFloatingActionBar()
                 return@Runnable
             }
-            // ✅ NEW: drag active থাকলে schedule-ও বাতিল
             if (isAnyDragActive()) return@Runnable
             if (isActionBarTemporarilyHidden && editText.hasSelection()) {
                 val (start, end) = getSelection()
@@ -2943,7 +2976,6 @@ class FloatingBubbleService : Service() {
         titleBar.addView(titleInput)
         contentContainer.addView(titleBar)
 
-        // ✅ Scroll listener with drag-active guard
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
@@ -2967,7 +2999,6 @@ class FloatingBubbleService : Service() {
                 scrollStopHandler?.postDelayed({
                     if (lastScrollTime == currentTime) {
 
-                        // ✅ CRITICAL: যদি কোনো drag এখনো active থাকে, কিছুই show করব না
                         if (isAnyDragActive()) {
                             isScrolling = false
                             return@postDelayed
@@ -2975,7 +3006,13 @@ class FloatingBubbleService : Service() {
 
                         isScrolling = false
 
-                        // ✅ সব state force reset
+                        if (!editText.hasSelection()) {
+                            // ✅ NEW: selection নেই → fully remove handle
+                            fullyRemoveSelectionHandles()
+                            hideFloatingActionBar()
+                            return@postDelayed
+                        }
+
                         isActionBarTemporarilyHidden = false
                         isLongPressDragging = false
                         suppressSelectionUiUntil = 0L
@@ -3348,8 +3385,9 @@ class FloatingBubbleService : Service() {
                                 if (selectionAtDown && this@apply.hasSelection()) {
                                     val offset = offsetAt(event.x, event.y)
                                     this@apply.setSelection(offset)
-                                    hideSelectionHandles()
                                     hideFloatingActionBar()
+                                    // ✅ FULL cleanup — handle view সম্পূর্ণ remove
+                                    fullyRemoveSelectionHandles()
                                     currentSelectedText = ""
                                 }
                                 this@apply.requestFocus()
@@ -3518,16 +3556,11 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ============================================================
-    // Forced action bar show after scroll (bypass guard conditions)
-    // ============================================================
     private fun forceShowActionBarAfterScroll(selectedText: String) {
         if (!isExpanded) return
         if (selectedText.isEmpty()) return
-        // ✅ যদি কোনো drag active থাকে, force show-ও বাতিল
         if (isAnyDragActive()) return
 
-        // Reset scroll state definitively
         isScrolling = false
         isActionBarTemporarilyHidden = false
         suppressSelectionUiUntil = 0L
@@ -3536,7 +3569,6 @@ class FloatingBubbleService : Service() {
 
         Handler(Looper.getMainLooper()).postDelayed({
             try {
-                // Check again — race conditions prevent
                 if (!isExpanded) return@postDelayed
                 if (isScrolling) return@postDelayed
                 if (isAnyDragActive()) return@postDelayed
