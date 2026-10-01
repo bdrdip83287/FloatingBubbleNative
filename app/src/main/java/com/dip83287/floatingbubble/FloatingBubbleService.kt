@@ -3483,7 +3483,8 @@ class FloatingBubbleService : Service() {
                 container.pivotY = 0f
 
                 oldNoteView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                oldNoteView.pivotX = 0f                oldNoteView.pivotY = 0f
+                oldNoteView.pivotX = 0f
+                oldNoteView.pivotY = 0f
 
                 oldNoteView.animate()
                     .alpha(0f)
