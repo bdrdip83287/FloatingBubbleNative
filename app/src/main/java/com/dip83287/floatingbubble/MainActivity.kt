@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         EmergencyLog.logLifecycle("MainActivity", "onCreate")
 
-        // ✅ Step 1: Overlay permission
+        // ✅ Step 1: Overlay permission check
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
                 EmergencyLog.log("Opening overlay settings page")
@@ -35,7 +35,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ✅ Step 2: Notification permission (Android 13+)
+        // ✅ Step 2: Notification permission check (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,
@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ✅ Step 3: সব permission আছে — service start
+        // ✅ Step 3: All permissions granted — start service
         startBubbleService()
         finish()
     }
@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
             // Permission granted or denied — either way start service
-            // (যদি denied হয়, silent notification দিয়ে service চলবে)
+            // (If denied, service will run with silent minimal notification)
             Handler(Looper.getMainLooper()).postDelayed({
                 startBubbleService()
                 finish()

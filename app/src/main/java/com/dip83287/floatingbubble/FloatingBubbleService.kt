@@ -251,11 +251,12 @@ class FloatingBubbleService : Service() {
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         loadSavedPositions()
         loadSettings()
+
         loadNotes()
 
         createNotificationChannel()
 
-        // ✅ NEW: Android 13+ এ notification permission check
+        // ✅ NEW: Check notification permission before showing notification
         if (hasNotificationPermission()) {
             if (isShowNotificationEnabled()) {
                 startForeground(1001, createNotification())
@@ -263,7 +264,7 @@ class FloatingBubbleService : Service() {
                 startForeground(1001, createMinimalNotification())
             }
         } else {
-            // Permission নেই — silent minimal notification দিয়ে service চালু রাখি
+            // Permission not granted — run service with silent minimal notification
             startForeground(1001, createMinimalNotification())
         }
 
@@ -278,16 +279,6 @@ class FloatingBubbleService : Service() {
         startConfigurationCheck()
 
     } catch (e: Exception) {
-    }
-}
-
-// ✅ NEW helper
-private fun hasNotificationPermission(): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-    } else {
-        true
     }
 }
 
@@ -307,20 +298,36 @@ private fun hasNotificationPermission(): Boolean {
     private fun setShowNotificationEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SHOW_NOTIFICATION, enabled).apply()
     }
+    
+    
+    // ✅ NEW: Check POST_NOTIFICATIONS runtime permission (Android 13+)
+private fun hasNotificationPermission(): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+    } else {
+        true
+    }
+}
 
     // ============================================================
     // ✅ Update notification visibility based on user preference
     // ============================================================
     private fun updateNotificationVisibility() {
-        try {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (isShowNotificationEnabled()) {
-                nm.notify(1001, createNotification())
-            } else {
-                nm.notify(1001, createMinimalNotification())
-            }
-        } catch (_: Exception) {}
-    }
+    try {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!hasNotificationPermission()) {
+            // No permission — use minimal silent notification
+            nm.notify(1001, createMinimalNotification())
+            return
+        }
+        if (isShowNotificationEnabled()) {
+            nm.notify(1001, createNotification())
+        } else {
+            nm.notify(1001, createMinimalNotification())
+        }
+    } catch (_: Exception) {}
+}
 
     // ✅ Minimal silent notification (used when user turns off visible notification)
     private fun createMinimalNotification(): Notification {
@@ -484,43 +491,45 @@ private fun hasNotificationPermission(): Boolean {
     // ✅ Notification with tap-to-open intent
     // ============================================================
     private fun createNotification(): Notification {
-        val contentIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            putExtra("from_notification", true)
-        }
-        val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            1001,
-            contentIntent,
-            pendingFlags
-        )
-
-        val startIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        val startPendingIntent = PendingIntent.getActivity(
-            this,
-            1002,
-            startIntent,
-            pendingFlags
-        )
-
-        return NotificationCompat.Builder(this, "floating_bubble_channel")
-            .setContentTitle("Floating Notes")
-            .setContentText("${notesList.size} notes available • Tap to open")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_view, "Open", startPendingIntent)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .build()
+    val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    } else {
+        PendingIntent.FLAG_UPDATE_CURRENT
     }
+
+    val contentIntent = Intent(this, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        putExtra("from_notification", true)
+    }
+    val pendingIntent = PendingIntent.getActivity(
+        this,
+        1001,
+        contentIntent,
+        pendingFlags
+    )
+
+    val startIntent = Intent(this, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        putExtra("from_notification", true)
+    }
+    val startPendingIntent = PendingIntent.getActivity(
+        this,
+        1002,
+        startIntent,
+        pendingFlags
+    )
+
+    return NotificationCompat.Builder(this, "floating_bubble_channel")
+        .setContentTitle("Floating Notes")
+        .setContentText("${notesList.size} notes available • Tap to open")
+        .setSmallIcon(android.R.drawable.ic_dialog_info)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setContentIntent(pendingIntent)
+        .addAction(android.R.drawable.ic_menu_view, "Open", startPendingIntent)
+        .setOngoing(true)
+        .setAutoCancel(false)
+        .build()
+}
 
     private fun loadSavedPositions() {
         currentNotepadWidth = prefs.getInt(KEY_NOTEPAD_WIDTH, NOTEPAD_MIN_WIDTH)
@@ -694,23 +703,29 @@ private fun hasNotificationPermission(): Boolean {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (bubbleView == null) {
-            Handler(Looper.getMainLooper()).post { createBubble() }
-        }
-        // ✅ If service re-started via notification tap, refresh notification
-        try {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+        stopSelf()
+        return START_NOT_STICKY
+    }
+    if (bubbleView == null) {
+        Handler(Looper.getMainLooper()).post { createBubble() }
+    }
+
+    // ✅ Refresh notification based on current permission + toggle state
+    try {
+        if (hasNotificationPermission()) {
             if (isShowNotificationEnabled()) {
                 startForeground(1001, createNotification())
             } else {
                 startForeground(1001, createMinimalNotification())
             }
-        } catch (_: Exception) {}
-        return START_STICKY
-    }
+        } else {
+            startForeground(1001, createMinimalNotification())
+        }
+    } catch (_: Exception) {}
+
+    return START_STICKY
+}
 
     // ============================================================
     // Bubble
