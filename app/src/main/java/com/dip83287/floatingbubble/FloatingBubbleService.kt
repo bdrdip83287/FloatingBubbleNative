@@ -256,17 +256,16 @@ class FloatingBubbleService : Service() {
 
         createNotificationChannel()
 
-        // ✅ NEW: Check notification permission before showing notification
-        if (hasNotificationPermission()) {
-            if (isShowNotificationEnabled()) {
-                startForeground(1001, createNotification())
-            } else {
-                startForeground(1001, createMinimalNotification())
-            }
-        } else {
-            // Permission not granted — run service with silent minimal notification
-            startForeground(1001, createMinimalNotification())
-        }
+        // ✅ Start foreground IMMEDIATELY to avoid ANR / crash
+        // Use minimal notification first, then update after
+        startForeground(1001, createMinimalNotification())
+
+        // ✅ Then update to full notification if allowed
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                updateNotificationVisibility()
+            } catch (_: Exception) {}
+        }, 100)
 
         createDeleteZone()
         scrollHideHandler = Handler(Looper.getMainLooper())
@@ -317,16 +316,32 @@ private fun hasNotificationPermission(): Boolean {
     try {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (!hasNotificationPermission()) {
-            // No permission — use minimal silent notification
-            nm.notify(1001, createMinimalNotification())
+            // No notification permission — use silent minimal notification
+            startForeground(1001, createMinimalNotification())
             return
         }
         if (isShowNotificationEnabled()) {
-            nm.notify(1001, createNotification())
+            // Show full notification
+            val notification = createNotification()
+            nm.notify(1001, notification)
+            // Also update foreground with same notification
+            startForeground(1001, notification)
         } else {
-            nm.notify(1001, createMinimalNotification())
+            // Show minimal silent notification
+            val notification = createMinimalNotification()
+            nm.notify(1001, notification)
+            startForeground(1001, notification)
         }
     } catch (_: Exception) {}
+}
+
+private fun hasNotificationPermission(): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+    } else {
+        true
+    }
 }
 
     // ✅ Minimal silent notification (used when user turns off visible notification)
@@ -707,21 +722,20 @@ private fun hasNotificationPermission(): Boolean {
         stopSelf()
         return START_NOT_STICKY
     }
+
+    // ✅ IDEMPOTENT: Only create bubble if it doesn't already exist
     if (bubbleView == null) {
-        Handler(Looper.getMainLooper()).post { createBubble() }
+        Handler(Looper.getMainLooper()).post {
+            // Double-check on main thread to avoid race condition
+            if (bubbleView == null) {
+                createBubble()
+            }
+        }
     }
 
-    // ✅ Refresh notification based on current permission + toggle state
+    // ✅ Refresh notification based on current state
     try {
-        if (hasNotificationPermission()) {
-            if (isShowNotificationEnabled()) {
-                startForeground(1001, createNotification())
-            } else {
-                startForeground(1001, createMinimalNotification())
-            }
-        } else {
-            startForeground(1001, createMinimalNotification())
-        }
+        updateNotificationVisibility()
     } catch (_: Exception) {}
 
     return START_STICKY
