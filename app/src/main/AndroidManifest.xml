@@ -2,14 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Overlay permission for all Android versions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.SYSTEM_OVERLAY_WINDOW" />
 
-    <!-- ✅ Storage permissions REMOVED for Play Store compatibility -->
-    <!-- Google Drive Auto Backup will handle persistence -->
-
-    <!-- Other permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -47,15 +42,14 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse">
-            <!-- ✅ FIX: property name corrected -->
+            <!-- ✅ FIX: property name (extra "type_" সরানো হয়েছে) -->
             <property
                 android:name="android.foreground_service_special_use"
                 android:value="floating_bubble" />
         </service>
 
-        <!-- FileProvider for sharing files -->
         <provider
-            android:name="androidx.core.content.FileProvider"
+            android:name="androidx.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">

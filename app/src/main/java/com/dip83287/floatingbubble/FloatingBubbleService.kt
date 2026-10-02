@@ -244,36 +244,52 @@ class FloatingBubbleService : Service() {
     // Lifecycle
     // ============================================================
     override fun onCreate() {
-        super.onCreate()
-        try {
-            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            loadSavedPositions()
-            loadSettings()
+    super.onCreate()
+    try {
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        actionBarWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        loadSavedPositions()
+        loadSettings()
+        loadNotes()
 
-            loadNotes()
+        createNotificationChannel()
 
-            createNotificationChannel()
-            // ✅ Start foreground with either full or minimal notification based on user pref
+        // ✅ NEW: Android 13+ এ notification permission check
+        if (hasNotificationPermission()) {
             if (isShowNotificationEnabled()) {
                 startForeground(1001, createNotification())
             } else {
                 startForeground(1001, createMinimalNotification())
             }
-            createDeleteZone()
-            scrollHideHandler = Handler(Looper.getMainLooper())
-            scrollStopHandler = Handler(Looper.getMainLooper())
-
-            lastFontScale = resources.configuration.fontScale
-            lastScreenWidth = resources.displayMetrics.widthPixels
-            lastScreenHeight = resources.displayMetrics.heightPixels
-
-            startConfigurationCheck()
-
-        } catch (e: Exception) {
+        } else {
+            // Permission নেই — silent minimal notification দিয়ে service চালু রাখি
+            startForeground(1001, createMinimalNotification())
         }
+
+        createDeleteZone()
+        scrollHideHandler = Handler(Looper.getMainLooper())
+        scrollStopHandler = Handler(Looper.getMainLooper())
+
+        lastFontScale = resources.configuration.fontScale
+        lastScreenWidth = resources.displayMetrics.widthPixels
+        lastScreenHeight = resources.displayMetrics.heightPixels
+
+        startConfigurationCheck()
+
+    } catch (e: Exception) {
     }
+}
+
+// ✅ NEW helper
+private fun hasNotificationPermission(): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+    } else {
+        true
+    }
+}
 
     // ============================================================
     // Settings load/save
