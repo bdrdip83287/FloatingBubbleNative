@@ -335,14 +335,7 @@ private fun hasNotificationPermission(): Boolean {
     } catch (_: Exception) {}
 }
 
-private fun hasNotificationPermission(): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-    } else {
-        true
-    }
-}
+
 
     // ✅ Minimal silent notification (used when user turns off visible notification)
     private fun createMinimalNotification(): Notification {
