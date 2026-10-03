@@ -19,9 +19,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val OVERLAY_PERMISSION_REQUEST = 1001
         private const val NOTIFICATION_PERMISSION_REQUEST = 1002
-        private const val PREFS_NAME = "bubble_prefs"
-        private const val KEY_OVERLAY_REQUESTED = "overlay_requested"
-        private const val KEY_NOTIFICATION_REQUESTED = "notification_requested"
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -142,10 +139,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         EmergencyLog.logLifecycle("MainActivity", "onResume")
-
-        // Only act if we didn't just launch (i.e., resumed from background)
-        // If we're here and all permissions granted, just finish quietly.
-        // Service will be started from onCreate if needed.
+        // Nothing to do here — all logic is in onCreate/onActivityResult
     }
 
     private fun startBubbleService() {

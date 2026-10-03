@@ -256,16 +256,15 @@ class FloatingBubbleService : Service() {
 
         createNotificationChannel()
 
-        // ✅ Start foreground IMMEDIATELY to avoid ANR / crash
-        // Use minimal notification first, then update after
+        // ✅ Start foreground IMMEDIATELY (before any heavy work) to avoid ANR/crash
         startForeground(1001, createMinimalNotification())
 
-        // ✅ Then update to full notification if allowed
+        // ✅ Then update notification on next loop (after service is running)
         Handler(Looper.getMainLooper()).postDelayed({
             try {
                 updateNotificationVisibility()
             } catch (_: Exception) {}
-        }, 100)
+        }, 200)
 
         createDeleteZone()
         scrollHideHandler = Handler(Looper.getMainLooper())
@@ -314,28 +313,25 @@ private fun hasNotificationPermission(): Boolean {
     // ============================================================
     private fun updateNotificationVisibility() {
     try {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (!hasNotificationPermission()) {
-            // No notification permission — use silent minimal notification
-            startForeground(1001, createMinimalNotification())
+            // No notification permission — use minimal silent notification
+            val notification = createMinimalNotification()
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(1001, notification)
             return
         }
+
         if (isShowNotificationEnabled()) {
-            // Show full notification
             val notification = createNotification()
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(1001, notification)
-            // Also update foreground with same notification
-            startForeground(1001, notification)
         } else {
-            // Show minimal silent notification
             val notification = createMinimalNotification()
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(1001, notification)
-            startForeground(1001, notification)
         }
     } catch (_: Exception) {}
 }
-
-
 
     // ✅ Minimal silent notification (used when user turns off visible notification)
     private fun createMinimalNotification(): Notification {
@@ -506,7 +502,7 @@ private fun hasNotificationPermission(): Boolean {
     }
 
     val contentIntent = Intent(this, MainActivity::class.java).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         putExtra("from_notification", true)
     }
     val pendingIntent = PendingIntent.getActivity(
@@ -517,7 +513,7 @@ private fun hasNotificationPermission(): Boolean {
     )
 
     val startIntent = Intent(this, MainActivity::class.java).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         putExtra("from_notification", true)
     }
     val startPendingIntent = PendingIntent.getActivity(
@@ -716,11 +712,13 @@ private fun hasNotificationPermission(): Boolean {
         return START_NOT_STICKY
     }
 
-    // ✅ IDEMPOTENT: Only create bubble if it doesn't already exist
-    if (bubbleView == null) {
+    // ✅ IDEMPOTENT: Only create bubble if NEITHER bubble NOR note pad exists
+    val shouldCreateBubble = (bubbleView == null && noteView == null)
+
+    if (shouldCreateBubble) {
         Handler(Looper.getMainLooper()).post {
-            // Double-check on main thread to avoid race condition
-            if (bubbleView == null) {
+            // Double-check on main thread to prevent race condition
+            if (bubbleView == null && noteView == null) {
                 createBubble()
             }
         }

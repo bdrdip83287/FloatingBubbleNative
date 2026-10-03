@@ -47,7 +47,7 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse">
-            <!-- ✅ FIX: property name corrected (removed extra "type_") -->
+            <!-- ✅ FIX: property name corrected -->
             <property
                 android:name="android.foreground_service_special_use"
                 android:value="floating_bubble" />
