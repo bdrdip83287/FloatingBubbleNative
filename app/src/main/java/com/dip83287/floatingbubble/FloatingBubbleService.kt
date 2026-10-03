@@ -256,13 +256,15 @@ class FloatingBubbleService : Service() {
 
         createNotificationChannel()
 
-        // ✅ Start foreground IMMEDIATELY (before any heavy work) to avoid ANR/crash
+        // ✅ CRITICAL: Call startForeground only ONCE with minimal notification
+        // (Never call startForeground twice — causes crash on Android 12+)
         startForeground(1001, createMinimalNotification())
 
-        // ✅ Then update notification on next loop (after service is running)
+        // ✅ Then update to full notification using NotificationManager.notify()
+        // (NOT startForeground — that would crash)
         Handler(Looper.getMainLooper()).postDelayed({
             try {
-                updateNotificationVisibility()
+                updateNotificationContent()
             } catch (_: Exception) {}
         }, 200)
 
@@ -311,25 +313,21 @@ private fun hasNotificationPermission(): Boolean {
     // ============================================================
     // ✅ Update notification visibility based on user preference
     // ============================================================
-    private fun updateNotificationVisibility() {
+    // ✅ Update notification CONTENT using NotificationManager.notify()
+// (NOT startForeground — that would crash on Android 12+)
+private fun updateNotificationContent() {
     try {
-        if (!hasNotificationPermission()) {
-            // No notification permission — use minimal silent notification
-            val notification = createMinimalNotification()
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(1001, notification)
-            return
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        val notification = if (hasNotificationPermission() && isShowNotificationEnabled()) {
+            // Full notification
+            createNotification()
+        } else {
+            // Minimal silent notification (used when permission missing or toggle off)
+            createMinimalNotification()
         }
 
-        if (isShowNotificationEnabled()) {
-            val notification = createNotification()
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(1001, notification)
-        } else {
-            val notification = createMinimalNotification()
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(1001, notification)
-        }
+        nm.notify(1001, notification)
     } catch (_: Exception) {}
 }
 
@@ -712,21 +710,23 @@ private fun hasNotificationPermission(): Boolean {
         return START_NOT_STICKY
     }
 
-    // ✅ IDEMPOTENT: Only create bubble if NEITHER bubble NOR note pad exists
+    // ✅ IDEMPOTENT + RACE-SAFE: Only create bubble if neither bubble nor note pad exists
     val shouldCreateBubble = (bubbleView == null && noteView == null)
 
     if (shouldCreateBubble) {
         Handler(Looper.getMainLooper()).post {
             // Double-check on main thread to prevent race condition
-            if (bubbleView == null && noteView == null) {
-                createBubble()
-            }
+            try {
+                if (bubbleView == null && noteView == null) {
+                    createBubble()
+                }
+            } catch (_: Exception) {}
         }
     }
 
-    // ✅ Refresh notification based on current state
+    // ✅ Refresh notification content (uses notify(), NOT startForeground)
     try {
-        updateNotificationVisibility()
+        updateNotificationContent()
     } catch (_: Exception) {}
 
     return START_STICKY
@@ -2310,7 +2310,7 @@ private fun hasNotificationPermission(): Boolean {
                         )
                         setOnCheckedChangeListener { _, isChecked ->
                             setShowNotificationEnabled(isChecked)
-                            updateNotificationVisibility()
+                            updateNotificationContent()
                             updateSubtitleRecursiveFromRoot(
                                 "Show Notification",
                                 if (isChecked) "Notification visible" else "Notification hidden"

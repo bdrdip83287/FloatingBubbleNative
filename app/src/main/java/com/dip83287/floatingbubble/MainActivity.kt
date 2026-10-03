@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -27,65 +28,62 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         EmergencyLog.logLifecycle("MainActivity", "onCreate")
 
-        // ✅ Step 1: Overlay permission
+        // ✅ Step 1: Check overlay permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
-                EmergencyLog.log("Requesting overlay permission")
-                requestOverlayPermission()
+                EmergencyLog.log("Overlay permission not granted → opening settings")
+                openOverlaySettings()
                 return
             }
         }
 
-        // ✅ Step 2: Notification permission (Android 13+)
+        // ✅ Step 2: Check notification permission (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.POST_NOTIFICATIONS
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
-                EmergencyLog.log("Requesting notification permission")
-                requestNotificationPermission()
+                EmergencyLog.log("Notification permission not granted → requesting")
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST
+                )
                 return
             }
         }
 
-        // ✅ Step 3: Everything granted — start service and finish quietly
+        // ✅ Step 3: All permissions granted → start service & finish
         startBubbleService()
         finish()
     }
 
-    private fun requestOverlayPermission() {
+    /**
+     * ✅ Open the app's "Display over other apps" settings page.
+     * Uses ACTION_APPLICATION_DETAILS_SETTINGS — works on ALL devices
+     * (unlike ACTION_MANAGE_OVERLAY_PERMISSION which fails silently
+     * on Xiaomi, Realme, Oppo, Vivo, etc.)
+     */
+    private fun openOverlaySettings() {
         try {
-            // Try app-specific overlay settings screen first
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            intent.data = Uri.parse("package:$packageName")
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
-            EmergencyLog.log("Opened overlay permission screen")
-        } catch (e: Exception) {
-            EmergencyLog.logException(e, "requestOverlayPermission")
-            // Fallback to app details
-            try {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                intent.data = Uri.parse("package:$packageName")
-                startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
-            } catch (_: Exception) {
-                finish()
-            }
-        }
-    }
-
-    private fun requestNotificationPermission() {
-        try {
-            ActivityCompat.requestPermissions(
+            Toast.makeText(
                 this,
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                NOTIFICATION_PERMISSION_REQUEST
-            )
-        } catch (_: Exception) {
-            // If this fails, just start service
-            startBubbleService()
+                "🔵 Go to 'Display over other apps' and enable permission",
+                Toast.LENGTH_LONG
+            ).show()
+            EmergencyLog.log("Opened app details settings for overlay permission")
+        } catch (e: Exception) {
+            EmergencyLog.logException(e, "openOverlaySettings")
+            Toast.makeText(
+                this,
+                "Please manually enable overlay permission from Settings",
+                Toast.LENGTH_LONG
+            ).show()
             finish()
         }
     }
@@ -97,7 +95,8 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
-            // Whether granted or denied — just start the service
+            // Whether granted or denied — start service anyway
+            // (If denied, service will run with silent minimal notification)
             startBubbleService()
             finish()
         }
@@ -108,38 +107,67 @@ class MainActivity : AppCompatActivity() {
 
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
             handler.postDelayed({
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                    Settings.canDrawOverlays(this)
-                ) {
-                    // Overlay granted — check notification permission next
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(
-                            this,
-                            Manifest.permission.POST_NOTIFICATIONS
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        requestNotificationPermission()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (Settings.canDrawOverlays(this)) {
+                        // ✅ Overlay granted — now check notification
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(
+                                this,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            ActivityCompat.requestPermissions(
+                                this,
+                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                NOTIFICATION_PERMISSION_REQUEST
+                            )
+                        } else {
+                            Toast.makeText(
+                                this,
+                                "✅ Overlay permission granted!",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            startBubbleService()
+                            finish()
+                        }
                     } else {
-                        startBubbleService()
+                        Toast.makeText(
+                            this,
+                            "❌ Please enable 'Display over other apps' permission",
+                            Toast.LENGTH_LONG
+                        ).show()
                         finish()
                     }
                 } else {
-                    // User didn't grant — just finish quietly
                     finish()
                 }
-            }, 400)
+            }, 500)
         }
     }
 
     /**
-     * ✅ When MainActivity is brought to front from a notification tap,
-     * we just ensure service is running (or do nothing if already running).
-     * No UI is shown — activity finishes immediately.
+     * ✅ MainActivity brought to front from notification tap.
+     * Just ensure service is running — no UI, no duplicate bubble.
      */
     override fun onResume() {
         super.onResume()
         EmergencyLog.logLifecycle("MainActivity", "onResume")
-        // Nothing to do here — all logic is in onCreate/onActivityResult
+
+        // If all permissions are granted and we're here (from notification tap),
+        // just ensure service is running
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            Settings.canDrawOverlays(this)
+        ) {
+            val isNotificationLaunch = intent?.getBooleanExtra(
+                "from_notification", false
+            ) ?: false
+
+            if (isNotificationLaunch) {
+                EmergencyLog.log("Launched from notification tap")
+                startBubbleService()
+                finish()
+            }
+        }
     }
 
     private fun startBubbleService() {
