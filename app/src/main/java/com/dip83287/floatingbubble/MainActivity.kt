@@ -28,7 +28,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         EmergencyLog.logLifecycle("MainActivity", "onCreate")
 
-        // ✅ Step 1: Check overlay permission
+        // ✅ Step 1: Overlay permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
                 EmergencyLog.log("Overlay permission not granted → opening settings")
@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ✅ Step 2: Check notification permission (Android 13+)
+        // ✅ Step 2: Notification permission (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,
@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity() {
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
                 EmergencyLog.log("Notification permission not granted → requesting")
+                // ✅ IMPORTANT: Do NOT finish() here. Wait for the result callback.
                 ActivityCompat.requestPermissions(
                     this,
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS),
@@ -56,14 +57,15 @@ class MainActivity : AppCompatActivity() {
 
         // ✅ Step 3: All permissions granted → start service & finish
         startBubbleService()
-        finish()
+        // Give service a moment to call startForeground() before finish
+        handler.postDelayed({
+            finish()
+        }, 300)
     }
 
     /**
      * ✅ Open the app's "Display over other apps" settings page.
-     * Uses ACTION_APPLICATION_DETAILS_SETTINGS — works on ALL devices
-     * (unlike ACTION_MANAGE_OVERLAY_PERMISSION which fails silently
-     * on Xiaomi, Realme, Oppo, Vivo, etc.)
+     * Uses ACTION_APPLICATION_DETAILS_SETTINGS — works on ALL devices.
      */
     private fun openOverlaySettings() {
         try {
@@ -88,6 +90,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * ✅ Handle notification permission result.
+     * IMPORTANT: Do NOT finish before this. Start service here.
+     */
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -95,10 +101,13 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
-            // Whether granted or denied — start service anyway
-            // (If denied, service will run with silent minimal notification)
+            EmergencyLog.log("Notification permission result received")
+            // Whether granted or denied — start service
             startBubbleService()
-            finish()
+            // Give service time to call startForeground() before finishing
+            handler.postDelayed({
+                finish()
+            }, 300)
         }
     }
 
@@ -109,26 +118,23 @@ class MainActivity : AppCompatActivity() {
             handler.postDelayed({
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     if (Settings.canDrawOverlays(this)) {
-                        // ✅ Overlay granted — now check notification
+                        // ✅ Overlay granted — check notification
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                             ContextCompat.checkSelfPermission(
                                 this,
                                 Manifest.permission.POST_NOTIFICATIONS
                             ) != PackageManager.PERMISSION_GRANTED
                         ) {
+                            // Request permission, wait for result
                             ActivityCompat.requestPermissions(
                                 this,
                                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                                 NOTIFICATION_PERMISSION_REQUEST
                             )
                         } else {
-                            Toast.makeText(
-                                this,
-                                "✅ Overlay permission granted!",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            // No notification permission needed — start service now
                             startBubbleService()
-                            finish()
+                            handler.postDelayed({ finish() }, 300)
                         }
                     } else {
                         Toast.makeText(
@@ -147,26 +153,26 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * ✅ MainActivity brought to front from notification tap.
-     * Just ensure service is running — no UI, no duplicate bubble.
+     * Start service — if already running, service does nothing.
      */
     override fun onResume() {
         super.onResume()
         EmergencyLog.logLifecycle("MainActivity", "onResume")
 
-        // If all permissions are granted and we're here (from notification tap),
-        // just ensure service is running
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+        // Only handle notification-launch case here
+        val isNotificationLaunch = intent?.getBooleanExtra(
+            "from_notification", false
+        ) ?: false
+
+        if (isNotificationLaunch &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             Settings.canDrawOverlays(this)
         ) {
-            val isNotificationLaunch = intent?.getBooleanExtra(
-                "from_notification", false
-            ) ?: false
-
-            if (isNotificationLaunch) {
-                EmergencyLog.log("Launched from notification tap")
-                startBubbleService()
+            EmergencyLog.log("Launched from notification tap")
+            startBubbleService()
+            handler.postDelayed({
                 finish()
-            }
+            }, 300)
         }
     }
 

@@ -260,16 +260,14 @@ private val PERSISTENT_CHANNEL_ID = "floating_notes_persistent"
 
         createNotificationChannel()
 
-        // ✅ Start foreground with the SILENT notification
-        // (IMPORTANCE_MIN channel — no status bar icon)
+        // ✅ CRITICAL: startForeground first (single time only)
         startForeground(NOTIFICATION_ID_SERVICE, createMinimalNotification())
 
-        // ✅ Show persistent notification (survives service destroy)
-        Handler(Looper.getMainLooper()).postDelayed({
-            try {
-                updatePersistentNotification()
-            } catch (_: Exception) {}
-        }, 200)
+        // ✅ IMMEDIATELY post the persistent notification (don't delay)
+        // This is a SEPARATE notification from the foreground one
+        try {
+            updatePersistentNotification()
+        } catch (_: Exception) {}
 
         createDeleteZone()
         scrollHideHandler = Handler(Looper.getMainLooper())
@@ -563,10 +561,18 @@ private fun createPersistentNotification(): Notification {
         .setPriority(NotificationCompat.PRIORITY_LOW)
         .setContentIntent(pendingIntent)
         .addAction(android.R.drawable.ic_menu_view, "Open", startPendingIntent)
-        .setOngoing(true)     // ✅ STICKY — user cannot swipe away
-        .setAutoCancel(false)
-        .setShowWhen(false)
-        .setCategory(NotificationCompat.CATEGORY_SERVICE)
+        // ✅ STICKY configuration
+        .setOngoing(true)         // User cannot swipe
+        .setAutoCancel(false)     // Tap won't remove
+        .setShowWhen(false)       // No timestamp
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)  // Service-type = sticky
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        .setLocalOnly(true)
+
+    // ✅ Android 12+: Mark as "user-initiated" so system doesn't auto-clear
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        builder.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+    }
 
     return builder.build()
 }
@@ -577,16 +583,16 @@ private fun updatePersistentNotification() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (!hasNotificationPermission()) {
-            // No permission — can't show notification at all
+            // No permission — can't show notification
             nm.cancel(NOTIFICATION_ID_PERSISTENT)
             return
         }
 
         if (isShowNotificationEnabled()) {
-            // ✅ Show persistent notification (survives service destroy)
+            // ✅ Show / update persistent notification
             nm.notify(NOTIFICATION_ID_PERSISTENT, createPersistentNotification())
         } else {
-            // ✅ Hide persistent notification
+            // ✅ Hide — user turned off toggle
             nm.cancel(NOTIFICATION_ID_PERSISTENT)
         }
     } catch (_: Exception) {}
