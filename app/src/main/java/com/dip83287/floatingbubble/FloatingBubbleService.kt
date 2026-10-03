@@ -260,7 +260,8 @@ private val PERSISTENT_CHANNEL_ID = "floating_notes_persistent"
 
         createNotificationChannel()
 
-        // ✅ CRITICAL: Only ONE startForeground() call
+        // ✅ Start foreground with the SILENT notification
+        // (IMPORTANCE_MIN channel — no status bar icon)
         startForeground(NOTIFICATION_ID_SERVICE, createMinimalNotification())
 
         // ✅ Show persistent notification (survives service destroy)
@@ -334,18 +335,31 @@ private fun updateNotificationContent() {
     } catch (_: Exception) {}
 }
 
-    // ✅ Minimal silent notification (used when user turns off visible notification)
-    private fun createMinimalNotification(): Notification {
-        return NotificationCompat.Builder(this, "floating_bubble_channel")
-            .setContentTitle("Floating Notes")
-            .setContentText("Running in background")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
-            .setSilent(true)
-            .setOngoing(true)
-            .build()
+// ✅ INVISIBLE foreground service notification
+// - IMPORTANCE_MIN channel + setSilent
+// - FOREGROUND_SERVICE_IMMEDIATE → hides from status bar on Android 12+
+// - Empty title/text → no content to show
+private fun createMinimalNotification(): Notification {
+    val builder = NotificationCompat.Builder(this, "floating_bubble_silent_channel")
+        .setContentTitle("")           // ✅ Empty — no text
+        .setContentText("")            // ✅ Empty — no text
+        .setSmallIcon(android.R.drawable.ic_dialog_info)  // Required by Android
+        .setPriority(NotificationCompat.PRIORITY_MIN)
+        .setVisibility(NotificationCompat.VISIBILITY_SECRET)  // ✅ Hidden from lockscreen
+        .setSilent(true)
+        .setOngoing(true)
+        .setShowWhen(false)
+        .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
+        .setLocalOnly(true)
+
+    // ✅ Android 12+: FOREGROUND_SERVICE_IMMEDIATE hides it from status bar
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        builder.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
     }
+
+    return builder.build()
+}
 
     private fun saveFontSize(size: Float) {
         currentFontSize = size
@@ -480,34 +494,39 @@ private fun updateNotificationContent() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val nm = getSystemService(NotificationManager::class.java)
 
-        // ✅ Foreground service channel (low priority, silent, ongoing)
-        val serviceChannel = NotificationChannel(
-            "floating_bubble_channel",
+        // ✅ SILENT channel — for the invisible foreground service notification
+        val silentChannel = NotificationChannel(
+            "floating_bubble_silent_channel",
             "Floating Bubble Service",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_MIN   // ✅ MIN = no icon in status bar
         ).apply {
             description = "Keeps floating bubble service alive"
             setShowBadge(false)
             enableVibration(false)
             enableLights(false)
+            setSound(null, null)
+            lockscreenVisibility = Notification.VISIBILITY_SECRET
         }
-        nm.createNotificationChannel(serviceChannel)
+        nm.createNotificationChannel(silentChannel)
 
-        // ✅ Persistent "app launcher" channel (default importance, dismissible)
+        // ✅ PERSISTENT channel — the visible notification user taps
         val persistentChannel = NotificationChannel(
-            PERSISTENT_CHANNEL_ID,
+            "floating_notes_persistent",
             "Floating Notes",
-            NotificationManager.IMPORTANCE_DEFAULT
+            NotificationManager.IMPORTANCE_LOW   // ✅ LOW = no sound, but visible
         ).apply {
             description = "Tap to open Floating Notes app"
-            setShowBadge(true)
+            setShowBadge(false)
+            enableVibration(false)
+            enableLights(false)
         }
         nm.createNotificationChannel(persistentChannel)
     }
 }
 
-// ✅ Persistent notification — survives service restart
-// Tap → opens MainActivity → service starts → bubble appears
+// ✅ Persistent notification — sticky until user turns off toggle
+// - setOngoing(true) → user cannot swipe it away
+// - Tap → opens MainActivity → service starts → bubble appears
 private fun createPersistentNotification(): Notification {
     val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -537,16 +556,19 @@ private fun createPersistentNotification(): Notification {
         pendingFlags
     )
 
-    return NotificationCompat.Builder(this, PERSISTENT_CHANNEL_ID)
+    val builder = NotificationCompat.Builder(this, "floating_notes_persistent")
         .setContentTitle("Floating Notes")
-        .setContentText("Tap to open floating notes")
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        .setContentText("Tap to open")
+        .setSmallIcon(android.R.drawable.ic_menu_edit)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
         .setContentIntent(pendingIntent)
         .addAction(android.R.drawable.ic_menu_view, "Open", startPendingIntent)
-        .setOngoing(false)   // ✅ Dismissible by user
-        .setAutoCancel(true) // ✅ Tap removes notification
-        .build()
+        .setOngoing(true)     // ✅ STICKY — user cannot swipe away
+        .setAutoCancel(false)
+        .setShowWhen(false)
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
+
+    return builder.build()
 }
 
 // ✅ Show or hide the persistent notification based on toggle
