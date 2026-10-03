@@ -61,9 +61,13 @@ class FloatingBubbleService : Service() {
         get() = resources.displayMetrics.widthPixels
     private val NOTEPAD_MAX_HEIGHT: Int
         get() = resources.displayMetrics.heightPixels
+        
 
     private val STORAGE_NOTES_LIST = "notes_list"
     private val KEY_FIRST_TIME_BUBBLE = "first_time_bubble"
+    private val NOTIFICATION_ID_SERVICE = 1001
+private val NOTIFICATION_ID_PERSISTENT = 1002
+private val PERSISTENT_CHANNEL_ID = "floating_notes_persistent"
 
     private val KEY_FONT_SIZE = "font_size"
     private val KEY_THEME_COLOR = "theme_color"
@@ -256,15 +260,13 @@ class FloatingBubbleService : Service() {
 
         createNotificationChannel()
 
-        // ✅ CRITICAL: Call startForeground only ONCE with minimal notification
-        // (Never call startForeground twice — causes crash on Android 12+)
-        startForeground(1001, createMinimalNotification())
+        // ✅ CRITICAL: Only ONE startForeground() call
+        startForeground(NOTIFICATION_ID_SERVICE, createMinimalNotification())
 
-        // ✅ Then update to full notification using NotificationManager.notify()
-        // (NOT startForeground — that would crash)
+        // ✅ Show persistent notification (survives service destroy)
         Handler(Looper.getMainLooper()).postDelayed({
             try {
-                updateNotificationContent()
+                updatePersistentNotification()
             } catch (_: Exception) {}
         }, 200)
 
@@ -317,17 +319,18 @@ private fun hasNotificationPermission(): Boolean {
 // (NOT startForeground — that would crash on Android 12+)
 private fun updateNotificationContent() {
     try {
+        // Update service notification content
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        val notification = if (hasNotificationPermission() && isShowNotificationEnabled()) {
-            // Full notification
+        val serviceNotification = if (hasNotificationPermission() && isShowNotificationEnabled()) {
             createNotification()
         } else {
-            // Minimal silent notification (used when permission missing or toggle off)
             createMinimalNotification()
         }
+        nm.notify(NOTIFICATION_ID_SERVICE, serviceNotification)
 
-        nm.notify(1001, notification)
+        // Also update persistent notification
+        updatePersistentNotification()
     } catch (_: Exception) {}
 }
 
@@ -474,20 +477,98 @@ private fun updateNotificationContent() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "floating_bubble_channel",
-                "Floating Bubble",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Keeps floating bubble alive • Tap to open app"
-                setShowBadge(false)
-                enableVibration(false)
-                enableLights(false)
-            }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val nm = getSystemService(NotificationManager::class.java)
+
+        // ✅ Foreground service channel (low priority, silent, ongoing)
+        val serviceChannel = NotificationChannel(
+            "floating_bubble_channel",
+            "Floating Bubble Service",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Keeps floating bubble service alive"
+            setShowBadge(false)
+            enableVibration(false)
+            enableLights(false)
         }
+        nm.createNotificationChannel(serviceChannel)
+
+        // ✅ Persistent "app launcher" channel (default importance, dismissible)
+        val persistentChannel = NotificationChannel(
+            PERSISTENT_CHANNEL_ID,
+            "Floating Notes",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Tap to open Floating Notes app"
+            setShowBadge(true)
+        }
+        nm.createNotificationChannel(persistentChannel)
     }
+}
+
+// ✅ Persistent notification — survives service restart
+// Tap → opens MainActivity → service starts → bubble appears
+private fun createPersistentNotification(): Notification {
+    val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    } else {
+        PendingIntent.FLAG_UPDATE_CURRENT
+    }
+
+    val contentIntent = Intent(this, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        putExtra("from_notification", true)
+    }
+    val pendingIntent = PendingIntent.getActivity(
+        this,
+        2001,
+        contentIntent,
+        pendingFlags
+    )
+
+    val startIntent = Intent(this, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        putExtra("from_notification", true)
+    }
+    val startPendingIntent = PendingIntent.getActivity(
+        this,
+        2002,
+        startIntent,
+        pendingFlags
+    )
+
+    return NotificationCompat.Builder(this, PERSISTENT_CHANNEL_ID)
+        .setContentTitle("Floating Notes")
+        .setContentText("Tap to open floating notes")
+        .setSmallIcon(android.R.drawable.ic_dialog_info)
+        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        .setContentIntent(pendingIntent)
+        .addAction(android.R.drawable.ic_menu_view, "Open", startPendingIntent)
+        .setOngoing(false)   // ✅ Dismissible by user
+        .setAutoCancel(true) // ✅ Tap removes notification
+        .build()
+}
+
+// ✅ Show or hide the persistent notification based on toggle
+private fun updatePersistentNotification() {
+    try {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (!hasNotificationPermission()) {
+            // No permission — can't show notification at all
+            nm.cancel(NOTIFICATION_ID_PERSISTENT)
+            return
+        }
+
+        if (isShowNotificationEnabled()) {
+            // ✅ Show persistent notification (survives service destroy)
+            nm.notify(NOTIFICATION_ID_PERSISTENT, createPersistentNotification())
+        } else {
+            // ✅ Hide persistent notification
+            nm.cancel(NOTIFICATION_ID_PERSISTENT)
+        }
+    } catch (_: Exception) {}
+}
 
     // ============================================================
     // ✅ Notification with tap-to-open intent
@@ -710,12 +791,10 @@ private fun updateNotificationContent() {
         return START_NOT_STICKY
     }
 
-    // ✅ IDEMPOTENT + RACE-SAFE: Only create bubble if neither bubble nor note pad exists
+    // ✅ IDEMPOTENT: Only create bubble if neither exists
     val shouldCreateBubble = (bubbleView == null && noteView == null)
-
     if (shouldCreateBubble) {
         Handler(Looper.getMainLooper()).post {
-            // Double-check on main thread to prevent race condition
             try {
                 if (bubbleView == null && noteView == null) {
                     createBubble()
@@ -724,9 +803,9 @@ private fun updateNotificationContent() {
         }
     }
 
-    // ✅ Refresh notification content (uses notify(), NOT startForeground)
+    // ✅ Refresh persistent notification
     try {
-        updateNotificationContent()
+        updatePersistentNotification()
     } catch (_: Exception) {}
 
     return START_STICKY
